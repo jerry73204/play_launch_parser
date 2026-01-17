@@ -29,17 +29,26 @@ impl CommandGenerator {
             Some("/".to_string())
         };
 
-        let params = node
+        let params: Result<Vec<_>, GenerationError> = node
             .parameters
             .iter()
-            .map(|p| (p.name.clone(), p.value.clone()))
+            .map(|p| {
+                let resolved_value = resolve_substitutions(&p.value, context)?;
+                Ok((p.name.clone(), resolved_value))
+            })
             .collect();
+        let params = params?;
 
-        let remaps = node
+        let remaps: Result<Vec<_>, GenerationError> = node
             .remappings
             .iter()
-            .map(|r| (r.from.clone(), r.to.clone()))
+            .map(|r| {
+                let from = resolve_substitutions(&r.from, context)?;
+                let to = resolve_substitutions(&r.to, context)?;
+                Ok((from, to))
+            })
             .collect();
+        let remaps = remaps?;
 
         let env = if node.environment.is_empty() {
             None
@@ -101,14 +110,17 @@ impl CommandGenerator {
 
         // 5. Remappings
         for remap in &node.remappings {
+            let from = resolve_substitutions(&remap.from, context)?;
+            let to = resolve_substitutions(&remap.to, context)?;
             cmd.push("-r".to_string());
-            cmd.push(format!("{}:={}", remap.from, remap.to));
+            cmd.push(format!("{}:={}", from, to));
         }
 
         // 6. Parameters
         for param in &node.parameters {
+            let value = resolve_substitutions(&param.value, context)?;
             cmd.push("-p".to_string());
-            cmd.push(format!("{}:={}", param.name, param.value));
+            cmd.push(format!("{}:={}", param.name, value));
         }
 
         Ok(cmd)
@@ -161,7 +173,7 @@ mod tests {
             namespace: None,
             parameters: vec![Parameter {
                 name: "rate".to_string(),
-                value: "10.0".to_string(),
+                value: vec![Substitution::Text("10.0".to_string())],
             }],
             remappings: vec![],
             environment: vec![],
@@ -186,8 +198,8 @@ mod tests {
             namespace: None,
             parameters: vec![],
             remappings: vec![Remapping {
-                from: "chatter".to_string(),
-                to: "/chat".to_string(),
+                from: vec![Substitution::Text("chatter".to_string())],
+                to: vec![Substitution::Text("/chat".to_string())],
             }],
             environment: vec![],
             output: None,

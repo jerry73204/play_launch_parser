@@ -1,17 +1,19 @@
 //! play_launch_parser library
 
 pub mod actions;
+pub mod condition;
 pub mod error;
 pub mod record;
 pub mod substitution;
 pub mod xml;
 
-use actions::{ArgAction, NodeAction};
+use actions::{ArgAction, GroupAction, IncludeAction, LetAction, NodeAction};
+use condition::should_process_entity;
 use error::{ParseError, Result};
 use record::{CommandGenerator, RecordJson};
 use std::collections::HashMap;
 use std::path::Path;
-use substitution::LaunchContext;
+use substitution::{resolve_substitutions, LaunchContext};
 use xml::{Entity, XmlEntity};
 
 /// Launch tree traverser for parsing launch files
@@ -42,7 +44,46 @@ impl LaunchTraverser {
         Ok(())
     }
 
+    fn process_include(&mut self, include: &IncludeAction) -> Result<()> {
+        // Resolve the file path
+        let file_path_str = resolve_substitutions(&include.file, &self.context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let file_path = Path::new(&file_path_str);
+
+        log::info!("Including launch file: {}", file_path.display());
+
+        // Create a new context for the included file
+        // Start with current context and apply include args
+        let mut include_context = self.context.clone();
+        for (key, value) in &include.args {
+            include_context.set_configuration(key.clone(), value.clone());
+        }
+
+        // Parse and traverse the included file
+        let content = std::fs::read_to_string(file_path)?;
+        let doc = roxmltree::Document::parse(&content)?;
+        let root = xml::XmlEntity::new(doc.root_element());
+
+        // Create temporary traverser for included file
+        let mut included_traverser = LaunchTraverser {
+            context: include_context,
+            records: Vec::new(),
+        };
+        included_traverser.traverse_entity(&root)?;
+
+        // Merge records from included file into current records
+        self.records.extend(included_traverser.records);
+
+        Ok(())
+    }
+
     fn traverse_entity(&mut self, entity: &XmlEntity) -> Result<()> {
+        // Check if entity should be processed based on if/unless conditions
+        if !should_process_entity(entity, &self.context)? {
+            log::debug!("Skipping {} due to condition", entity.type_name());
+            return Ok(());
+        }
+
         match entity.type_name() {
             "launch" => {
                 // Root element, traverse children
@@ -59,6 +100,24 @@ impl LaunchTraverser {
                 let record = CommandGenerator::generate_node_record(&node, &self.context)
                     .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
                 self.records.push(record);
+            }
+            "include" => {
+                let include = IncludeAction::from_entity(entity)?;
+                self.process_include(&include)?;
+            }
+            "group" => {
+                let _group = GroupAction::from_entity(entity)?;
+                // For now, simply traverse children
+                // TODO: Implement namespace scoping
+                for child in entity.children() {
+                    self.traverse_entity(&child)?;
+                }
+            }
+            "let" => {
+                let let_action = LetAction::from_entity(entity)?;
+                // Set variable in context (acts like arg)
+                self.context
+                    .set_configuration(let_action.name, let_action.value);
             }
             other => {
                 log::warn!("Unsupported action type: {}", other);

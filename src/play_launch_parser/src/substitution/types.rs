@@ -15,6 +15,8 @@ pub enum Substitution {
         name: String,
         default: Option<String>,
     },
+    /// $(find-pkg-share package_name) - Find ROS 2 package share directory
+    FindPackageShare(String),
 }
 
 impl Substitution {
@@ -32,8 +34,41 @@ impl Substitution {
                         .ok_or_else(|| SubstitutionError::UndefinedEnvVar(name.clone()))
                 })
             }
+            Substitution::FindPackageShare(package_name) => find_package_share(package_name)
+                .ok_or_else(|| SubstitutionError::PackageNotFound(package_name.clone())),
         }
     }
+}
+
+/// Find ROS 2 package share directory
+fn find_package_share(package_name: &str) -> Option<String> {
+    // Try ROS_DISTRO environment variable first
+    if let Ok(distro) = std::env::var("ROS_DISTRO") {
+        let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);
+        if std::path::Path::new(&share_path).exists() {
+            return Some(share_path);
+        }
+    }
+
+    // Fallback: Try common ROS 2 distributions
+    for distro in &["jazzy", "iron", "humble", "galactic", "foxy"] {
+        let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);
+        if std::path::Path::new(&share_path).exists() {
+            return Some(share_path);
+        }
+    }
+
+    // Try AMENT_PREFIX_PATH
+    if let Ok(prefix_path) = std::env::var("AMENT_PREFIX_PATH") {
+        for prefix in prefix_path.split(':') {
+            let share_path = format!("{}/share/{}", prefix, package_name);
+            if std::path::Path::new(&share_path).exists() {
+                return Some(share_path);
+            }
+        }
+    }
+
+    None
 }
 
 /// Resolve list of substitutions to single string

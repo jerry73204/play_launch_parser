@@ -86,11 +86,19 @@ impl NodeAction {
 #[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: String,
-    pub value: String,
+    pub value: Vec<Substitution>,
 }
 
 impl Parameter {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
+        let value_str: String =
+            entity
+                .get_attr("value", false)?
+                .ok_or_else(|| ParseError::MissingAttribute {
+                    element: "param".to_string(),
+                    attribute: "value".to_string(),
+                })?;
+
         Ok(Self {
             name: entity
                 .get_attr("name", false)?
@@ -98,37 +106,38 @@ impl Parameter {
                     element: "param".to_string(),
                     attribute: "name".to_string(),
                 })?,
-            value: entity.get_attr("value", false)?.ok_or_else(|| {
-                ParseError::MissingAttribute {
-                    element: "param".to_string(),
-                    attribute: "value".to_string(),
-                }
-            })?,
+            value: parse_substitutions(&value_str)?,
         })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Remapping {
-    pub from: String,
-    pub to: String,
+    pub from: Vec<Substitution>,
+    pub to: Vec<Substitution>,
 }
 
 impl Remapping {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
-        Ok(Self {
-            from: entity
+        let from_str: String =
+            entity
                 .get_attr("from", false)?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "remap".to_string(),
                     attribute: "from".to_string(),
-                })?,
-            to: entity
+                })?;
+
+        let to_str: String =
+            entity
                 .get_attr("to", false)?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "remap".to_string(),
                     attribute: "to".to_string(),
-                })?,
+                })?;
+
+        Ok(Self {
+            from: parse_substitutions(&from_str)?,
+            to: parse_substitutions(&to_str)?,
         })
     }
 }
@@ -193,7 +202,10 @@ mod tests {
 
         assert_eq!(node.parameters.len(), 1);
         assert_eq!(node.parameters[0].name, "rate");
-        assert_eq!(node.parameters[0].value, "10.0");
+        assert_eq!(
+            node.parameters[0].value,
+            vec![Substitution::Text("10.0".to_string())]
+        );
     }
 
     #[test]
@@ -207,8 +219,14 @@ mod tests {
         let node = NodeAction::from_entity(&entity).unwrap();
 
         assert_eq!(node.remappings.len(), 1);
-        assert_eq!(node.remappings[0].from, "chatter");
-        assert_eq!(node.remappings[0].to, "/chat");
+        assert_eq!(
+            node.remappings[0].from,
+            vec![Substitution::Text("chatter".to_string())]
+        );
+        assert_eq!(
+            node.remappings[0].to,
+            vec![Substitution::Text("/chat".to_string())]
+        );
     }
 
     #[test]

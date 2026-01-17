@@ -59,6 +59,7 @@ fn parse_single_substitution(sub_type: &str, args: &str) -> Result<Substitution>
             let default = parts.get(1).map(|s| s.to_string());
             Ok(Substitution::EnvironmentVariable { name, default })
         }
+        "find-pkg-share" => Ok(Substitution::FindPackageShare(args.trim().to_string())),
         _ => Err(ParseError::InvalidSubstitution(format!(
             "Unknown substitution type: {}",
             sub_type
