@@ -1,0 +1,30 @@
+[package]
+name = "play_launch_parser"
+version = "0.1.0"
+edition = "2021"
+authors = ["play_launch_parser contributors"]
+description = "High-performance ROS 2 launch file parser in Rust"
+license = "Apache-2.0"
+repository = "https://github.com/tier4/play_launch_parser"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+roxmltree = "0.19"
+thiserror = "1.0"
+anyhow = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+regex = "1.10"
+
+[dev-dependencies]
+tempfile = "3.8"
+
+[[bin]]
+name = "play_launch_parser"
+path = "src/main.rs"
+
+[lib]
+name = "play_launch_parser"
+path = "src/lib.rs"
