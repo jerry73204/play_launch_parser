@@ -35,6 +35,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_actions.add_class::<actions::TimerAction>()?;
     launch_actions.add_class::<actions::OpaqueFunction>()?;
     launch_actions.add_class::<actions::IncludeLaunchDescription>()?;
+    launch_actions.add_class::<actions::SetLaunchConfiguration>()?;
 
     // Create launch.substitutions submodule
     let launch_subs = PyModule::new(py, "launch.substitutions")?;
@@ -72,14 +73,20 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     let launch_ros_actions = PyModule::new(py, "launch_ros.actions")?;
     launch_ros_actions.add_class::<launch_ros::Node>()?;
     launch_ros_actions.add_class::<launch_ros::ComposableNodeContainer>()?;
+    launch_ros_actions.add_class::<launch_ros::SetParameter>()?;
 
     // Create launch_ros.descriptions submodule
     let launch_ros_desc = PyModule::new(py, "launch_ros.descriptions")?;
     launch_ros_desc.add_class::<launch_ros::ComposableNode>()?;
 
+    // Create launch_ros.substitutions submodule
+    let launch_ros_subs = PyModule::new(py, "launch_ros.substitutions")?;
+    launch_ros_subs.add_class::<substitutions::FindPackageShare>()?;
+
     // Add submodules to parent module as attributes
     launch_ros_mod.add_submodule(launch_ros_actions)?;
     launch_ros_mod.add_submodule(launch_ros_desc)?;
+    launch_ros_mod.add_submodule(launch_ros_subs)?;
 
     // Register in sys.modules
     let sys = py.import("sys")?;
@@ -93,6 +100,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     modules.set_item("launch_ros", launch_ros_mod)?;
     modules.set_item("launch_ros.actions", launch_ros_actions)?;
     modules.set_item("launch_ros.descriptions", launch_ros_desc)?;
+    modules.set_item("launch_ros.substitutions", launch_ros_subs)?;
 
     Ok(())
 }

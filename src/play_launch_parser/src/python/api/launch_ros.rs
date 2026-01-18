@@ -568,3 +568,37 @@ impl ComposableNode {
         Ok(parsed_params)
     }
 }
+
+/// Mock SetParameter action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import SetParameter
+/// set_param = SetParameter(name='parameter_name', value='value')
+/// ```
+///
+/// Sets a global ROS parameter that applies to all nodes
+#[pyclass]
+#[derive(Clone)]
+pub struct SetParameter {
+    #[allow(dead_code)] // Stored for API compatibility
+    name: String,
+    #[allow(dead_code)] // Stored for API compatibility
+    value: PyObject,
+}
+
+#[pymethods]
+impl SetParameter {
+    #[new]
+    #[pyo3(signature = (*, name, value, **_kwargs))]
+    fn new(name: String, value: PyObject, _kwargs: Option<&PyDict>) -> Self {
+        log::debug!("Python Launch SetParameter: {}=<value>", name);
+        // TODO: Capture this as a global parameter
+        // For now, just store it but don't use it
+        Self { name, value }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("SetParameter(name='{}')", self.name)
+    }
+}
