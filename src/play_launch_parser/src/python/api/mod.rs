@@ -48,6 +48,13 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_subs.add_class::<substitutions::EnvironmentVariable>()?;
     launch_subs.add_class::<substitutions::ThisLaunchFileDir>()?;
     launch_subs.add_class::<substitutions::PythonExpression>()?;
+    launch_subs.add_class::<substitutions::Command>()?;
+    launch_subs.add_class::<substitutions::NotSubstitution>()?;
+    launch_subs.add_class::<substitutions::AndSubstitution>()?;
+    launch_subs.add_class::<substitutions::OrSubstitution>()?;
+    launch_subs.add_class::<substitutions::EqualsSubstitution>()?;
+    launch_subs.add_class::<substitutions::IfElseSubstitution>()?;
+    launch_subs.add_class::<substitutions::AnonName>()?;
 
     // Create launch.conditions submodule
     let launch_conditions = PyModule::new(py, "launch.conditions")?;
@@ -85,6 +92,9 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_ros_actions.add_class::<launch_ros::ComposableNodeContainer>()?;
     launch_ros_actions.add_class::<launch_ros::SetParameter>()?;
     launch_ros_actions.add_class::<launch_ros::LifecycleNode>()?;
+    launch_ros_actions.add_class::<launch_ros::PushRosNamespace>()?;
+    launch_ros_actions.add_class::<launch_ros::PopRosNamespace>()?;
+    launch_ros_actions.add_class::<launch_ros::LoadComposableNodes>()?;
 
     // Create launch_ros.descriptions submodule
     let launch_ros_desc = PyModule::new(py, "launch_ros.descriptions")?;

@@ -262,3 +262,378 @@ impl PythonExpression {
         "PythonExpression(...)".to_string()
     }
 }
+
+/// Mock Command substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import Command
+/// cmd = Command(['echo', 'hello'])
+/// ```
+///
+/// Executes a shell command and returns its output
+#[pyclass]
+#[derive(Clone)]
+pub struct Command {
+    command: Vec<PyObject>,
+}
+
+#[pymethods]
+impl Command {
+    #[new]
+    fn new(command: Vec<PyObject>) -> Self {
+        Self { command }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        // Convert command parts to strings
+        let cmd_parts: Result<Vec<String>, _> = self
+            .command
+            .iter()
+            .map(|obj| {
+                if let Ok(s) = obj.extract::<String>(py) {
+                    Ok(s)
+                } else if let Ok(str_result) = obj.call_method0(py, "__str__") {
+                    str_result.extract::<String>(py)
+                } else {
+                    Ok(obj.to_string())
+                }
+            })
+            .collect();
+
+        let parts = cmd_parts?;
+        // Return as substitution format
+        Ok(format!("$(command {})", parts.join(" ")))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Command({} parts)", self.command.len())
+    }
+}
+
+/// Mock NotSubstitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import NotSubstitution
+/// not_sub = NotSubstitution(some_condition)
+/// ```
+///
+/// Returns the boolean NOT of the input
+#[pyclass]
+#[derive(Clone)]
+pub struct NotSubstitution {
+    condition: PyObject,
+}
+
+#[pymethods]
+impl NotSubstitution {
+    #[new]
+    fn new(condition: PyObject) -> Self {
+        Self { condition }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        // Try to evaluate the condition
+        if let Ok(s) = self.condition.extract::<String>(py) {
+            let is_true = matches!(s.to_lowercase().as_str(), "true" | "1" | "yes");
+            return Ok(if is_true { "false" } else { "true" }.to_string());
+        }
+
+        if let Ok(b) = self.condition.extract::<bool>(py) {
+            return Ok(if b { "false" } else { "true" }.to_string());
+        }
+
+        // Fallback: call __str__ and negate
+        if let Ok(str_result) = self.condition.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                let is_true = matches!(s.to_lowercase().as_str(), "true" | "1" | "yes");
+                return Ok(if is_true { "false" } else { "true" }.to_string());
+            }
+        }
+
+        Ok("true".to_string())
+    }
+
+    fn __repr__(&self) -> String {
+        "NotSubstitution(...)".to_string()
+    }
+}
+
+/// Mock AndSubstitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import AndSubstitution
+/// and_sub = AndSubstitution(left, right)
+/// ```
+///
+/// Returns the boolean AND of two inputs
+#[pyclass]
+#[derive(Clone)]
+pub struct AndSubstitution {
+    left: PyObject,
+    right: PyObject,
+}
+
+#[pymethods]
+impl AndSubstitution {
+    #[new]
+    fn new(left: PyObject, right: PyObject) -> Self {
+        Self { left, right }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let left_val = Self::to_bool(&self.left, py)?;
+        let right_val = Self::to_bool(&self.right, py)?;
+        Ok(if left_val && right_val {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string())
+    }
+
+    fn __repr__(&self) -> String {
+        "AndSubstitution(...)".to_string()
+    }
+}
+
+impl AndSubstitution {
+    fn to_bool(obj: &PyObject, py: Python) -> PyResult<bool> {
+        if let Ok(b) = obj.extract::<bool>(py) {
+            return Ok(b);
+        }
+
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+        }
+
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+            }
+        }
+
+        Ok(false)
+    }
+}
+
+/// Mock OrSubstitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import OrSubstitution
+/// or_sub = OrSubstitution(left, right)
+/// ```
+///
+/// Returns the boolean OR of two inputs
+#[pyclass]
+#[derive(Clone)]
+pub struct OrSubstitution {
+    left: PyObject,
+    right: PyObject,
+}
+
+#[pymethods]
+impl OrSubstitution {
+    #[new]
+    fn new(left: PyObject, right: PyObject) -> Self {
+        Self { left, right }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let left_val = Self::to_bool(&self.left, py)?;
+        let right_val = Self::to_bool(&self.right, py)?;
+        Ok(if left_val || right_val {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string())
+    }
+
+    fn __repr__(&self) -> String {
+        "OrSubstitution(...)".to_string()
+    }
+}
+
+impl OrSubstitution {
+    fn to_bool(obj: &PyObject, py: Python) -> PyResult<bool> {
+        if let Ok(b) = obj.extract::<bool>(py) {
+            return Ok(b);
+        }
+
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+        }
+
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+            }
+        }
+
+        Ok(false)
+    }
+}
+
+/// Mock EqualsSubstitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import EqualsSubstitution
+/// equals_sub = EqualsSubstitution(left, right)
+/// ```
+///
+/// Returns true if two values are equal
+#[pyclass]
+#[derive(Clone)]
+pub struct EqualsSubstitution {
+    left: PyObject,
+    right: PyObject,
+}
+
+#[pymethods]
+impl EqualsSubstitution {
+    #[new]
+    fn new(left: PyObject, right: PyObject) -> Self {
+        Self { left, right }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let left_str = Self::to_string(&self.left, py)?;
+        let right_str = Self::to_string(&self.right, py)?;
+        Ok(if left_str == right_str {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string())
+    }
+
+    fn __repr__(&self) -> String {
+        "EqualsSubstitution(...)".to_string()
+    }
+}
+
+impl EqualsSubstitution {
+    fn to_string(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+
+        Ok(obj.to_string())
+    }
+}
+
+/// Mock IfElseSubstitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import IfElseSubstitution
+/// ifelse_sub = IfElseSubstitution(condition, if_value, else_value)
+/// ```
+///
+/// Returns if_value if condition is true, else returns else_value
+#[pyclass]
+#[derive(Clone)]
+pub struct IfElseSubstitution {
+    condition: PyObject,
+    if_value: PyObject,
+    else_value: PyObject,
+}
+
+#[pymethods]
+impl IfElseSubstitution {
+    #[new]
+    fn new(condition: PyObject, if_value: PyObject, else_value: PyObject) -> Self {
+        Self {
+            condition,
+            if_value,
+            else_value,
+        }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let cond_val = Self::to_bool(&self.condition, py)?;
+        let obj = if cond_val {
+            &self.if_value
+        } else {
+            &self.else_value
+        };
+
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+
+        Ok(obj.to_string())
+    }
+
+    fn __repr__(&self) -> String {
+        "IfElseSubstitution(...)".to_string()
+    }
+}
+
+impl IfElseSubstitution {
+    fn to_bool(obj: &PyObject, py: Python) -> PyResult<bool> {
+        if let Ok(b) = obj.extract::<bool>(py) {
+            return Ok(b);
+        }
+
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+        }
+
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+            }
+        }
+
+        Ok(false)
+    }
+}
+
+/// Mock AnonName substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import AnonName
+/// anon = AnonName('my_node')
+/// ```
+///
+/// Generates an anonymous name with a random suffix
+#[pyclass]
+#[derive(Clone)]
+pub struct AnonName {
+    name: String,
+}
+
+#[pymethods]
+impl AnonName {
+    #[new]
+    fn new(name: String) -> Self {
+        Self { name }
+    }
+
+    fn __str__(&self) -> String {
+        format!("$(anon {})", self.name)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("AnonName('{}')", self.name)
+    }
+}

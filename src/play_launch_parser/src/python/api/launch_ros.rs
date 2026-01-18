@@ -840,3 +840,265 @@ impl LifecycleNode {
         Ok(obj.to_string())
     }
 }
+
+/// Mock PushRosNamespace action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import PushRosNamespace
+/// PushRosNamespace('my_namespace')
+/// ```
+///
+/// Pushes a namespace onto the namespace stack
+#[pyclass]
+#[derive(Clone)]
+pub struct PushRosNamespace {
+    #[allow(dead_code)] // Keep for API compatibility
+    namespace: PyObject,
+}
+
+#[pymethods]
+impl PushRosNamespace {
+    #[new]
+    fn new(namespace: PyObject) -> Self {
+        log::debug!("Python Launch PushRosNamespace created (limited support)");
+        Self { namespace }
+    }
+
+    fn __repr__(&self) -> String {
+        "PushRosNamespace(...)".to_string()
+    }
+}
+
+/// Mock PopRosNamespace action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import PopRosNamespace
+/// PopRosNamespace()
+/// ```
+///
+/// Pops a namespace from the namespace stack
+#[pyclass]
+#[derive(Clone)]
+pub struct PopRosNamespace {}
+
+#[pymethods]
+impl PopRosNamespace {
+    #[new]
+    fn new() -> Self {
+        log::debug!("Python Launch PopRosNamespace created (limited support)");
+        Self {}
+    }
+
+    fn __repr__(&self) -> String {
+        "PopRosNamespace()".to_string()
+    }
+}
+
+/// Mock LoadComposableNodes action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import LoadComposableNodes
+/// from launch_ros.descriptions import ComposableNode
+///
+/// LoadComposableNodes(
+///     target_container='container_name',
+///     composable_node_descriptions=[
+///         ComposableNode(
+///             package='my_package',
+///             plugin='my_package::MyPlugin',
+///             name='my_node',
+///         ),
+///     ],
+/// )
+/// ```
+///
+/// Loads composable nodes into an existing container
+#[pyclass]
+#[derive(Clone)]
+pub struct LoadComposableNodes {
+    #[allow(dead_code)] // Keep for API compatibility
+    target_container: PyObject,
+    composable_node_descriptions: Vec<PyObject>,
+}
+
+#[pymethods]
+impl LoadComposableNodes {
+    #[new]
+    #[pyo3(signature = (*, target_container, composable_node_descriptions, **_kwargs))]
+    fn new(
+        py: Python,
+        target_container: PyObject,
+        composable_node_descriptions: Vec<PyObject>,
+        _kwargs: Option<&pyo3::types::PyDict>,
+    ) -> PyResult<Self> {
+        // Capture the composable nodes
+        Self::capture_composable_nodes(py, &composable_node_descriptions)?;
+
+        log::debug!(
+            "Python Launch LoadComposableNodes created with {} nodes",
+            composable_node_descriptions.len()
+        );
+
+        Ok(Self {
+            target_container,
+            composable_node_descriptions,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "LoadComposableNodes({} nodes)",
+            self.composable_node_descriptions.len()
+        )
+    }
+}
+
+impl LoadComposableNodes {
+    /// Capture composable nodes from the descriptions list
+    fn capture_composable_nodes(py: Python, descriptions: &[PyObject]) -> PyResult<()> {
+        use crate::python::bridge::{LoadNodeCapture, CAPTURED_LOAD_NODES};
+
+        for desc_obj in descriptions {
+            // Try to get the ComposableNode attributes
+            let desc = desc_obj.as_ref(py);
+
+            // Extract package (required)
+            let package = if let Ok(pkg) = desc.getattr("package") {
+                Self::pyobject_to_string(pkg)?
+            } else {
+                continue; // Skip if no package
+            };
+
+            // Extract plugin (required)
+            let plugin = if let Ok(plg) = desc.getattr("plugin") {
+                Self::pyobject_to_string(plg)?
+            } else {
+                continue; // Skip if no plugin
+            };
+
+            // Extract name (required)
+            let node_name = if let Ok(n) = desc.getattr("name") {
+                Self::pyobject_to_string(n)?
+            } else {
+                continue; // Skip if no name
+            };
+
+            // Extract namespace (optional, defaults to "/")
+            let namespace = desc
+                .getattr("namespace")
+                .ok()
+                .and_then(|ns| Self::pyobject_to_string(ns).ok())
+                .unwrap_or_else(|| "/".to_string());
+
+            // Extract parameters (optional)
+            let parameters = if let Ok(params_obj) = desc.getattr("parameters") {
+                Self::extract_parameters(params_obj)?
+            } else {
+                Vec::new()
+            };
+
+            // Extract remappings (optional)
+            let remappings = if let Ok(remaps_obj) = desc.getattr("remappings") {
+                Self::extract_remappings(remaps_obj)?
+            } else {
+                Vec::new()
+            };
+
+            let capture = LoadNodeCapture {
+                package,
+                plugin,
+                target_container_name: "__dynamic__".to_string(), // Will be resolved at runtime
+                node_name,
+                namespace,
+                parameters,
+                remappings,
+            };
+
+            log::debug!(
+                "Captured Python composable node from LoadComposableNodes: {} / {}",
+                capture.package,
+                capture.plugin
+            );
+
+            CAPTURED_LOAD_NODES.lock().unwrap().push(capture);
+        }
+
+        Ok(())
+    }
+
+    /// Extract parameters from Python object
+    fn extract_parameters(params_obj: &PyAny) -> PyResult<Vec<(String, String)>> {
+        let mut parsed_params = Vec::new();
+
+        if let Ok(params_list) = params_obj.downcast::<pyo3::types::PyList>() {
+            for param_item in params_list.iter() {
+                if let Ok(param_dict) = param_item.downcast::<pyo3::types::PyDict>() {
+                    for (key, value) in param_dict.iter() {
+                        let key_str = key.extract::<String>()?;
+                        let value_str = Self::pyobject_to_string(value)?;
+                        parsed_params.push((key_str, value_str));
+                    }
+                } else if let Ok(path_str) = param_item.extract::<String>() {
+                    parsed_params.push(("__param_file".to_string(), path_str));
+                }
+            }
+        }
+
+        Ok(parsed_params)
+    }
+
+    /// Extract remappings from Python object
+    fn extract_remappings(remaps_obj: &PyAny) -> PyResult<Vec<(String, String)>> {
+        let mut parsed_remaps = Vec::new();
+
+        if let Ok(remaps_list) = remaps_obj.downcast::<pyo3::types::PyList>() {
+            for remap_item in remaps_list.iter() {
+                if let Ok(remap_tuple) = remap_item.downcast::<pyo3::types::PyTuple>() {
+                    if remap_tuple.len() == 2 {
+                        let from = remap_tuple.get_item(0)?.extract::<String>()?;
+                        let to = remap_tuple.get_item(1)?.extract::<String>()?;
+                        parsed_remaps.push((from, to));
+                    }
+                }
+            }
+        }
+
+        Ok(parsed_remaps)
+    }
+
+    /// Convert PyObject to string (handles substitutions)
+    fn pyobject_to_string(obj: &PyAny) -> PyResult<String> {
+        // Try direct string extraction
+        if let Ok(s) = obj.extract::<String>() {
+            return Ok(s);
+        }
+
+        // Try calling __str__ method (for substitutions)
+        if let Ok(str_result) = obj.call_method0("__str__") {
+            if let Ok(s) = str_result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+
+        // Try bool conversion
+        if let Ok(b) = obj.extract::<bool>() {
+            return Ok(if b { "true" } else { "false" }.to_string());
+        }
+
+        // Try integer
+        if let Ok(i) = obj.extract::<i64>() {
+            return Ok(i.to_string());
+        }
+
+        // Try float
+        if let Ok(f) = obj.extract::<f64>() {
+            return Ok(f.to_string());
+        }
+
+        // Fallback to repr
+        Ok(obj.to_string())
+    }
+}
