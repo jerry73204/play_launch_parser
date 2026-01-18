@@ -1,167 +1,141 @@
-# CLAUDE.md
+# Claude Development Guidelines
 
-Guide for Claude Code when working with this repository.
+This document contains best practices and guidelines for Claude (AI assistant) when working on this project.
 
-## Project Overview
+## Quality Assurance
 
-ROS 2 Launch Parser in Rust - A high-performance reimplementation of ROS 2 launch file parsing:
-- **play_launch_parser** (Rust): Parse XML and YAML launch files, generate record.json
-- **Goal**: Replace the Python-based dump_launch bottleneck (40s → target <5s for Autoware)
-- **Strategy**: Replicate official ROS 2 launch semantics in Rust, starting with XML/YAML (Python launch files deferred)
+### Always Run Quality Checks Before Finishing
 
-## Motivation
+**IMPORTANT**: After completing any task that modifies code, always run:
 
-The existing play_launch project uses dump_launch (Python) to scan ROS 2 launch trees. This is a performance bottleneck:
-- **Current**: ~40s to walk through Autoware launch tree
-- **Root Cause**: Python overhead, dynamic launch execution, complex tree traversal
-- **Solution**: Native Rust parser with static analysis for XML/YAML formats
-
-## Project Status
-
-**Phase 1 - Project Setup** (In Progress)
-- Setting up directory structure
-- Creating initial documentation
-- Planning architecture
-
-## Installation & Usage
-
-```sh
-# Build from source
-just build
-
-# Run tests
-just test
-
-# Check code quality
-just check
+```bash
+just quality
 ```
 
-## Architecture
+This command runs:
+1. `just check` - Linters and formatters (clippy, rustfmt)
+2. `just test-rust` - All Rust unit tests
 
-### Planned Components
-
-1. **XML Parser** (`src/xml_parser/`)
-   - Parse ROS 2 XML launch files
-   - Handle substitutions, includes, groups
-   - Generate intermediate representation
-
-2. **YAML Parser** (`src/yaml_parser/`)
-   - Parse ROS 2 YAML launch files
-   - Support YAML-specific features
-   - Generate intermediate representation
-
-3. **Launch Tree Builder** (`src/tree_builder/`)
-   - Build launch tree from parsed files
-   - Resolve substitutions and includes
-   - Handle parameter files and argument passing
-
-4. **Record Generator** (`src/record_generator/`)
-   - Generate record.json compatible with play_launch
-   - Collect node, container, and composable node metadata
-   - Preserve parameter types and values
-
-### Design Principles
-
-- **Fast**: Minimal overhead, parallel processing where possible
-- **Compatible**: Generate record.json compatible with play_launch runtime
-- **Correct**: Match official ROS 2 launch semantics for XML/YAML
-- **Extensible**: Architecture ready for Python launch support (future)
-
-## Development Practices
-
-### Building
-- **ALWAYS** use `just build` for consistent builds
-- Run `just check` before committing to verify code quality
-- Use `just test` to run all tests
-
-### Testing Strategy
-- Download test packages to `src/` directory
-- Use `colcon build` to build test packages alongside parser
-- Compare parser output with dump_launch output
-- Side-by-side log comparison for verification
-
-### Code Quality
-- Run `just check` to run linters and formatters
-- Keep code modular and well-documented
-- Write unit tests for parsers and tree builders
-- Integration tests with real ROS 2 launch files
-
-## Directory Structure
-
-```
-play_launch_parser/
-├── src/                    # Source packages (ROS 2 + parser code)
-├── docs/                   # Documentation
-│   └── roadmap/           # Phase-based roadmap files
-├── build/                 # Build artifacts (gitignored)
-├── install/               # Install artifacts (gitignored)
-├── log/                   # Build logs (gitignored)
-├── justfile               # Build/test/check commands
-├── CLAUDE.md              # This file
-└── README.md              # User-facing documentation
-```
-
-## Comparison with play_launch
-
-| Aspect | play_launch | play_launch_parser |
-|--------|-------------|-------------------|
-| Language | Python (dump) + Rust (runtime) | Rust (parser) |
-| Launch Formats | Python, XML, YAML | XML, YAML (Python future) |
-| Parse Time | ~40s (Autoware) | Target: <5s |
-| Output | record.json | record.json (compatible) |
-| Use Case | Full dump + replay | Fast parsing only |
-
-## Key Challenges
-
-1. **ROS 2 Launch Semantics**: XML/YAML formats have complex substitution, parameter passing, and include mechanics
-2. **Compatibility**: Must generate record.json compatible with play_launch runtime
-3. **Performance**: Parser must be significantly faster than Python approach
-4. **Testing**: Need comprehensive test suite with real ROS 2 packages
-
-## Roadmap
-
-See `docs/roadmap/` for detailed phase plans:
-- Phase 1: Project Setup & Architecture Design
-- Phase 2: XML Parser Implementation (TBD)
-- Phase 3: YAML Parser Implementation (TBD)
-- Phase 4: Launch Tree Builder (TBD)
-- Phase 5: Record Generator & Integration (TBD)
+Only mark a task as complete after all quality checks pass.
 
 ## Development Workflow
 
-1. **Exploration**: Download ROS 2 packages to `src/`, build with colcon
-2. **Implementation**: Write parser code, iterate with tests
-3. **Verification**: Compare parser output with dump_launch
-4. **Optimization**: Profile and optimize hot paths
+### When Making Changes
 
-## Testing
+1. **Read files first**: Always use the Read tool to examine files before modifying them
+2. **Run tests after changes**: After any code modification, run `cargo test` or `just test-rust`
+3. **Fix all errors**: Never leave compilation errors or failing tests
+4. **Update tests**: When changing functionality, update relevant tests
+5. **Add tests for new features**: New functionality requires comprehensive test coverage
 
-Test packages should be placed in `src/` and built with colcon:
-```sh
-# Example workflow
-cd src/
-git clone https://github.com/ros2/demos.git
-cd ..
-colcon build --base-paths src/demos
+### Test-Driven Development
+
+- Write tests for new features before or during implementation
+- Ensure tests cover:
+  - Happy path (normal operation)
+  - Edge cases (boundary conditions)
+  - Error cases (invalid input, failures)
+  - Integration scenarios (features working together)
+
+### Code Quality Standards
+
+- **No warnings**: Fix all clippy warnings (`cargo clippy`)
+- **Formatted code**: Always format with `cargo fmt`
+- **No unused code**: Remove unused imports, variables, functions
+- **Clear naming**: Use descriptive names for variables, functions, types
+- **Documentation**: Add doc comments for public APIs
+
+## Project-Specific Practices
+
+### Temporary Files
+
+When creating temporary files for debugging or testing:
+- Use `$project/tmp/` directory instead of `/tmp/`
+- Create the directory if it doesn't exist: `mkdir -p tmp/`
+- Clean up temporary files when done if appropriate
+- Example: `tmp/debug_output.json`, `tmp/test_results.txt`
+
+### File Creation
+
+When creating files:
+- **Prefer**: Use `Write` tool for creating files
+- **Avoid**: Using `cat` with heredoc pattern (`cat > file << 'EOF'`)
+- **Reason**: Write tool is clearer and less error-prone
+- **Exception**: Small one-liners or when appending to existing files
+
+### Substitution System
+
+When working on the substitution system:
+- All substitution types support nested substitutions via `Vec<Substitution>`
+- Parser uses character-by-character parsing with parenthesis depth counting
+- Resolution happens recursively from inside-out
+- Always test both parsing and resolution separately
+
+### Testing Strategy
+
+Current test count baseline: **194 tests**
+
+When adding features:
+- Add parser tests (verify AST structure)
+- Add resolution tests (verify runtime behavior)
+- Add integration tests (verify end-to-end functionality)
+- Test nested/complex scenarios
+- Test error cases
+
+#### Test Fixtures Organization
+
+Test launch files are organized in the `tests/` directory:
+
+```
+tests/
+├── fixtures/
+│   ├── launch/         # Main test launch files
+│   └── includes/       # Launch files to be included by other files
+└── README.md
 ```
 
-Compare parser output:
-```sh
-# Generate with dump_launch (Python)
-dump_launch launch demo_nodes_cpp talker_listener.launch.py
-mv record.json record_python.json
+When adding new test fixtures:
+- Place main test files in `tests/fixtures/launch/`
+- Place included files in `tests/fixtures/includes/`
+- Use relative paths for includes: `../includes/file.launch.xml`
+- Name test files descriptively: `test_<feature>.launch.xml`
+- Document new fixtures in `tests/README.md`
 
-# Generate with play_launch_parser (Rust)
-play_launch_parser launch demo_nodes_cpp talker_listener.launch.xml
-mv record.json record_rust.json
+## Common Commands
 
-# Compare
-diff -u record_python.json record_rust.json
+```bash
+# Format code
+just format
+
+# Run linters
+just check
+
+# Run Rust unit tests
+just test-rust
+
+# Run all quality checks
+just quality
+
+# Build the project
+just build
+
+# Clean artifacts
+just clean
 ```
+
+## Before Completing a Task
+
+Checklist:
+- [ ] All code compiles without errors
+- [ ] All tests pass (`just test-rust`)
+- [ ] Code is formatted (`just format`)
+- [ ] No clippy warnings (`just check`)
+- [ ] Quality checks pass (`just quality`)
+- [ ] New functionality has tests
+- [ ] Documentation is updated if needed
 
 ## Notes
 
-- Focus on XML/YAML first due to Python parsing complexity
-- Target compatibility with play_launch v0.x.x runtime
-- Document semantic differences between parser and dump_launch
-- Keep performance metrics for each phase
+- This is a ROS 2 launch file parser written in Rust
+- Goal: Replace slow Python `dump_launch` with fast Rust implementation
+- Focus: Parser correctness, performance, and ROS 2 feature parity
