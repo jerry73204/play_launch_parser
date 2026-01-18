@@ -238,6 +238,26 @@ pub fn resolve_substitutions(
 fn evaluate_expression(expr: &str) -> Result<String, SubstitutionError> {
     let expr = expr.trim();
 
+    // Check for string comparison operators BEFORE stripping outer quotes
+    // If the expression contains comparison operators, the quotes are part of the string literals
+    if expr.contains("==") || expr.contains("!=") {
+        // Only strip outer quotes if they truly wrap the ENTIRE expression
+        // Check if the opening quote's matching closing quote is at the end
+        let expr = if should_strip_outer_quotes(expr) {
+            &expr[1..expr.len() - 1]
+        } else {
+            expr
+        };
+        return evaluate_string_comparison(expr);
+    }
+
+    // For numeric expressions, strip outer quotes if present
+    let expr = if should_strip_outer_quotes(expr) {
+        &expr[1..expr.len() - 1]
+    } else {
+        expr
+    };
+
     // Try to parse and evaluate as a numeric expression
     match eval_expr(expr) {
         Ok(value) => {
@@ -252,6 +272,91 @@ fn evaluate_expression(expr: &str) -> Result<String, SubstitutionError> {
             "Failed to evaluate expression '{}': {}",
             expr, e
         ))),
+    }
+}
+
+/// Check if outer quotes truly wrap the entire expression
+/// Returns true only if the opening quote's matching closing quote is at the end
+fn should_strip_outer_quotes(expr: &str) -> bool {
+    if expr.len() < 2 {
+        return false;
+    }
+
+    let first_char = expr.chars().next().unwrap();
+    let last_char = expr.chars().last().unwrap();
+
+    // Check if starts and ends with matching quotes
+    if (first_char == '"' && last_char == '"') || (first_char == '\'' && last_char == '\'') {
+        // Find the matching closing quote for the opening quote
+        let quote_char = first_char;
+        let mut chars = expr.chars();
+        chars.next(); // Skip the opening quote
+
+        let mut found_closing = false;
+        let mut pos = 1;
+
+        for ch in chars {
+            if ch == quote_char {
+                // Found a matching quote - check if it's at the end
+                if pos == expr.len() - 1 {
+                    found_closing = true;
+                }
+                break;
+            }
+            pos += 1;
+        }
+
+        return found_closing;
+    }
+
+    false
+}
+
+/// Evaluate string comparison expressions (e.g., 'foo' == 'bar')
+fn evaluate_string_comparison(expr: &str) -> Result<String, SubstitutionError> {
+    // Handle == comparison
+    if let Some(eq_pos) = expr.find("==") {
+        let left = expr[..eq_pos].trim();
+        let right = expr[eq_pos + 2..].trim();
+
+        let left_val = strip_quotes(left);
+        let right_val = strip_quotes(right);
+
+        return Ok(if left_val == right_val {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        });
+    }
+
+    // Handle != comparison
+    if let Some(ne_pos) = expr.find("!=") {
+        let left = expr[..ne_pos].trim();
+        let right = expr[ne_pos + 2..].trim();
+
+        let left_val = strip_quotes(left);
+        let right_val = strip_quotes(right);
+
+        return Ok(if left_val != right_val {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        });
+    }
+
+    Err(SubstitutionError::InvalidSubstitution(format!(
+        "Invalid comparison expression: {}",
+        expr
+    )))
+}
+
+/// Strip surrounding quotes from a string
+fn strip_quotes(s: &str) -> String {
+    let s = s.trim();
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        s[1..s.len() - 1].to_string()
+    } else {
+        s.to_string()
     }
 }
 
@@ -981,6 +1086,60 @@ mod tests {
         let context = LaunchContext::new();
         let result = sub.resolve(&context);
         assert!(result.is_err());
+    }
+
+    // String comparison tests
+    #[test]
+    fn test_eval_string_equals_true() {
+        let sub = Substitution::Eval(vec![Substitution::Text(
+            "'elastic_band' == 'elastic_band'".to_string(),
+        )]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "true");
+    }
+
+    #[test]
+    fn test_eval_string_equals_false() {
+        let sub = Substitution::Eval(vec![Substitution::Text("'foo' == 'bar'".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "false");
+    }
+
+    #[test]
+    fn test_eval_string_not_equals_true() {
+        let sub = Substitution::Eval(vec![Substitution::Text("'foo' != 'bar'".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "true");
+    }
+
+    #[test]
+    fn test_eval_string_not_equals_false() {
+        let sub = Substitution::Eval(vec![Substitution::Text("'foo' != 'foo'".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "false");
+    }
+
+    #[test]
+    fn test_eval_string_with_outer_quotes() {
+        // Expression wrapped in double quotes (from XML attribute)
+        let sub = Substitution::Eval(vec![Substitution::Text(
+            "\"'elastic_band' == 'elastic_band'\"".to_string(),
+        )]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "true");
+    }
+
+    #[test]
+    fn test_eval_string_double_quotes() {
+        let sub = Substitution::Eval(vec![Substitution::Text("\"foo\" == \"foo\"".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "true");
     }
 
     // Command error mode execution tests
