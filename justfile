@@ -37,6 +37,20 @@ test:
     colcon test --base-paths src
     colcon test-result --all --verbose
 
+# Run Rust unit tests
+test-rust:
+    #!/usr/bin/env bash
+    set -e
+
+    echo "Running Rust unit tests..."
+    find src -name "Cargo.toml" -not -path "*/target/*" | while read cargo_toml; do
+        dir=$(dirname "$cargo_toml")
+        echo "Testing $dir..."
+        (cd "$dir" && cargo test)
+    done
+
+    echo "All Rust tests passed!"
+
 # Run linters and formatters
 check:
     #!/usr/bin/env bash
@@ -51,6 +65,10 @@ check:
     done
 
     echo "All checks passed!"
+
+# Run quality checks (linters + tests)
+quality: check test-rust
+    @echo "✓ All quality checks passed!"
 
 # Format all code
 format:
