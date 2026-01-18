@@ -34,20 +34,66 @@ impl DeclareLaunchArgument {
     #[new]
     #[pyo3(signature = (name, *, default_value=None, description=None, **_kwargs))]
     fn new(
+        py: Python,
         name: String,
-        default_value: Option<String>,
+        default_value: Option<PyObject>,
         description: Option<String>,
         _kwargs: Option<&pyo3::types::PyDict>,
-    ) -> Self {
-        Self {
+    ) -> PyResult<Self> {
+        // Convert default_value PyObject to string (may be string, substitution, or list)
+        let default_str = default_value
+            .map(|dv| Self::pyobject_to_string(py, &dv))
+            .transpose()?;
+
+        Ok(Self {
             name,
-            default_value,
+            default_value: default_str,
             description,
-        }
+        })
     }
 
     fn __repr__(&self) -> String {
         format!("DeclareLaunchArgument('{}')", self.name)
+    }
+}
+
+impl DeclareLaunchArgument {
+    /// Convert PyObject to string (handles strings, substitutions, and lists)
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        use pyo3::types::PyList;
+
+        // Try direct string extraction
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+
+        // Try list (concatenate all elements)
+        if let Ok(list) = obj.downcast::<PyList>(py) {
+            let mut result = String::new();
+            for item in list.iter() {
+                // Try to extract as string
+                if let Ok(s) = item.extract::<String>() {
+                    result.push_str(&s);
+                }
+                // Try calling __str__
+                else if let Ok(str_result) = item.call_method0("__str__") {
+                    if let Ok(s) = str_result.extract::<String>() {
+                        result.push_str(&s);
+                    }
+                }
+            }
+            return Ok(result);
+        }
+
+        // Try calling __str__ method (for substitutions)
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj.to_string())
     }
 }
 
@@ -414,5 +460,51 @@ impl IncludeLaunchDescription {
             "IncludeLaunchDescription({} args)",
             self.launch_arguments.len()
         )
+    }
+}
+
+/// Mock SetLaunchConfiguration action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import SetLaunchConfiguration
+/// set_config = SetLaunchConfiguration(name='config_name', value='value')
+/// ```
+///
+/// Sets a launch configuration value
+#[pyclass]
+#[derive(Clone)]
+pub struct SetLaunchConfiguration {
+    #[allow(dead_code)] // Stored for API compatibility
+    name: PyObject,
+    #[allow(dead_code)] // Stored for API compatibility
+    value: PyObject,
+}
+
+#[pymethods]
+impl SetLaunchConfiguration {
+    #[new]
+    #[pyo3(signature = (name, value, **_kwargs))]
+    fn new(
+        py: Python,
+        name: PyObject,
+        value: PyObject,
+        _kwargs: Option<&pyo3::types::PyDict>,
+    ) -> PyResult<Self> {
+        // Convert name to string (may be a substitution)
+        let name_str = if let Ok(s) = name.extract::<String>(py) {
+            s
+        } else if let Ok(str_result) = name.call_method0(py, "__str__") {
+            str_result.extract::<String>(py)?
+        } else {
+            name.to_string()
+        };
+
+        log::debug!("Python Launch SetLaunchConfiguration: {}=<value>", name_str);
+        Ok(Self { name, value })
+    }
+
+    fn __repr__(&self) -> String {
+        "SetLaunchConfiguration(...)".to_string()
     }
 }

@@ -369,20 +369,29 @@ impl ComposableNodeContainer {
         **_kwargs
     ))]
     fn new(
-        name: String,
-        namespace: Option<String>,
-        package: String,
-        executable: String,
+        py: Python,
+        name: PyObject,
+        namespace: Option<PyObject>,
+        package: PyObject,
+        executable: PyObject,
         composable_node_descriptions: Option<Vec<Py<ComposableNode>>>,
         _kwargs: Option<&PyDict>,
     ) -> PyResult<Self> {
         let composable_nodes = composable_node_descriptions.unwrap_or_default();
 
+        // Convert PyObject parameters to strings (may be substitutions)
+        let name_str = Self::pyobject_to_string(py, &name)?;
+        let namespace_str = namespace
+            .map(|ns| Self::pyobject_to_string(py, &ns))
+            .transpose()?;
+        let package_str = Self::pyobject_to_string(py, &package)?;
+        let executable_str = Self::pyobject_to_string(py, &executable)?;
+
         let container = Self {
-            name: name.clone(),
-            namespace: namespace.clone(),
-            package,
-            executable,
+            name: name_str,
+            namespace: namespace_str,
+            package: package_str,
+            executable: executable_str,
             composable_nodes: composable_nodes.clone(),
         };
 
@@ -426,6 +435,24 @@ impl ComposableNodeContainer {
                 node.capture_as_load_node(&container.name, &container.namespace);
             }
         });
+    }
+
+    /// Convert PyObject to string (handles both strings and substitutions)
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        // Try direct string extraction
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+
+        // Try calling __str__ method (for substitutions)
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj.to_string())
     }
 }
 
