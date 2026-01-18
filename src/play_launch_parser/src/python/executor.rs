@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::api;
-use super::bridge::{CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES, CAPTURED_NODES};
+use super::bridge::{
+    CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES, CAPTURED_NODES, LAUNCH_CONFIGURATIONS,
+};
 
 /// Python launch file executor
 ///
@@ -45,6 +47,15 @@ impl PythonLaunchExecutor {
             CAPTURED_NODES.lock().unwrap().clear();
             CAPTURED_CONTAINERS.lock().unwrap().clear();
             CAPTURED_LOAD_NODES.lock().unwrap().clear();
+
+            // Store launch configurations for condition evaluation
+            {
+                let mut configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+                configs.clear();
+                for (key, value) in args {
+                    configs.insert(key.clone(), value.clone());
+                }
+            }
 
             // Register our mock modules
             api::register_modules(py)?;

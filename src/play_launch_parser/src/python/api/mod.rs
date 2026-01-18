@@ -1,6 +1,7 @@
 //! Mock Python API for ROS 2 launch system
 
 pub mod actions;
+pub mod conditions;
 pub mod launch;
 pub mod launch_ros;
 pub mod substitutions;
@@ -13,6 +14,7 @@ use pyo3::prelude::*;
 /// - `launch`
 /// - `launch.actions`
 /// - `launch.substitutions`
+/// - `launch.conditions`
 /// - `launch_ros`
 /// - `launch_ros.actions`
 /// - `launch_ros.descriptions`
@@ -24,15 +26,35 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     // Create launch.actions submodule
     let launch_actions = PyModule::new(py, "launch.actions")?;
     launch_actions.add_class::<actions::DeclareLaunchArgument>()?;
+    launch_actions.add_class::<actions::LogInfo>()?;
+    launch_actions.add_class::<actions::SetEnvironmentVariable>()?;
+    launch_actions.add_class::<actions::UnsetEnvironmentVariable>()?;
+    launch_actions.add_class::<actions::GroupAction>()?;
+    launch_actions.add_class::<actions::ExecuteProcess>()?;
+    launch_actions.add_class::<actions::TimerAction>()?;
+    launch_actions.add_class::<actions::OpaqueFunction>()?;
 
     // Create launch.substitutions submodule
     let launch_subs = PyModule::new(py, "launch.substitutions")?;
     launch_subs.add_class::<substitutions::LaunchConfiguration>()?;
     launch_subs.add_class::<substitutions::TextSubstitution>()?;
+    launch_subs.add_class::<substitutions::PathJoinSubstitution>()?;
+    launch_subs.add_class::<substitutions::FindPackageShare>()?;
+    launch_subs.add_class::<substitutions::EnvironmentVariable>()?;
+    launch_subs.add_class::<substitutions::ThisLaunchFileDir>()?;
+    launch_subs.add_class::<substitutions::PythonExpression>()?;
+
+    // Create launch.conditions submodule
+    let launch_conditions = PyModule::new(py, "launch.conditions")?;
+    launch_conditions.add_class::<conditions::IfCondition>()?;
+    launch_conditions.add_class::<conditions::UnlessCondition>()?;
+    launch_conditions.add_class::<conditions::LaunchConfigurationEquals>()?;
+    launch_conditions.add_class::<conditions::LaunchConfigurationNotEquals>()?;
 
     // Add submodules to parent module as attributes
     launch_mod.add_submodule(launch_actions)?;
     launch_mod.add_submodule(launch_subs)?;
+    launch_mod.add_submodule(launch_conditions)?;
 
     // Create launch_ros module
     let launch_ros_mod = PyModule::new(py, "launch_ros")?;
@@ -57,6 +79,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     modules.set_item("launch", launch_mod)?;
     modules.set_item("launch.actions", launch_actions)?;
     modules.set_item("launch.substitutions", launch_subs)?;
+    modules.set_item("launch.conditions", launch_conditions)?;
     modules.set_item("launch_ros", launch_ros_mod)?;
     modules.set_item("launch_ros.actions", launch_ros_actions)?;
     modules.set_item("launch_ros.descriptions", launch_ros_desc)?;

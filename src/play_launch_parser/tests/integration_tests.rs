@@ -1212,3 +1212,386 @@ fn test_parse_simple_python_launch() {
         "Should have correct namespace"
     );
 }
+
+#[test]
+#[cfg(feature = "python")]
+fn test_parse_python_substitutions() {
+    let fixture = get_fixture_path("test_python_substitutions.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let mut args = HashMap::new();
+    args.insert("package_name".to_string(), "my_package".to_string());
+    args.insert("use_sim_time".to_string(), "true".to_string());
+
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file with substitutions should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 4, "Should have 4 nodes");
+
+    // Check first node with PathJoinSubstitution
+    let node = &nodes[0];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "talker_with_config",
+        "Should have correct name"
+    );
+
+    // Verify parameter with substitutions
+    let params = node["params"].as_array().expect("Should have params array");
+    assert!(!params.is_empty(), "Should have parameters");
+
+    // Check that config_path parameter contains PathJoinSubstitution result
+    let config_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("config_path")
+    });
+    assert!(config_param.is_some(), "Should have config_path parameter");
+
+    // Check second node with EnvironmentVariable
+    let node = &nodes[1];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "listener_with_env",
+        "Should have correct name"
+    );
+
+    // Check third node with ThisLaunchFileDir
+    let node = &nodes[2];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "talker_with_dir",
+        "Should have correct name"
+    );
+}
+
+#[test]
+#[cfg(feature = "python")]
+fn test_parse_python_parameters() {
+    let fixture = get_fixture_path("test_python_parameters.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file with parameters should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 6, "Should have 6 nodes");
+
+    // Check first node with simple parameters
+    let node = &nodes[0];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "talker_simple_params",
+        "Should have correct name"
+    );
+
+    let params = node["params"].as_array().unwrap();
+    assert!(!params.is_empty(), "Should have parameters");
+
+    // Verify string parameter
+    let string_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("string_param")
+    });
+    assert!(string_param.is_some(), "Should have string_param");
+    let string_value = string_param
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .get(1)
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(string_value, "hello_world", "String param should match");
+
+    // Verify int parameter
+    let int_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("int_param")
+    });
+    assert!(int_param.is_some(), "Should have int_param");
+    let int_value = int_param
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .get(1)
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(int_value, "42", "Int param should match");
+
+    // Verify bool parameter
+    let bool_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("bool_param")
+    });
+    assert!(bool_param.is_some(), "Should have bool_param");
+    let bool_value = bool_param
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .get(1)
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(bool_value, "true", "Bool param should match");
+
+    // Check second node with nested parameters (uses dot notation)
+    let node = &nodes[1];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "listener_nested_params",
+        "Should have correct name"
+    );
+
+    let params = node["params"].as_array().unwrap();
+    assert!(!params.is_empty(), "Should have parameters");
+
+    // Verify nested parameter with dot notation
+    let nested_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("robot.name")
+    });
+    assert!(
+        nested_param.is_some(),
+        "Should have nested parameter with dot notation"
+    );
+    let nested_value = nested_param
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .get(1)
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(nested_value, "my_robot", "Nested param should match");
+
+    // Verify deeply nested parameter
+    let deep_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("config.advanced.timeout")
+    });
+    assert!(deep_param.is_some(), "Should have deeply nested parameter");
+
+    // Check third node with list of parameter dicts
+    let node = &nodes[2];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "talker_list_params",
+        "Should have correct name"
+    );
+
+    let params = node["params"].as_array().unwrap();
+    assert_eq!(params.len(), 3, "Should have 3 parameters from list");
+
+    // Check fourth node with mixed parameters (including param file)
+    let node = &nodes[3];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "listener_mixed_params",
+        "Should have correct name"
+    );
+
+    let params = node["params"].as_array().unwrap();
+    assert!(!params.is_empty(), "Should have parameters");
+
+    // Verify parameter file marker
+    let param_file = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("__param_file")
+    });
+    assert!(param_file.is_some(), "Should have parameter file marker");
+
+    // Check fifth node with array parameters
+    let node = &nodes[4];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "talker_array_params",
+        "Should have correct name"
+    );
+
+    let params = node["params"].as_array().unwrap();
+    assert!(!params.is_empty(), "Should have array parameters");
+
+    // Verify array parameter is formatted as string
+    let joints_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("joints")
+    });
+    assert!(joints_param.is_some(), "Should have joints array parameter");
+    let joints_value = joints_param
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .get(1)
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert!(
+        joints_value.starts_with('['),
+        "Array param should be formatted as string array"
+    );
+
+    // Check sixth node with no parameters
+    let node = &nodes[5];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "listener_no_params",
+        "Should have correct name"
+    );
+}
+
+#[test]
+#[cfg(feature = "python")]
+fn test_parse_python_conditions() {
+    let fixture = get_fixture_path("test_python_conditions.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    // Test 1: use_sim=false, enable_debug=true (default)
+    let mut args = HashMap::new();
+    args.insert("use_sim".to_string(), "false".to_string());
+    args.insert("enable_debug".to_string(), "true".to_string());
+
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file with conditions should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+
+    // With use_sim=false and enable_debug=true, we should have:
+    // - real_talker (UnlessCondition(use_sim) = UnlessCondition(false) = true)
+    // - debug_listener (IfCondition(enable_debug) = IfCondition(true) = true)
+    // - main_listener (always)
+    // NOT sim_talker (IfCondition(use_sim) = IfCondition(false) = false)
+    assert_eq!(
+        nodes.len(),
+        3,
+        "Should have 3 nodes with use_sim=false, enable_debug=true"
+    );
+
+    // Check we have real_talker
+    let has_real_talker = nodes
+        .iter()
+        .any(|n| n["name"].as_str() == Some("real_talker"));
+    assert!(
+        has_real_talker,
+        "Should have real_talker when use_sim=false"
+    );
+
+    // Check we have debug_listener
+    let has_debug_listener = nodes
+        .iter()
+        .any(|n| n["name"].as_str() == Some("debug_listener"));
+    assert!(
+        has_debug_listener,
+        "Should have debug_listener when enable_debug=true"
+    );
+
+    // Check we have main_listener
+    let has_main_listener = nodes
+        .iter()
+        .any(|n| n["name"].as_str() == Some("main_listener"));
+    assert!(has_main_listener, "Should always have main_listener");
+
+    // Check we DON'T have sim_talker
+    let has_sim_talker = nodes
+        .iter()
+        .any(|n| n["name"].as_str() == Some("sim_talker"));
+    assert!(
+        !has_sim_talker,
+        "Should NOT have sim_talker when use_sim=false"
+    );
+
+    // Test 2: use_sim=true, enable_debug=false
+    let mut args = HashMap::new();
+    args.insert("use_sim".to_string(), "true".to_string());
+    args.insert("enable_debug".to_string(), "false".to_string());
+
+    let result = parse_launch_file(&fixture, args);
+    assert!(result.is_ok(), "Parsing should succeed with different args");
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    // With use_sim=true and enable_debug=false, we should have:
+    // - sim_talker (IfCondition(use_sim) = IfCondition(true) = true)
+    // - main_listener (always)
+    // NOT real_talker (UnlessCondition(use_sim) = UnlessCondition(true) = false)
+    // NOT debug_listener (IfCondition(enable_debug) = IfCondition(false) = false)
+    assert_eq!(
+        nodes.len(),
+        2,
+        "Should have 2 nodes with use_sim=true, enable_debug=false"
+    );
+
+    // Check we have sim_talker
+    let has_sim_talker = nodes
+        .iter()
+        .any(|n| n["name"].as_str() == Some("sim_talker"));
+    assert!(has_sim_talker, "Should have sim_talker when use_sim=true");
+
+    // Check we DON'T have real_talker
+    let has_real_talker = nodes
+        .iter()
+        .any(|n| n["name"].as_str() == Some("real_talker"));
+    assert!(
+        !has_real_talker,
+        "Should NOT have real_talker when use_sim=true"
+    );
+
+    // Check we DON'T have debug_listener
+    let has_debug_listener = nodes
+        .iter()
+        .any(|n| n["name"].as_str() == Some("debug_listener"));
+    assert!(
+        !has_debug_listener,
+        "Should NOT have debug_listener when enable_debug=false"
+    );
+}

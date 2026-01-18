@@ -6,6 +6,11 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+/// Global storage for launch configurations (arguments passed to the launch file)
+/// This allows conditions to access and resolve LaunchConfiguration substitutions
+pub static LAUNCH_CONFIGURATIONS: Lazy<Arc<Mutex<HashMap<String, String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
 /// Captured node data from Python
 #[derive(Debug, Clone)]
 pub struct NodeCapture {
