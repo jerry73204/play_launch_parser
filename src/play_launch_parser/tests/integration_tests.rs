@@ -964,16 +964,14 @@ fn test_node_container() {
     );
 
     let json = serde_json::to_value(result.unwrap()).unwrap();
-    let nodes = json["node"].as_array().unwrap();
+    let containers = json["container"].as_array().unwrap();
 
-    assert_eq!(nodes.len(), 1, "Should have 1 node (container)");
+    assert_eq!(containers.len(), 1, "Should have 1 container");
 
-    // Check container node details
-    let node = &nodes[0];
-    assert_eq!(node["package"].as_str().unwrap(), "rclcpp_components");
-    assert_eq!(node["executable"].as_str().unwrap(), "component_container");
-    assert_eq!(node["name"].as_str().unwrap(), "my_container");
-    assert_eq!(node["namespace"].as_str().unwrap(), "/test");
+    // Check container details
+    let container = &containers[0];
+    assert_eq!(container["name"].as_str().unwrap(), "my_container");
+    assert_eq!(container["namespace"].as_str().unwrap(), "/test");
 }
 
 #[test]
@@ -997,9 +995,9 @@ fn test_node_container_hyphenated() {
     );
 
     let json = serde_json::to_value(result.unwrap()).unwrap();
-    let nodes = json["node"].as_array().unwrap();
+    let containers = json["container"].as_array().unwrap();
 
-    assert_eq!(nodes.len(), 1, "Should have 1 node (container)");
+    assert_eq!(containers.len(), 1, "Should have 1 container");
 }
 
 #[test]
@@ -1026,12 +1024,39 @@ fn test_composable_node_in_container() {
     );
 
     let json = serde_json::to_value(result.unwrap()).unwrap();
-    let nodes = json["node"].as_array().unwrap();
 
-    // Currently we just parse the container as a node
-    // composable_node children are logged but not yet captured
-    assert_eq!(nodes.len(), 1, "Should have 1 node (container)");
-    assert_eq!(nodes[0]["name"].as_str().unwrap(), "my_container");
+    // Check container
+    let containers = json["container"].as_array().unwrap();
+    assert_eq!(containers.len(), 1, "Should have 1 container");
+    assert_eq!(containers[0]["name"].as_str().unwrap(), "my_container");
+
+    // Check composable nodes are captured as load_node entries
+    let load_nodes = json["load_node"].as_array().unwrap();
+    assert_eq!(load_nodes.len(), 2, "Should have 2 composable nodes");
+
+    // Check first composable node
+    assert_eq!(load_nodes[0]["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(
+        load_nodes[0]["plugin"].as_str().unwrap(),
+        "demo_nodes_cpp::Talker"
+    );
+    assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "talker");
+    assert_eq!(
+        load_nodes[0]["target_container_name"].as_str().unwrap(),
+        "my_container"
+    );
+
+    // Check second composable node
+    assert_eq!(load_nodes[1]["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(
+        load_nodes[1]["plugin"].as_str().unwrap(),
+        "demo_nodes_cpp::Listener"
+    );
+    assert_eq!(load_nodes[1]["node_name"].as_str().unwrap(), "listener");
+    assert_eq!(
+        load_nodes[1]["target_container_name"].as_str().unwrap(),
+        "my_container"
+    );
 }
 
 #[test]
@@ -1069,6 +1094,75 @@ fn test_parse_python_no_import() {
         node["name"].as_str().unwrap(),
         "sys_modules_test",
         "Should have correct name"
+    );
+}
+
+#[test]
+#[cfg(feature = "python")]
+fn test_parse_python_container() {
+    let fixture = get_fixture_path("test_python_container.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python container launch file should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Check container
+    let containers = json["container"].as_array().unwrap();
+    assert_eq!(containers.len(), 1, "Should have 1 container");
+    assert_eq!(
+        containers[0]["name"].as_str().unwrap(),
+        "my_component_container"
+    );
+    assert_eq!(containers[0]["namespace"].as_str().unwrap(), "/test_ns");
+
+    // Check composable nodes are captured as load_node entries
+    let load_nodes = json["load_node"].as_array().unwrap();
+    assert_eq!(load_nodes.len(), 2, "Should have 2 composable nodes");
+
+    // Check first composable node
+    assert_eq!(load_nodes[0]["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(
+        load_nodes[0]["plugin"].as_str().unwrap(),
+        "demo_nodes_cpp::Talker"
+    );
+    assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "talker_node");
+    assert_eq!(
+        load_nodes[0]["target_container_name"].as_str().unwrap(),
+        "my_component_container"
+    );
+    assert_eq!(
+        load_nodes[0]["namespace"].as_str().unwrap(),
+        "/test_ns", // Inherits from container
+        "Should inherit namespace from container"
+    );
+
+    // Check second composable node
+    assert_eq!(load_nodes[1]["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(
+        load_nodes[1]["plugin"].as_str().unwrap(),
+        "demo_nodes_cpp::Listener"
+    );
+    assert_eq!(
+        load_nodes[1]["node_name"].as_str().unwrap(),
+        "listener_node"
+    );
+    assert_eq!(
+        load_nodes[1]["target_container_name"].as_str().unwrap(),
+        "my_component_container"
+    );
+    assert_eq!(
+        load_nodes[1]["namespace"].as_str().unwrap(),
+        "/custom_ns", // Has its own namespace
+        "Should use custom namespace"
     );
 }
 

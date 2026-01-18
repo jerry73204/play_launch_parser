@@ -40,9 +40,11 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     // Create launch_ros.actions submodule
     let launch_ros_actions = PyModule::new(py, "launch_ros.actions")?;
     launch_ros_actions.add_class::<launch_ros::Node>()?;
+    launch_ros_actions.add_class::<launch_ros::ComposableNodeContainer>()?;
 
     // Create launch_ros.descriptions submodule
     let launch_ros_desc = PyModule::new(py, "launch_ros.descriptions")?;
+    launch_ros_desc.add_class::<launch_ros::ComposableNode>()?;
 
     // Add submodules to parent module as attributes
     launch_ros_mod.add_submodule(launch_ros_actions)?;

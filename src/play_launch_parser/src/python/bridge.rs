@@ -1,8 +1,9 @@
 //! Bridge between Python and Rust types
 
 use crate::error::Result;
-use crate::record::NodeRecord;
+use crate::record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord};
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 /// Captured node data from Python
@@ -51,4 +52,59 @@ impl NodeCapture {
 
 /// Global storage for captured nodes (thread-safe)
 pub static CAPTURED_NODES: Lazy<Arc<Mutex<Vec<NodeCapture>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+
+/// Captured container data from Python
+#[derive(Debug, Clone)]
+pub struct ContainerCapture {
+    pub name: String,
+    pub namespace: String,
+}
+
+impl ContainerCapture {
+    /// Convert to ComposableNodeContainerRecord
+    pub fn to_record(&self) -> Result<ComposableNodeContainerRecord> {
+        Ok(ComposableNodeContainerRecord {
+            name: self.name.clone(),
+            namespace: self.namespace.clone(),
+        })
+    }
+}
+
+/// Global storage for captured containers (thread-safe)
+pub static CAPTURED_CONTAINERS: Lazy<Arc<Mutex<Vec<ContainerCapture>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+
+/// Captured composable node data from Python
+#[derive(Debug, Clone)]
+pub struct LoadNodeCapture {
+    pub package: String,
+    pub plugin: String,
+    pub target_container_name: String,
+    pub node_name: String,
+    pub namespace: String,
+    pub parameters: Vec<(String, String)>,
+    pub remappings: Vec<(String, String)>,
+}
+
+impl LoadNodeCapture {
+    /// Convert to LoadNodeRecord
+    pub fn to_record(&self) -> Result<LoadNodeRecord> {
+        Ok(LoadNodeRecord {
+            package: self.package.clone(),
+            plugin: self.plugin.clone(),
+            target_container_name: self.target_container_name.clone(),
+            node_name: self.node_name.clone(),
+            namespace: self.namespace.clone(),
+            log_level: None,
+            remaps: self.remappings.clone(),
+            params: self.parameters.clone(),
+            extra_args: HashMap::new(),
+            env: None,
+        })
+    }
+}
+
+/// Global storage for captured load_nodes (thread-safe)
+pub static CAPTURED_LOAD_NODES: Lazy<Arc<Mutex<Vec<LoadNodeCapture>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));

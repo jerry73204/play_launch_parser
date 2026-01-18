@@ -1,6 +1,9 @@
 //! Mock `launch_ros` module classes
 
-use crate::python::bridge::{NodeCapture, CAPTURED_NODES};
+use crate::python::bridge::{
+    ContainerCapture, LoadNodeCapture, NodeCapture, CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES,
+    CAPTURED_NODES,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -109,5 +112,198 @@ impl Node {
         );
 
         CAPTURED_NODES.lock().unwrap().push(capture);
+    }
+}
+
+/// Mock ComposableNodeContainer class
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import ComposableNodeContainer
+/// from launch_ros.descriptions import ComposableNode
+///
+/// container = ComposableNodeContainer(
+///     name='my_container',
+///     namespace='/my_namespace',
+///     package='rclcpp_components',
+///     executable='component_container',
+///     composable_node_descriptions=[
+///         ComposableNode(package='pkg', plugin='Plugin', name='node'),
+///     ]
+/// )
+/// ```
+#[pyclass]
+#[derive(Clone)]
+pub struct ComposableNodeContainer {
+    name: String,
+    namespace: Option<String>,
+    package: String,
+    executable: String,
+    composable_nodes: Vec<Py<ComposableNode>>,
+}
+
+#[pymethods]
+impl ComposableNodeContainer {
+    #[new]
+    #[pyo3(signature = (
+        *,
+        name,
+        namespace=None,
+        package,
+        executable,
+        composable_node_descriptions=None,
+        **_kwargs
+    ))]
+    fn new(
+        name: String,
+        namespace: Option<String>,
+        package: String,
+        executable: String,
+        composable_node_descriptions: Option<Vec<Py<ComposableNode>>>,
+        _kwargs: Option<&PyDict>,
+    ) -> PyResult<Self> {
+        let composable_nodes = composable_node_descriptions.unwrap_or_default();
+
+        let container = Self {
+            name: name.clone(),
+            namespace: namespace.clone(),
+            package,
+            executable,
+            composable_nodes: composable_nodes.clone(),
+        };
+
+        // Capture the container
+        Self::capture_container(&container);
+
+        Ok(container)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ComposableNodeContainer(name='{}', namespace='{}')",
+            self.name,
+            self.namespace.as_deref().unwrap_or("/")
+        )
+    }
+}
+
+impl ComposableNodeContainer {
+    fn capture_container(container: &ComposableNodeContainer) {
+        let capture = ContainerCapture {
+            name: container.name.clone(),
+            namespace: container
+                .namespace
+                .clone()
+                .unwrap_or_else(|| "/".to_string()),
+        };
+
+        log::debug!(
+            "Captured Python container: {} (namespace: {})",
+            capture.name,
+            capture.namespace
+        );
+
+        CAPTURED_CONTAINERS.lock().unwrap().push(capture);
+
+        // Capture each composable node as a load_node entry
+        Python::with_gil(|py| {
+            for node_obj in &container.composable_nodes {
+                let node = node_obj.borrow(py);
+                node.capture_as_load_node(&container.name, &container.namespace);
+            }
+        });
+    }
+}
+
+/// Mock ComposableNode class (for descriptions module)
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.descriptions import ComposableNode
+///
+/// node = ComposableNode(
+///     package='my_package',
+///     plugin='my_package::MyPlugin',
+///     name='my_node',
+///     namespace='/my_namespace',
+///     parameters=[...],
+///     remappings=[...],
+/// )
+/// ```
+#[pyclass]
+#[derive(Clone)]
+pub struct ComposableNode {
+    package: String,
+    plugin: String,
+    name: String,
+    namespace: Option<String>,
+    parameters: Vec<PyObject>,
+    remappings: Vec<(String, String)>,
+}
+
+#[pymethods]
+impl ComposableNode {
+    #[new]
+    #[pyo3(signature = (
+        *,
+        package,
+        plugin,
+        name,
+        namespace=None,
+        parameters=None,
+        remappings=None,
+        **_kwargs
+    ))]
+    fn new(
+        package: String,
+        plugin: String,
+        name: String,
+        namespace: Option<String>,
+        parameters: Option<Vec<PyObject>>,
+        remappings: Option<Vec<(String, String)>>,
+        _kwargs: Option<&PyDict>,
+    ) -> PyResult<Self> {
+        Ok(Self {
+            package,
+            plugin,
+            name,
+            namespace,
+            parameters: parameters.unwrap_or_default(),
+            remappings: remappings.unwrap_or_default(),
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ComposableNode(package='{}', plugin='{}', name='{}')",
+            self.package, self.plugin, self.name
+        )
+    }
+}
+
+impl ComposableNode {
+    fn capture_as_load_node(&self, container_name: &str, container_namespace: &Option<String>) {
+        let capture = LoadNodeCapture {
+            package: self.package.clone(),
+            plugin: self.plugin.clone(),
+            target_container_name: container_name.to_string(),
+            node_name: self.name.clone(),
+            namespace: self
+                .namespace
+                .clone()
+                .or_else(|| container_namespace.clone())
+                .unwrap_or_else(|| "/".to_string()),
+            parameters: Vec::new(), // TODO: Parse Python parameters
+            remappings: self.remappings.clone(),
+        };
+
+        log::debug!(
+            "Captured Python composable node: {} / {} (container: {})",
+            capture.package,
+            capture.plugin,
+            capture.target_container_name
+        );
+
+        CAPTURED_LOAD_NODES.lock().unwrap().push(capture);
     }
 }

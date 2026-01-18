@@ -1,13 +1,13 @@
 //! Python launch file execution engine
 
 use crate::error::{ParseError, Result};
-use crate::record::NodeRecord;
+use crate::record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 
 use super::api;
-use super::bridge::CAPTURED_NODES;
+use super::bridge::{CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES, CAPTURED_NODES};
 
 /// Python launch file executor
 ///
@@ -21,7 +21,7 @@ impl PythonLaunchExecutor {
         Ok(Self)
     }
 
-    /// Execute a Python launch file and return captured nodes
+    /// Execute a Python launch file and return captured entities
     ///
     /// # Arguments
     ///
@@ -30,15 +30,21 @@ impl PythonLaunchExecutor {
     ///
     /// # Returns
     ///
-    /// Vector of NodeRecord structs captured during execution
+    /// Tuple of (nodes, containers, load_nodes) captured during execution
     pub fn execute_launch_file(
         &self,
         path: &Path,
         args: &HashMap<String, String>,
-    ) -> Result<Vec<NodeRecord>> {
+    ) -> Result<(
+        Vec<NodeRecord>,
+        Vec<ComposableNodeContainerRecord>,
+        Vec<LoadNodeRecord>,
+    )> {
         let result = Python::with_gil(|py| {
             // Clear previous captures
             CAPTURED_NODES.lock().unwrap().clear();
+            CAPTURED_CONTAINERS.lock().unwrap().clear();
+            CAPTURED_LOAD_NODES.lock().unwrap().clear();
 
             // Register our mock modules
             api::register_modules(py)?;
@@ -72,16 +78,29 @@ impl PythonLaunchExecutor {
             // Call the function
             let _launch_description = generate_fn.call0()?;
 
-            // Nodes are already captured via our mock API
-            // Convert to NodeRecord and return
-            let captures = CAPTURED_NODES.lock().unwrap().clone();
-            let nodes = captures
+            // Convert captured entities to records
+            let node_captures = CAPTURED_NODES.lock().unwrap().clone();
+            let nodes = node_captures
                 .into_iter()
                 .map(|capture| capture.to_record())
                 .collect::<Result<Vec<_>>>()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-            Ok(nodes)
+            let container_captures = CAPTURED_CONTAINERS.lock().unwrap().clone();
+            let containers = container_captures
+                .into_iter()
+                .map(|capture| capture.to_record())
+                .collect::<Result<Vec<_>>>()
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+
+            let load_node_captures = CAPTURED_LOAD_NODES.lock().unwrap().clone();
+            let load_nodes = load_node_captures
+                .into_iter()
+                .map(|capture| capture.to_record())
+                .collect::<Result<Vec<_>>>()
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+
+            Ok((nodes, containers, load_nodes))
         });
 
         result.map_err(|e: PyErr| ParseError::PythonError(e.to_string()))

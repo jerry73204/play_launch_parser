@@ -13,8 +13,8 @@ pub mod substitution;
 pub mod xml;
 
 use actions::{
-    ArgAction, DeclareArgumentAction, ExecutableAction, GroupAction, IncludeAction, LetAction,
-    NodeAction, SetEnvAction, SetParameterAction, UnsetEnvAction,
+    ArgAction, ContainerAction, DeclareArgumentAction, ExecutableAction, GroupAction,
+    IncludeAction, LetAction, NodeAction, SetEnvAction, SetParameterAction, UnsetEnvAction,
 };
 use condition::should_process_entity;
 use error::{ParseError, Result};
@@ -28,6 +28,8 @@ use xml::{Entity, XmlEntity};
 pub struct LaunchTraverser {
     context: LaunchContext,
     records: Vec<record::NodeRecord>,
+    containers: Vec<record::ComposableNodeContainerRecord>,
+    load_nodes: Vec<record::LoadNodeRecord>,
 }
 
 impl LaunchTraverser {
@@ -41,6 +43,8 @@ impl LaunchTraverser {
         Self {
             context,
             records: Vec::new(),
+            containers: Vec::new(),
+            load_nodes: Vec::new(),
         }
     }
 
@@ -88,10 +92,18 @@ impl LaunchTraverser {
 
         let executor =
             PythonLaunchExecutor::new().map_err(|e| ParseError::PythonError(e.to_string()))?;
-        let nodes = executor.execute_launch_file(path, args)?;
+        let (nodes, containers, load_nodes) = executor.execute_launch_file(path, args)?;
 
-        log::info!("Captured {} nodes from Python launch file", nodes.len());
+        log::info!(
+            "Captured {} nodes, {} containers, {} composable nodes from Python launch file",
+            nodes.len(),
+            containers.len(),
+            load_nodes.len()
+        );
+
         self.records.extend(nodes);
+        self.containers.extend(containers);
+        self.load_nodes.extend(load_nodes);
 
         Ok(())
     }
@@ -183,11 +195,15 @@ impl LaunchTraverser {
         let mut included_traverser = LaunchTraverser {
             context: include_context,
             records: Vec::new(),
+            containers: Vec::new(),
+            load_nodes: Vec::new(),
         };
         included_traverser.traverse_entity(&root)?;
 
         // Merge records from included file into current records
         self.records.extend(included_traverser.records);
+        self.containers.extend(included_traverser.containers);
+        self.load_nodes.extend(included_traverser.load_nodes);
 
         Ok(())
     }
@@ -322,17 +338,25 @@ impl LaunchTraverser {
                 self.context.pop_namespace();
             }
             "node_container" | "node-container" => {
-                // Parse node container similar to regular node
-                // Containers are special nodes that load composable node plugins
-                // NodeAction will handle composable_node children gracefully
-                let node_action = NodeAction::from_entity(entity)?;
-                let record = CommandGenerator::generate_node_record(&node_action, &self.context)
-                    .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
-                self.records.push(record);
+                // Parse container and its composable nodes
+                let container_action = ContainerAction::from_entity(entity, &self.context)?;
+
+                // Add container record
+                self.containers.push(container_action.to_container_record());
+
+                // Add load_node records for each composable node
+                self.load_nodes
+                    .extend(container_action.to_load_node_records());
+
+                log::info!(
+                    "Parsed container '{}' with {} composable nodes",
+                    container_action.name,
+                    container_action.composable_nodes.len()
+                );
             }
             "composable_node" | "composable-node" => {
                 // Composable nodes are loaded into containers
-                // For now, we log and skip them when they appear standalone
+                // Standalone composable nodes should be inside a node_container
                 log::info!("Skipping standalone composable_node (should be in node_container)");
             }
             "load_composable_node" | "load-composable-node" => {
@@ -351,8 +375,8 @@ impl LaunchTraverser {
     pub fn into_record_json(self) -> RecordJson {
         RecordJson {
             node: self.records,
-            container: Vec::new(),
-            load_node: Vec::new(),
+            container: self.containers,
+            load_node: self.load_nodes,
             lifecycle_node: Vec::new(),
             file_data: HashMap::new(),
         }
