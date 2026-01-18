@@ -153,16 +153,26 @@ fn execute_command(cmd: &str) -> Result<String, SubstitutionError> {
         .arg(cmd)
         .output()
         .map_err(|e| {
-            SubstitutionError::InvalidSubstitution(format!("Failed to execute command: {}", e))
+            SubstitutionError::CommandFailed(format!("Failed to execute '{}': {}", cmd, e))
         })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(SubstitutionError::InvalidSubstitution(format!(
-            "Command failed with exit code {:?}: {}",
-            output.status.code(),
-            stderr.trim()
-        )));
+        let error_msg = if stderr.trim().is_empty() {
+            format!(
+                "Command '{}' failed with exit code {}",
+                cmd,
+                output.status.code().unwrap_or(-1)
+            )
+        } else {
+            format!(
+                "Command '{}' failed with exit code {}: {}",
+                cmd,
+                output.status.code().unwrap_or(-1),
+                stderr.trim()
+            )
+        };
+        return Err(SubstitutionError::CommandFailed(error_msg));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

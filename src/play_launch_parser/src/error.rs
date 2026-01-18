@@ -7,8 +7,15 @@ pub enum ParseError {
     #[error("XML parsing error: {0}")]
     XmlError(#[from] roxmltree::Error),
 
-    #[error("Missing required attribute '{attribute}' on element '{element}'")]
+    #[error("Missing required attribute '{attribute}' on element '<{element}>'")]
     MissingAttribute { element: String, attribute: String },
+
+    #[error("Missing required attribute '{attribute}' on element '<{element}>' in file {file}")]
+    MissingAttributeWithContext {
+        element: String,
+        attribute: String,
+        file: String,
+    },
 
     #[error("Type coercion failed for attribute '{attribute}' with value '{value}' (expected {expected_type})")]
     TypeCoercion {
@@ -17,11 +24,14 @@ pub enum ParseError {
         expected_type: &'static str,
     },
 
-    #[error("Unexpected element '{child}' in '{parent}'")]
+    #[error("Unexpected element '<{child}>' in '<{parent}>'")]
     UnexpectedElement { parent: String, child: String },
 
     #[error("Invalid substitution syntax: {0}")]
     InvalidSubstitution(String),
+
+    #[error("Invalid substitution in file {file}: {message}")]
+    InvalidSubstitutionWithContext { message: String, file: String },
 
     #[error("File not found: {0}")]
     FileNotFound(String),
@@ -32,17 +42,22 @@ pub enum ParseError {
 
 #[derive(Error, Debug)]
 pub enum SubstitutionError {
-    #[error("Undefined variable: {0}")]
+    #[error("Undefined variable: '{0}'. Did you forget to declare it with <arg> or <let>?")]
     UndefinedVariable(String),
 
-    #[error("Undefined environment variable: {0}")]
+    #[error(
+        "Undefined environment variable: '{0}'. Make sure the variable is set in your environment."
+    )]
     UndefinedEnvVar(String),
 
-    #[error("Package not found: {0}")]
+    #[error("Package '{0}' not found. Ensure the package is installed and sourced.")]
     PackageNotFound(String),
 
     #[error("Invalid substitution: {0}")]
     InvalidSubstitution(String),
+
+    #[error("Command execution failed: {0}")]
+    CommandFailed(String),
 }
 
 #[derive(Error, Debug)]
