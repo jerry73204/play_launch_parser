@@ -41,6 +41,25 @@ impl LaunchTraverser {
     }
 
     pub fn traverse_file(&mut self, path: &Path) -> Result<()> {
+        // Check file extension and handle non-XML files
+        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+            match ext {
+                "py" => {
+                    log::warn!(
+                        "Skipping Python launch file (not yet supported): {}",
+                        path.display()
+                    );
+                    return Ok(());
+                }
+                "yaml" | "yml" => {
+                    log::info!("Skipping YAML configuration file: {}", path.display());
+                    // YAML files are configuration files, not launch files
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+
         // Set current file in context
         self.context.set_current_file(path.to_path_buf());
 
@@ -75,14 +94,29 @@ impl LaunchTraverser {
         log::info!("Including launch file: {}", resolved_path.display());
 
         // Check if this is a Python launch file
-        if resolved_path.extension().and_then(|s| s.to_str()) == Some("py") {
-            log::warn!(
-                "Skipping Python launch file (not yet supported): {}",
-                resolved_path.display()
-            );
-            // Python launch files require Python runtime to execute
-            // For now, we skip them but could record them in the future
-            return Ok(());
+        // Check file extension and handle non-XML files
+        if let Some(ext) = resolved_path.extension().and_then(|s| s.to_str()) {
+            match ext {
+                "py" => {
+                    log::warn!(
+                        "Skipping Python launch file (not yet supported): {}",
+                        resolved_path.display()
+                    );
+                    // Python launch files require Python runtime to execute
+                    // For now, we skip them but could record them in the future
+                    return Ok(());
+                }
+                "yaml" | "yml" => {
+                    log::info!(
+                        "Skipping YAML configuration file: {}",
+                        resolved_path.display()
+                    );
+                    // YAML files are configuration files, not launch files
+                    // They are typically loaded as parameter files, not executed
+                    return Ok(());
+                }
+                _ => {}
+            }
         }
 
         // Create a new context for the included file
@@ -207,13 +241,13 @@ impl LaunchTraverser {
                 self.context
                     .set_configuration(let_action.name, let_action.value);
             }
-            "set_env" => {
+            "set_env" | "set-env" => {
                 let set_env = SetEnvAction::from_entity(entity)?;
                 let value = resolve_substitutions(&set_env.value, &self.context)
                     .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
                 self.context.set_environment_variable(set_env.name, value);
             }
-            "unset_env" => {
+            "unset_env" | "unset-env" => {
                 let unset_env = UnsetEnvAction::from_entity(entity)?;
                 self.context.unset_environment_variable(&unset_env.name);
             }
@@ -243,6 +277,25 @@ impl LaunchTraverser {
             }
             "pop-ros-namespace" => {
                 self.context.pop_namespace();
+            }
+            "node_container" | "node-container" => {
+                // Parse node container similar to regular node
+                // Containers are special nodes that load composable node plugins
+                // NodeAction will handle composable_node children gracefully
+                let node_action = NodeAction::from_entity(entity)?;
+                let record = CommandGenerator::generate_node_record(&node_action, &self.context)
+                    .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
+                self.records.push(record);
+            }
+            "composable_node" | "composable-node" => {
+                // Composable nodes are loaded into containers
+                // For now, we log and skip them when they appear standalone
+                log::info!("Skipping standalone composable_node (should be in node_container)");
+            }
+            "load_composable_node" | "load-composable-node" => {
+                // Action to dynamically load composable nodes
+                // For now, we log and skip
+                log::info!("Skipping load_composable_node action (not yet supported)");
             }
             other => {
                 log::warn!("Unsupported action type: {}", other);

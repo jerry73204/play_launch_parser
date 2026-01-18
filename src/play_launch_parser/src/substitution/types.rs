@@ -64,6 +64,10 @@ impl Substitution {
             }
             Substitution::EnvironmentVariable { name, default } => {
                 let name_str = resolve_substitutions(name, context)?;
+                // Check context environment first, then process environment
+                if let Some(value) = context.get_environment_variable(&name_str) {
+                    return Ok(value);
+                }
                 std::env::var(&name_str).or_else(|_| {
                     if let Some(default_subs) = default {
                         resolve_substitutions(default_subs, context)
@@ -75,6 +79,10 @@ impl Substitution {
             Substitution::OptionalEnvironmentVariable { name, default } => {
                 // Never errors - returns default or empty string if not set
                 let name_str = resolve_substitutions(name, context)?;
+                // Check context environment first, then process environment
+                if let Some(value) = context.get_environment_variable(&name_str) {
+                    return Ok(value);
+                }
                 Ok(std::env::var(&name_str).unwrap_or_else(|_| {
                     if let Some(default_subs) = default {
                         resolve_substitutions(default_subs, context)

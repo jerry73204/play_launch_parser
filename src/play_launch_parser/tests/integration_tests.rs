@@ -830,3 +830,206 @@ fn test_nested_variable_substitutions() {
     println!("Nested variable substitution test passed!");
     println!("exec_path value: {}", exec_path_param[1].as_str().unwrap());
 }
+
+// ============================================================================
+// Phase 5.1 Feature Tests
+// ============================================================================
+
+#[test]
+fn test_yaml_file_skip() {
+    // Create a temporary YAML file
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let yaml_content = r#"
+some_param: value
+another_param: 123
+"#;
+    temp_file.write_all(yaml_content.as_bytes()).unwrap();
+
+    // Rename to .yaml extension
+    let yaml_path = temp_file.path().with_extension("yaml");
+    std::fs::copy(temp_file.path(), &yaml_path).unwrap();
+
+    // Parse should succeed and skip the file gracefully
+    let args = HashMap::new();
+    let result = parse_launch_file(&yaml_path, args);
+
+    // Should succeed with empty records
+    assert!(result.is_ok(), "YAML file should be skipped without error");
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Should have no nodes (file was skipped)
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 0, "YAML file should produce no nodes");
+
+    // Cleanup
+    std::fs::remove_file(&yaml_path).ok();
+}
+
+#[test]
+fn test_set_env_hyphenated() {
+    // Create temporary launch file with set-env (hyphenated)
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <set-env name="MY_TEST_VAR" value="test_value" />
+    <node pkg="demo_nodes_cpp" exec="talker" name="test_node">
+        <env name="MY_TEST_VAR" value="$(env MY_TEST_VAR)" />
+    </node>
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(temp_file.path(), args);
+
+    assert!(
+        result.is_ok(),
+        "set-env should work with hyphens: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    // Check node has the environment variable
+    let node = &nodes[0];
+    let env = node["env"].as_array().unwrap();
+    assert!(!env.is_empty(), "Node should have env vars");
+
+    // Find MY_TEST_VAR
+    let test_var = env
+        .iter()
+        .find(|e| e[0].as_str() == Some("MY_TEST_VAR"))
+        .expect("Should have MY_TEST_VAR");
+
+    assert_eq!(
+        test_var[1].as_str().unwrap(),
+        "test_value",
+        "Environment variable should be resolved"
+    );
+}
+
+#[test]
+fn test_unset_env_hyphenated() {
+    // Set an environment variable first
+    std::env::set_var("TEST_UNSET_VAR", "initial_value");
+
+    // Create temporary launch file with unset-env (hyphenated)
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <unset-env name="TEST_UNSET_VAR" />
+    <node pkg="demo_nodes_cpp" exec="talker" name="test_node" />
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(temp_file.path(), args);
+
+    assert!(
+        result.is_ok(),
+        "unset-env should work with hyphens: {:?}",
+        result.err()
+    );
+
+    // Note: unset-env affects the context during parsing
+    // It doesn't directly show in the output, but should not cause errors
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+}
+
+#[test]
+fn test_node_container() {
+    // Create temporary launch file with node_container (underscore)
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <node_container pkg="rclcpp_components" exec="component_container" name="my_container" namespace="/test" />
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(temp_file.path(), args);
+
+    assert!(
+        result.is_ok(),
+        "node_container should parse: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    assert_eq!(nodes.len(), 1, "Should have 1 node (container)");
+
+    // Check container node details
+    let node = &nodes[0];
+    assert_eq!(node["package"].as_str().unwrap(), "rclcpp_components");
+    assert_eq!(node["executable"].as_str().unwrap(), "component_container");
+    assert_eq!(node["name"].as_str().unwrap(), "my_container");
+    assert_eq!(node["namespace"].as_str().unwrap(), "/test");
+}
+
+#[test]
+fn test_node_container_hyphenated() {
+    // Create temporary launch file with node-container (hyphenated)
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <node-container pkg="rclcpp_components" exec="component_container" name="my_container" namespace="/test" />
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(temp_file.path(), args);
+
+    assert!(
+        result.is_ok(),
+        "node-container should parse: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    assert_eq!(nodes.len(), 1, "Should have 1 node (container)");
+}
+
+#[test]
+fn test_composable_node_in_container() {
+    // Create temporary launch file with composable_node inside node_container
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <node_container pkg="rclcpp_components" exec="component_container" name="my_container">
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Talker" name="talker" />
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Listener" name="listener" />
+    </node_container>
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(temp_file.path(), args);
+
+    assert!(
+        result.is_ok(),
+        "node_container with composable_node children should parse: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    // Currently we just parse the container as a node
+    // composable_node children are logged but not yet captured
+    assert_eq!(nodes.len(), 1, "Should have 1 node (container)");
+    assert_eq!(nodes[0]["name"].as_str().unwrap(), "my_container");
+}

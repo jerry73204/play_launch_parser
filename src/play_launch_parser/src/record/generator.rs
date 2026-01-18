@@ -75,7 +75,14 @@ impl CommandGenerator {
         // Node-specific environment takes precedence
         let mut merged_env = context.environment().clone();
         for (key, value) in &node.environment {
-            merged_env.insert(key.clone(), value.clone());
+            // Resolve any substitutions in the environment value
+            let substitutions = crate::substitution::parse_substitutions(value).map_err(|e| {
+                GenerationError::Substitution(crate::error::SubstitutionError::InvalidSubstitution(
+                    e.to_string(),
+                ))
+            })?;
+            let resolved_value = resolve_substitutions(&substitutions, context)?;
+            merged_env.insert(key.clone(), resolved_value);
         }
 
         let env = if merged_env.is_empty() {
@@ -196,7 +203,14 @@ impl CommandGenerator {
         // Executable-specific environment takes precedence
         let mut merged_env = context.environment().clone();
         for (key, value) in &exec.environment {
-            merged_env.insert(key.clone(), value.clone());
+            // Resolve any substitutions in the environment value
+            let substitutions = crate::substitution::parse_substitutions(value).map_err(|e| {
+                GenerationError::Substitution(crate::error::SubstitutionError::InvalidSubstitution(
+                    e.to_string(),
+                ))
+            })?;
+            let resolved_value = resolve_substitutions(&substitutions, context)?;
+            merged_env.insert(key.clone(), resolved_value);
         }
 
         let env = if merged_env.is_empty() {
