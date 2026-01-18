@@ -264,8 +264,6 @@ Comprehensive feature list for the play_launch_parser project.
 ## 9. Python Launch File Support 📝
 
 **Status**: Phase 5.2 (Planned)
-**Architecture**: See `docs/PYTHON_WORKSPACE_ARCHITECTURE.md`
-**Roadmap**: See `docs/roadmap/phase-5-PYTHON_SUPPORT.md`
 
 ### 9.1 Infrastructure 📝
 | Feature | Status | Priority | Notes |
@@ -337,20 +335,20 @@ Comprehensive feature list for the play_launch_parser project.
 ### 10.1 Architecture Docs ✅
 | Document | Status | Notes |
 |----------|--------|-------|
-| ROS2_LAUNCH_ARCHITECTURE.md | ✅ | System design |
-| DUMP_LAUNCH_ANALYSIS.md | ✅ | Performance analysis |
-| RECORD_JSON_FORMAT.md | ✅ | Output format |
-| RESEARCH_SUMMARY.md | ✅ | Research findings |
-| **PYTHON_WORKSPACE_ARCHITECTURE.md** | ✅ | **Python design** |
+| ros2_launch_architecture.md | ✅ | System design |
+| dump_launch_analysis.md | ✅ | Performance analysis |
+| record_json_format.md | ✅ | Output format |
+| research_summary.md | ✅ | Research findings |
+| **python_workspace_architecture.md** | ✅ | **Python design** |
 
 ### 10.2 Roadmap Docs ✅
 | Document | Status | Notes |
 |----------|--------|-------|
-| IMPLEMENTATION_STATUS.md | ✅ | Overall status |
-| phase-1-PROJECT_SETUP.md | ✅ | Complete |
-| phase-2-MVP_XML_PARSER.md | ✅ | Complete |
-| phase-3-ADVANCED_XML_FEATURES.md | ✅ | Complete |
-| **phase-5-PYTHON_SUPPORT.md** | ✅ | **Updated** |
+| implementation_status.md | ✅ | Overall status |
+| phase-1-project_setup.md | ✅ | Complete |
+| phase-2-mvp_xml_parser.md | ✅ | Complete |
+| phase-3-advanced_xml_features.md | ✅ | Complete |
+| **phase-5-python_support.md** | ✅ | **Updated** |
 
 ### 10.3 User Documentation 📝
 | Document | Status | Priority | Notes |
@@ -429,10 +427,3 @@ Comprehensive feature list for the play_launch_parser project.
 - **Target Coverage**: 95-100% Autoware
 - **Test Goal**: 300+ tests
 
----
-
-## References
-
-- **Architecture**: `docs/PYTHON_WORKSPACE_ARCHITECTURE.md`
-- **Roadmap**: `docs/roadmap/phase-5-PYTHON_SUPPORT.md`
-- **Implementation Status**: `docs/roadmap/IMPLEMENTATION_STATUS.md`

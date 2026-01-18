@@ -84,19 +84,19 @@ Establish the foundational project structure, tooling, and architecture design f
 
 **Subtasks**:
 - [x] 1.3.1: Create CLAUDE.md with project overview and guidelines
-- [x] 1.3.2: Create this roadmap file (phase-1-PROJECT_SETUP.md)
+- [x] 1.3.2: Create this roadmap file (phase-1-project_setup.md)
 - [x] 1.3.3: Create README.md with user-facing documentation
-- [x] 1.3.4: Create docs/ROS2_LAUNCH_ARCHITECTURE.md analyzing ROS 2 launch system
-- [x] 1.3.5: Create docs/DUMP_LAUNCH_ANALYSIS.md analyzing dump_launch implementation
-- [x] 1.3.6: Create docs/RECORD_JSON_FORMAT.md specifying record.json format
+- [x] 1.3.4: Create docs/ros2_launch_architecture.md analyzing ROS 2 launch system
+- [x] 1.3.5: Create docs/dump_launch_analysis.md analyzing dump_launch implementation
+- [x] 1.3.6: Create docs/record_json_format.md specifying record.json format
 
 **Files Created**:
 - `/CLAUDE.md` - Guide for Claude Code (5,489 bytes) ✅
-- `/docs/roadmap/phase-1-PROJECT_SETUP.md` - This file ✅
+- `/docs/roadmap/phase-1-project_setup.md` - This file ✅
 - `/README.md` - User-facing documentation (5,552 bytes) ✅
-- `/docs/ROS2_LAUNCH_ARCHITECTURE.md` - ROS 2 launch architecture (880 lines) ✅
-- `/docs/DUMP_LAUNCH_ANALYSIS.md` - dump_launch analysis (776 lines) ✅
-- `/docs/RECORD_JSON_FORMAT.md` - record.json specification (731 lines) ✅
+- `/docs/ros2_launch_architecture.md` - ROS 2 launch architecture (880 lines) ✅
+- `/docs/dump_launch_analysis.md` - dump_launch analysis (776 lines) ✅
+- `/docs/record_json_format.md` - record.json specification (731 lines) ✅
 
 **Documentation Summary**:
 - Total: 2,387 lines of comprehensive technical documentation

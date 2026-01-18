@@ -1277,7 +1277,7 @@ fi
 - [ ] README for package
 - [ ] API documentation (rustdoc)
 - [ ] Usage examples
-- [ ] Updated FEATURE_LIST.md
+- [ ] Updated feature_list.md
 
 **Tests**:
 - [ ] All unit tests passing
@@ -1340,12 +1340,3 @@ fi
 
 **Buffer**: +5 days for unexpected issues
 
----
-
-## References
-
-- **Feature List**: `docs/FEATURE_LIST.md`
-- **ROS 2 Architecture**: `docs/ROS2_LAUNCH_ARCHITECTURE.md`
-- **dump_launch Analysis**: `docs/DUMP_LAUNCH_ANALYSIS.md`
-- **record.json Spec**: `docs/RECORD_JSON_FORMAT.md`
-- **Research Summary**: `docs/RESEARCH_SUMMARY.md`

@@ -38,8 +38,6 @@ Achieve **full Autoware compatibility** through Python launch file support via p
 
 ### Architecture
 
-**See**: `docs/PYTHON_WORKSPACE_ARCHITECTURE.md`
-
 **Strategy**: Embed Python interpreter, mock `launch` API, capture nodes on construction
 
 ```
@@ -389,7 +387,6 @@ cargo clippy --features python
 
 ## References
 
-- **Architecture**: `docs/PYTHON_WORKSPACE_ARCHITECTURE.md`
 - **pyo3 Docs**: https://pyo3.rs/
 - **ROS 2 Launch**: https://github.com/ros2/launch
 - **Autoware**: https://github.com/autowarefoundation/autoware.universe

@@ -41,7 +41,7 @@ play_launch_parser/
 │       └── tests/
 │           └── python_tests.rs   # Python integration tests
 └── docs/
-    └── PYTHON_WORKSPACE_ARCHITECTURE.md
+    └── python_workspace_architecture.md
 ```
 
 ---

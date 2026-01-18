@@ -463,7 +463,4 @@ sha2 = "0.10"             # For anon name generation
 
 ## References
 
-- [Implementation Status](./IMPLEMENTATION_STATUS.md)
-- [Feature List](../FEATURE_LIST.md)
-- [ROS 2 Launch Architecture](../ROS2_LAUNCH_ARCHITECTURE.md)
 - [launch_ros Source Code](https://github.com/ros2/launch_ros)

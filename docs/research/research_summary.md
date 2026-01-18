@@ -21,7 +21,7 @@ I've completed a thorough analysis of the ROS 2 launch system and the dump_launc
 
 ## Documentation Created
 
-### 1. ROS2_LAUNCH_ARCHITECTURE.md (880 lines)
+### 1. ros2_launch_architecture.md (880 lines)
 
 **Comprehensive analysis of the ROS 2 launch system architecture.**
 
@@ -55,7 +55,7 @@ Execution with LaunchContext
 
 ---
 
-### 2. DUMP_LAUNCH_ANALYSIS.md (776 lines)
+### 2. dump_launch_analysis.md (776 lines)
 
 **In-depth analysis of the dump_launch Python implementation.**
 
@@ -95,7 +95,7 @@ Execution with LaunchContext
 
 ---
 
-### 3. RECORD_JSON_FORMAT.md (731 lines)
+### 3. record_json_format.md (731 lines)
 
 **Complete specification of the record.json format.**
 
