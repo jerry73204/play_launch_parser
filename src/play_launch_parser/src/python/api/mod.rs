@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod conditions;
 pub mod launch;
+pub mod launch_description_sources;
 pub mod launch_ros;
 pub mod substitutions;
 
@@ -33,6 +34,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_actions.add_class::<actions::ExecuteProcess>()?;
     launch_actions.add_class::<actions::TimerAction>()?;
     launch_actions.add_class::<actions::OpaqueFunction>()?;
+    launch_actions.add_class::<actions::IncludeLaunchDescription>()?;
 
     // Create launch.substitutions submodule
     let launch_subs = PyModule::new(py, "launch.substitutions")?;
@@ -51,10 +53,17 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_conditions.add_class::<conditions::LaunchConfigurationEquals>()?;
     launch_conditions.add_class::<conditions::LaunchConfigurationNotEquals>()?;
 
+    // Create launch.launch_description_sources submodule
+    let launch_sources = PyModule::new(py, "launch.launch_description_sources")?;
+    launch_sources.add_class::<launch_description_sources::PythonLaunchDescriptionSource>()?;
+    launch_sources.add_class::<launch_description_sources::XMLLaunchDescriptionSource>()?;
+    launch_sources.add_class::<launch_description_sources::YAMLLaunchDescriptionSource>()?;
+
     // Add submodules to parent module as attributes
     launch_mod.add_submodule(launch_actions)?;
     launch_mod.add_submodule(launch_subs)?;
     launch_mod.add_submodule(launch_conditions)?;
+    launch_mod.add_submodule(launch_sources)?;
 
     // Create launch_ros module
     let launch_ros_mod = PyModule::new(py, "launch_ros")?;
@@ -80,6 +89,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     modules.set_item("launch.actions", launch_actions)?;
     modules.set_item("launch.substitutions", launch_subs)?;
     modules.set_item("launch.conditions", launch_conditions)?;
+    modules.set_item("launch.launch_description_sources", launch_sources)?;
     modules.set_item("launch_ros", launch_ros_mod)?;
     modules.set_item("launch_ros.actions", launch_ros_actions)?;
     modules.set_item("launch_ros.descriptions", launch_ros_desc)?;

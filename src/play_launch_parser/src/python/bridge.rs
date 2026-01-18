@@ -113,3 +113,14 @@ impl LoadNodeCapture {
 /// Global storage for captured load_nodes (thread-safe)
 pub static CAPTURED_LOAD_NODES: Lazy<Arc<Mutex<Vec<LoadNodeCapture>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+
+/// Captured include data from Python
+#[derive(Debug, Clone)]
+pub struct IncludeCapture {
+    pub file_path: String,
+    pub args: Vec<(String, String)>,
+}
+
+/// Global storage for captured includes (thread-safe)
+pub static CAPTURED_INCLUDES: Lazy<Arc<Mutex<Vec<IncludeCapture>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));

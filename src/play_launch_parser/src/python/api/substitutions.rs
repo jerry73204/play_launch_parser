@@ -17,13 +17,23 @@ use pyo3::prelude::*;
 #[derive(Clone)]
 pub struct LaunchConfiguration {
     variable_name: String,
+    #[allow(dead_code)] // Store for API compatibility
+    default: Option<String>,
 }
 
 #[pymethods]
 impl LaunchConfiguration {
     #[new]
-    fn new(variable_name: String) -> Self {
-        Self { variable_name }
+    #[pyo3(signature = (variable_name, *, default=None, **_kwargs))]
+    fn new(
+        variable_name: String,
+        default: Option<String>,
+        _kwargs: Option<&pyo3::types::PyDict>,
+    ) -> Self {
+        Self {
+            variable_name,
+            default,
+        }
     }
 
     fn __str__(&self) -> String {

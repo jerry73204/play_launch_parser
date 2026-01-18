@@ -92,18 +92,46 @@ impl LaunchTraverser {
 
         let executor =
             PythonLaunchExecutor::new().map_err(|e| ParseError::PythonError(e.to_string()))?;
-        let (nodes, containers, load_nodes) = executor.execute_launch_file(path, args)?;
+        let (nodes, containers, load_nodes, includes) = executor.execute_launch_file(path, args)?;
 
         log::info!(
-            "Captured {} nodes, {} containers, {} composable nodes from Python launch file",
+            "Captured {} nodes, {} containers, {} composable nodes, {} includes from Python launch file",
             nodes.len(),
             containers.len(),
-            load_nodes.len()
+            load_nodes.len(),
+            includes.len()
         );
 
         self.records.extend(nodes);
         self.containers.extend(containers);
         self.load_nodes.extend(load_nodes);
+
+        // Process includes recursively
+        for include in includes {
+            log::debug!("Processing Python include: {}", include.file_path);
+
+            // Convert args to HashMap
+            let mut include_args = args.clone();
+            for (key, value) in include.args {
+                include_args.insert(key, value);
+            }
+
+            // Resolve the include file path (handle relative paths)
+            let include_path = Path::new(&include.file_path);
+            let resolved_include_path = if include_path.is_relative() {
+                // Resolve relative to the current Python file
+                if let Some(parent_dir) = path.parent() {
+                    parent_dir.join(include_path)
+                } else {
+                    include_path.to_path_buf()
+                }
+            } else {
+                include_path.to_path_buf()
+            };
+
+            // Recursively execute the included Python file
+            self.execute_python_file(&resolved_include_path, &include_args)?;
+        }
 
         Ok(())
     }

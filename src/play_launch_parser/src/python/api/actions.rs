@@ -2,6 +2,7 @@
 
 #![allow(non_local_definitions)] // pyo3 macros generate non-local impls
 
+use crate::python::bridge::CAPTURED_INCLUDES;
 use pyo3::prelude::*;
 
 /// Mock DeclareLaunchArgument action
@@ -298,5 +299,120 @@ impl OpaqueFunction {
 
     fn __repr__(&self) -> String {
         "OpaqueFunction(...)".to_string()
+    }
+}
+
+/// Mock IncludeLaunchDescription action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import IncludeLaunchDescription
+/// from launch.launch_description_sources import PythonLaunchDescriptionSource
+///
+/// include = IncludeLaunchDescription(
+///     PythonLaunchDescriptionSource([path]),
+///     launch_arguments={'arg': 'value'}.items()
+/// )
+/// ```
+///
+/// Includes another launch file (Python, XML, or YAML)
+#[pyclass]
+#[derive(Clone)]
+pub struct IncludeLaunchDescription {
+    #[allow(dead_code)] // Stored for API compatibility, used during construction
+    launch_description_source: PyObject,
+    #[allow(dead_code)] // Stored for API compatibility, used during construction
+    launch_arguments: Vec<(String, String)>,
+}
+
+#[pymethods]
+impl IncludeLaunchDescription {
+    #[new]
+    #[pyo3(signature = (launch_description_source, *, launch_arguments=None, **_kwargs))]
+    fn new(
+        py: Python,
+        launch_description_source: PyObject,
+        launch_arguments: Option<PyObject>,
+        _kwargs: Option<&pyo3::types::PyDict>,
+    ) -> PyResult<Self> {
+        // Parse launch_arguments
+        let mut args = Vec::new();
+        if let Some(launch_args_obj) = launch_arguments {
+            // Try to extract as dict
+            if let Ok(dict) = launch_args_obj.downcast::<pyo3::types::PyDict>(py) {
+                for (key, value) in dict.iter() {
+                    let key_str = key.extract::<String>()?;
+                    // Try to extract value as string, or call __str__ for substitutions
+                    let value_str = if let Ok(s) = value.extract::<String>() {
+                        s
+                    } else if let Ok(str_result) = value.call_method0("__str__") {
+                        str_result.extract::<String>()?
+                    } else {
+                        value.to_string()
+                    };
+                    args.push((key_str, value_str));
+                }
+            }
+            // Try to extract as list/iterator of tuples
+            else if let Ok(iter) = launch_args_obj.as_ref(py).iter() {
+                for item in iter {
+                    let item = item?;
+                    if let Ok(tuple) = item.downcast::<pyo3::types::PyTuple>() {
+                        if tuple.len() == 2 {
+                            let key = tuple.get_item(0)?.extract::<String>()?;
+                            let value_obj = tuple.get_item(1)?;
+                            // Try to extract value as string, or call __str__ for substitutions
+                            let value = if let Ok(s) = value_obj.extract::<String>() {
+                                s
+                            } else if let Ok(str_result) = value_obj.call_method0("__str__") {
+                                str_result.extract::<String>()?
+                            } else {
+                                value_obj.to_string()
+                            };
+                            args.push((key, value));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Extract file path from launch_description_source
+        let file_path = if let Ok(path_str) =
+            launch_description_source.call_method0(py, "get_launch_file_path")
+        {
+            path_str.extract::<String>(py)?
+        } else {
+            // Fallback - try direct string extraction
+            launch_description_source
+                .extract::<String>(py)
+                .unwrap_or_else(|_| "unknown".to_string())
+        };
+
+        // Capture the include request
+        {
+            let mut includes = CAPTURED_INCLUDES.lock().unwrap();
+            includes.push(crate::python::bridge::IncludeCapture {
+                file_path: file_path.clone(),
+                args: args.clone(),
+            });
+        }
+
+        log::debug!(
+            "Python Launch IncludeLaunchDescription: {} with {} args",
+            file_path,
+            args.len()
+        );
+
+        Ok(Self {
+            launch_description_source,
+            launch_arguments: args,
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "IncludeLaunchDescription({} args)",
+            self.launch_arguments.len()
+        )
     }
 }

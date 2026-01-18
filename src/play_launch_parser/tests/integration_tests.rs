@@ -1595,3 +1595,77 @@ fn test_parse_python_conditions() {
         "Should NOT have debug_listener when enable_debug=false"
     );
 }
+
+#[test]
+#[cfg(feature = "python")]
+fn test_parse_python_include() {
+    let fixture = get_fixture_path("test_python_include.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    // Test with custom launch arguments
+    let mut args = HashMap::new();
+    args.insert("node_name".to_string(), "my_included_node".to_string());
+    args.insert("param_value".to_string(), "my_custom_value".to_string());
+
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file with includes should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    // Debug: print node names
+    eprintln!("Found {} nodes:", nodes.len());
+    for node in nodes {
+        eprintln!("  - {}", node["name"].as_str().unwrap_or("no name"));
+    }
+
+    // Should have 2 nodes: 1 from main file + 1 from included file
+    assert_eq!(nodes.len(), 2, "Should have 2 nodes (1 main + 1 included)");
+
+    // Check for the main node
+    let main_node = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("main_node"));
+    assert!(main_node.is_some(), "Should have main_node from main file");
+    let main_node = main_node.unwrap();
+    assert_eq!(main_node["package"].as_str().unwrap(), "main_pkg");
+    assert_eq!(main_node["executable"].as_str().unwrap(), "main_node");
+    assert_eq!(main_node["namespace"].as_str().unwrap(), "/main");
+
+    // Check for the included node (name will be a substitution)
+    let included_node = nodes
+        .iter()
+        .find(|n| n["package"].as_str() == Some("included_pkg"));
+    assert!(
+        included_node.is_some(),
+        "Should have included_pkg node from included file"
+    );
+    let included_node = included_node.unwrap();
+    assert_eq!(included_node["package"].as_str().unwrap(), "included_pkg");
+    assert_eq!(
+        included_node["executable"].as_str().unwrap(),
+        "included_node"
+    );
+    assert_eq!(included_node["namespace"].as_str().unwrap(), "/included");
+    // The name should be a LaunchConfiguration substitution
+    assert_eq!(included_node["name"].as_str().unwrap(), "$(var node_name)");
+
+    // Check that launch arguments were passed to included file
+    // The parameter value will also be a substitution
+    let params = included_node["params"].as_array().unwrap();
+    let has_param = params.iter().any(|p| {
+        let tuple = p.as_array().unwrap();
+        tuple[0].as_str() == Some("included_param")
+            && tuple[1].as_str() == Some("$(var param_value)")
+    });
+    assert!(
+        has_param,
+        "Included node should have included_param with substitution"
+    );
+}

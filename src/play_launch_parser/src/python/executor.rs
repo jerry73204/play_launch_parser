@@ -8,7 +8,8 @@ use std::path::Path;
 
 use super::api;
 use super::bridge::{
-    CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES, CAPTURED_NODES, LAUNCH_CONFIGURATIONS,
+    IncludeCapture, CAPTURED_CONTAINERS, CAPTURED_INCLUDES, CAPTURED_LOAD_NODES, CAPTURED_NODES,
+    LAUNCH_CONFIGURATIONS,
 };
 
 /// Python launch file executor
@@ -32,7 +33,8 @@ impl PythonLaunchExecutor {
     ///
     /// # Returns
     ///
-    /// Tuple of (nodes, containers, load_nodes) captured during execution
+    /// Tuple of (nodes, containers, load_nodes, includes) captured during execution
+    #[allow(clippy::type_complexity)]
     pub fn execute_launch_file(
         &self,
         path: &Path,
@@ -41,12 +43,14 @@ impl PythonLaunchExecutor {
         Vec<NodeRecord>,
         Vec<ComposableNodeContainerRecord>,
         Vec<LoadNodeRecord>,
+        Vec<IncludeCapture>,
     )> {
         let result = Python::with_gil(|py| {
             // Clear previous captures
             CAPTURED_NODES.lock().unwrap().clear();
             CAPTURED_CONTAINERS.lock().unwrap().clear();
             CAPTURED_LOAD_NODES.lock().unwrap().clear();
+            CAPTURED_INCLUDES.lock().unwrap().clear();
 
             // Store launch configurations for condition evaluation
             {
@@ -111,7 +115,9 @@ impl PythonLaunchExecutor {
                 .collect::<Result<Vec<_>>>()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-            Ok((nodes, containers, load_nodes))
+            let includes = CAPTURED_INCLUDES.lock().unwrap().clone();
+
+            Ok((nodes, containers, load_nodes, includes))
         });
 
         result.map_err(|e: PyErr| ParseError::PythonError(e.to_string()))
