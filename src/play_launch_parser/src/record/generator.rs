@@ -71,10 +71,35 @@ impl CommandGenerator {
             .collect();
         let remaps = remaps?;
 
-        let env = if node.environment.is_empty() {
+        // Merge context environment with node-specific environment
+        // Node-specific environment takes precedence
+        let mut merged_env = context.environment().clone();
+        for (key, value) in &node.environment {
+            merged_env.insert(key.clone(), value.clone());
+        }
+
+        let env = if merged_env.is_empty() {
             None
         } else {
-            Some(node.environment.clone())
+            Some(
+                merged_env
+                    .into_iter()
+                    .map(|(k, v)| (k, v))
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        // Get global parameters from context
+        let global_params = if context.global_parameters().is_empty() {
+            None
+        } else {
+            Some(
+                context
+                    .global_parameters()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+            )
         };
 
         Ok(NodeRecord {
@@ -92,7 +117,7 @@ impl CommandGenerator {
             env,
             respawn: Some(node.respawn),
             respawn_delay: node.respawn_delay,
-            global_params: None, // TODO: Phase 3
+            global_params,
         })
     }
 
@@ -172,10 +197,22 @@ impl CommandGenerator {
             Some(cmd_str.clone())
         };
 
-        let env = if exec.environment.is_empty() {
+        // Merge context environment with executable-specific environment
+        // Executable-specific environment takes precedence
+        let mut merged_env = context.environment().clone();
+        for (key, value) in &exec.environment {
+            merged_env.insert(key.clone(), value.clone());
+        }
+
+        let env = if merged_env.is_empty() {
             None
         } else {
-            Some(exec.environment.clone())
+            Some(
+                merged_env
+                    .into_iter()
+                    .map(|(k, v)| (k, v))
+                    .collect::<Vec<_>>(),
+            )
         };
 
         Ok(NodeRecord {

@@ -71,6 +71,23 @@ fn parse_single_substitution(sub_type: &str, args: Option<&str>) -> Result<Subst
             let default = parts.get(1).map(|s| s.to_string());
             Ok(Substitution::EnvironmentVariable { name, default })
         }
+        "optenv" => {
+            let args_str = args.ok_or_else(|| {
+                ParseError::InvalidSubstitution("optenv requires an argument".to_string())
+            })?;
+            let parts: Vec<&str> = args_str.splitn(2, ' ').map(|s| s.trim()).collect();
+            let name = parts[0].to_string();
+            let default = parts.get(1).map(|s| s.to_string());
+            Ok(Substitution::OptionalEnvironmentVariable { name, default })
+        }
+        "command" => {
+            let cmd = args
+                .ok_or_else(|| {
+                    ParseError::InvalidSubstitution("command requires an argument".to_string())
+                })?
+                .to_string();
+            Ok(Substitution::Command(cmd))
+        }
         "find-pkg-share" => {
             let package = args
                 .ok_or_else(|| {
@@ -207,5 +224,81 @@ mod tests {
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[0], Substitution::Text("node_".to_string()));
         assert_eq!(subs[1], Substitution::Anon("suffix".to_string()));
+    }
+
+    #[test]
+    fn test_parse_optenv_without_default() {
+        let subs = parse_substitutions("$(optenv MY_VAR)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(
+            subs[0],
+            Substitution::OptionalEnvironmentVariable {
+                name: "MY_VAR".to_string(),
+                default: None
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_optenv_with_default() {
+        let subs = parse_substitutions("$(optenv MY_VAR default_value)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(
+            subs[0],
+            Substitution::OptionalEnvironmentVariable {
+                name: "MY_VAR".to_string(),
+                default: Some("default_value".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_optenv_in_string() {
+        let subs = parse_substitutions("prefix_$(optenv VAR suffix)_end").unwrap();
+        assert_eq!(subs.len(), 3);
+        assert_eq!(subs[0], Substitution::Text("prefix_".to_string()));
+        assert_eq!(
+            subs[1],
+            Substitution::OptionalEnvironmentVariable {
+                name: "VAR".to_string(),
+                default: Some("suffix".to_string())
+            }
+        );
+        assert_eq!(subs[2], Substitution::Text("_end".to_string()));
+    }
+
+    #[test]
+    fn test_parse_command() {
+        let subs = parse_substitutions("$(command echo hello)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0], Substitution::Command("echo hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_command_with_args() {
+        let subs = parse_substitutions("$(command ls -la)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0], Substitution::Command("ls -la".to_string()));
+    }
+
+    #[test]
+    fn test_parse_command_in_string() {
+        let subs = parse_substitutions("Version: $(command cat /etc/os-release)").unwrap();
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[0], Substitution::Text("Version: ".to_string()));
+        assert_eq!(
+            subs[1],
+            Substitution::Command("cat /etc/os-release".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_command_with_pipe() {
+        let subs = parse_substitutions("$(command echo test | tr a-z A-Z)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(
+            subs[0],
+            Substitution::Command("echo test | tr a-z A-Z".to_string())
+        );
     }
 }

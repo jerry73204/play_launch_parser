@@ -8,13 +8,16 @@ pub mod record;
 pub mod substitution;
 pub mod xml;
 
-use actions::{ArgAction, ExecutableAction, GroupAction, IncludeAction, LetAction, NodeAction};
+use actions::{
+    ArgAction, DeclareArgumentAction, ExecutableAction, GroupAction, IncludeAction, LetAction,
+    NodeAction, SetEnvAction, SetParameterAction, UnsetEnvAction,
+};
 use condition::should_process_entity;
 use error::{ParseError, Result};
 use record::{CommandGenerator, RecordJson};
 use std::collections::HashMap;
 use std::path::Path;
-use substitution::{parse_substitutions, resolve_substitutions, LaunchContext};
+use substitution::{parse_substitutions, resolve_substitutions, ArgumentMetadata, LaunchContext};
 use xml::{Entity, XmlEntity};
 
 /// Launch tree traverser for parsing launch files
@@ -100,6 +103,38 @@ impl LaunchTraverser {
                 let arg = ArgAction::from_entity(entity)?;
                 arg.apply(&mut self.context, &HashMap::new());
             }
+            "declare_argument" => {
+                let declare_arg = DeclareArgumentAction::from_entity(entity)?;
+
+                // Resolve default value if present
+                let default = if let Some(default_subs) = &declare_arg.default {
+                    Some(
+                        resolve_substitutions(default_subs, &self.context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+
+                // Store metadata
+                let metadata = ArgumentMetadata {
+                    name: declare_arg.name.clone(),
+                    default,
+                    description: declare_arg.description.clone(),
+                    choices: declare_arg.choices.clone(),
+                };
+                self.context.declare_argument(metadata);
+
+                // If a default value is provided and the argument is not yet set, apply it
+                if let Some(default_val) = &declare_arg.default {
+                    if self.context.get_configuration(&declare_arg.name).is_none() {
+                        let resolved_default = resolve_substitutions(default_val, &self.context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                        self.context
+                            .set_configuration(declare_arg.name, resolved_default);
+                    }
+                }
+            }
             "node" => {
                 let node = NodeAction::from_entity(entity)?;
                 let record = CommandGenerator::generate_node_record(&node, &self.context)
@@ -141,6 +176,22 @@ impl LaunchTraverser {
                 // Set variable in context (acts like arg)
                 self.context
                     .set_configuration(let_action.name, let_action.value);
+            }
+            "set_env" => {
+                let set_env = SetEnvAction::from_entity(entity)?;
+                let value = resolve_substitutions(&set_env.value, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.set_environment_variable(set_env.name, value);
+            }
+            "unset_env" => {
+                let unset_env = UnsetEnvAction::from_entity(entity)?;
+                self.context.unset_environment_variable(&unset_env.name);
+            }
+            "set_parameter" => {
+                let set_param = SetParameterAction::from_entity(entity)?;
+                let value = resolve_substitutions(&set_param.value, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.set_global_parameter(set_param.name, value);
             }
             "push-ros-namespace" => {
                 // Get namespace from "ns" attribute
@@ -480,5 +531,465 @@ test_node:
         assert_eq!(record.node.len(), 1);
         // Absolute namespace should override parent
         assert_eq!(record.node[0].namespace, Some("/absolute".to_string()));
+    }
+
+    #[test]
+    fn test_set_env_literal() {
+        let xml = r#"<launch>
+            <set_env name="ROS_DOMAIN_ID" value="42" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        // Check that environment was set
+        let env = record.node[0].env.as_ref().unwrap();
+        assert!(env.iter().any(|(k, v)| k == "ROS_DOMAIN_ID" && v == "42"));
+    }
+
+    #[test]
+    fn test_set_env_with_substitution() {
+        let xml = r#"<launch>
+            <arg name="domain_id" default="99" />
+            <set_env name="ROS_DOMAIN_ID" value="$(var domain_id)" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        let env = record.node[0].env.as_ref().unwrap();
+        assert!(env.iter().any(|(k, v)| k == "ROS_DOMAIN_ID" && v == "99"));
+    }
+
+    #[test]
+    fn test_unset_env() {
+        let xml = r#"<launch>
+            <set_env name="VAR1" value="value1" />
+            <set_env name="VAR2" value="value2" />
+            <unset_env name="VAR1" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        let env = record.node[0].env.as_ref().unwrap();
+        // VAR1 should not be present
+        assert!(!env.iter().any(|(k, _)| k == "VAR1"));
+        // VAR2 should be present
+        assert!(env.iter().any(|(k, v)| k == "VAR2" && v == "value2"));
+    }
+
+    #[test]
+    fn test_env_inheritance_in_nodes() {
+        let xml = r#"<launch>
+            <set_env name="GLOBAL_VAR" value="global" />
+            <node pkg="demo_nodes_cpp" exec="talker">
+                <env name="NODE_VAR" value="node_specific" />
+            </node>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        let env = record.node[0].env.as_ref().unwrap();
+        // Both global and node-specific environment should be present
+        assert!(env.iter().any(|(k, v)| k == "GLOBAL_VAR" && v == "global"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "NODE_VAR" && v == "node_specific"));
+    }
+
+    #[test]
+    fn test_node_env_overrides_context() {
+        let xml = r#"<launch>
+            <set_env name="MY_VAR" value="context_value" />
+            <node pkg="demo_nodes_cpp" exec="talker">
+                <env name="MY_VAR" value="node_value" />
+            </node>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        let env = record.node[0].env.as_ref().unwrap();
+        // Node-specific value should override context value
+        let my_var = env.iter().find(|(k, _)| k == "MY_VAR").unwrap();
+        assert_eq!(my_var.1, "node_value");
+    }
+
+    #[test]
+    fn test_env_with_executable() {
+        let xml = r#"<launch>
+            <set_env name="EXEC_VAR" value="exec_value" />
+            <executable cmd="echo" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        let env = record.node[0].env.as_ref().unwrap();
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "EXEC_VAR" && v == "exec_value"));
+    }
+
+    #[test]
+    fn test_declare_argument_with_default() {
+        let xml = r#"<launch>
+            <declare_argument name="my_arg" default="default_value" />
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(var my_arg)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // The default value should be used
+        assert_eq!(record.node[0].name, Some("default_value".to_string()));
+    }
+
+    #[test]
+    fn test_declare_argument_cli_override() {
+        let xml = r#"<launch>
+            <declare_argument name="my_arg" default="default_value" />
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(var my_arg)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let mut cli_args = HashMap::new();
+        cli_args.insert("my_arg".to_string(), "cli_value".to_string());
+
+        let record = parse_launch_file(file.path(), cli_args).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // CLI value should override default
+        assert_eq!(record.node[0].name, Some("cli_value".to_string()));
+    }
+
+    #[test]
+    fn test_declare_argument_without_default() {
+        let xml = r#"<launch>
+            <declare_argument name="required_arg" description="A required argument" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        // This should not crash even though required_arg is declared without a default
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+    }
+
+    #[test]
+    fn test_declare_argument_then_arg() {
+        let xml = r#"<launch>
+            <declare_argument name="my_param" description="Test parameter" />
+            <arg name="my_param" default="set_value" />
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(var my_param)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // Value set by <arg> should be used
+        assert_eq!(record.node[0].name, Some("set_value".to_string()));
+    }
+
+    #[test]
+    fn test_declare_argument_with_description() {
+        let xml = r#"<launch>
+            <declare_argument
+                name="robot_name"
+                default="robot1"
+                description="Name of the robot"
+            />
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(var robot_name)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].name, Some("robot1".to_string()));
+    }
+
+    #[test]
+    fn test_set_parameter_simple() {
+        let xml = r#"<launch>
+            <set_parameter name="use_sim_time" value="true" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        // Check that global parameter was set
+        let global_params = record.node[0].global_params.as_ref().unwrap();
+        assert!(global_params
+            .iter()
+            .any(|(k, v)| k == "use_sim_time" && v == "true"));
+    }
+
+    #[test]
+    fn test_set_parameter_with_substitution() {
+        let xml = r#"<launch>
+            <arg name="sim_mode" default="true" />
+            <set_parameter name="use_sim_time" value="$(var sim_mode)" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        let global_params = record.node[0].global_params.as_ref().unwrap();
+        assert!(global_params
+            .iter()
+            .any(|(k, v)| k == "use_sim_time" && v == "true"));
+    }
+
+    #[test]
+    fn test_multiple_set_parameters() {
+        let xml = r#"<launch>
+            <set_parameter name="use_sim_time" value="true" />
+            <set_parameter name="log_level" value="debug" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        let global_params = record.node[0].global_params.as_ref().unwrap();
+        assert_eq!(global_params.len(), 2);
+        assert!(global_params
+            .iter()
+            .any(|(k, v)| k == "use_sim_time" && v == "true"));
+        assert!(global_params
+            .iter()
+            .any(|(k, v)| k == "log_level" && v == "debug"));
+    }
+
+    #[test]
+    fn test_set_parameter_applies_to_all_nodes() {
+        let xml = r#"<launch>
+            <set_parameter name="use_sim_time" value="true" />
+            <node pkg="demo_nodes_cpp" exec="talker" />
+            <node pkg="demo_nodes_cpp" exec="listener" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 2);
+
+        // Both nodes should have the global parameter
+        for node_record in &record.node {
+            let global_params = node_record.global_params.as_ref().unwrap();
+            assert!(global_params
+                .iter()
+                .any(|(k, v)| k == "use_sim_time" && v == "true"));
+        }
+    }
+
+    #[test]
+    fn test_optenv_with_existing_var() {
+        std::env::set_var("TEST_OPTENV_LAUNCH", "from_env");
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(optenv TEST_OPTENV_LAUNCH)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].name, Some("from_env".to_string()));
+    }
+
+    #[test]
+    fn test_optenv_with_missing_var_no_default() {
+        std::env::remove_var("NONEXISTENT_OPTENV_LAUNCH");
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="node_$(optenv NONEXISTENT_OPTENV_LAUNCH)_end" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // Should use empty string for missing var
+        assert_eq!(record.node[0].name, Some("node__end".to_string()));
+    }
+
+    #[test]
+    fn test_optenv_with_missing_var_with_default() {
+        std::env::remove_var("NONEXISTENT_OPTENV_LAUNCH2");
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(optenv NONEXISTENT_OPTENV_LAUNCH2 default_name)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // Should use default value
+        assert_eq!(record.node[0].name, Some("default_name".to_string()));
+    }
+
+    #[test]
+    fn test_optenv_vs_env_missing_var() {
+        std::env::remove_var("MISSING_TEST_VAR");
+
+        // optenv should work with missing variable
+        let xml_optenv = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(optenv MISSING_TEST_VAR fallback)" />
+        </launch>"#;
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml_optenv.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node[0].name, Some("fallback".to_string()));
+
+        // env without default should error
+        let xml_env = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(env MISSING_TEST_VAR)" />
+        </launch>"#;
+        let mut file2 = NamedTempFile::new().unwrap();
+        file2.write_all(xml_env.as_bytes()).unwrap();
+
+        let result = parse_launch_file(file2.path(), HashMap::new());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_simple() {
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(command echo test_node)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].name, Some("test_node".to_string()));
+    }
+
+    #[test]
+    fn test_command_with_args() {
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(command echo foo bar)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].name, Some("foo bar".to_string()));
+    }
+
+    #[test]
+    fn test_command_output_trimming() {
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(command printf '  test  \n')" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // Output should be trimmed
+        assert_eq!(record.node[0].name, Some("test".to_string()));
+    }
+
+    #[test]
+    fn test_command_in_parameter() {
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker">
+                <param name="hostname" value="$(command hostname)" />
+            </node>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // Should have the hostname parameter with some value
+        let hostname_param = record.node[0]
+            .params
+            .iter()
+            .find(|(k, _)| k == "hostname")
+            .expect("hostname param not found");
+        // Just verify it's not empty
+        assert!(!hostname_param.1.is_empty());
+    }
+
+    #[test]
+    fn test_command_with_pipe() {
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(command echo test | tr a-z A-Z)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].name, Some("TEST".to_string()));
+    }
+
+    #[test]
+    fn test_command_failed() {
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" name="$(command exit 1)" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        // Should fail because the command exits with non-zero status
+        let result = parse_launch_file(file.path(), HashMap::new());
+        assert!(result.is_err());
     }
 }

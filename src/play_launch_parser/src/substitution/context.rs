@@ -3,12 +3,24 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// Metadata for a declared argument
+#[derive(Debug, Clone)]
+pub struct ArgumentMetadata {
+    pub name: String,
+    pub default: Option<String>,
+    pub description: Option<String>,
+    pub choices: Option<Vec<String>>,
+}
+
 /// Launch context holding configurations and state
 #[derive(Debug, Clone)]
 pub struct LaunchContext {
     configurations: HashMap<String, String>,
     current_file: Option<PathBuf>,
     namespace_stack: Vec<String>,
+    environment: HashMap<String, String>,
+    declared_arguments: HashMap<String, ArgumentMetadata>,
+    global_parameters: HashMap<String, String>,
 }
 
 impl LaunchContext {
@@ -17,6 +29,9 @@ impl LaunchContext {
             configurations: HashMap::new(),
             current_file: None,
             namespace_stack: vec!["/".to_string()], // Start with root namespace
+            environment: HashMap::new(),
+            declared_arguments: HashMap::new(),
+            global_parameters: HashMap::new(),
         }
     }
 
@@ -52,6 +67,47 @@ impl LaunchContext {
 
     pub fn configurations(&self) -> &HashMap<String, String> {
         &self.configurations
+    }
+
+    pub fn set_environment_variable(&mut self, name: String, value: String) {
+        self.environment.insert(name, value);
+    }
+
+    pub fn unset_environment_variable(&mut self, name: &str) {
+        self.environment.remove(name);
+    }
+
+    pub fn get_environment_variable(&self, name: &str) -> Option<String> {
+        self.environment.get(name).cloned()
+    }
+
+    pub fn environment(&self) -> &HashMap<String, String> {
+        &self.environment
+    }
+
+    pub fn declare_argument(&mut self, metadata: ArgumentMetadata) {
+        self.declared_arguments
+            .insert(metadata.name.clone(), metadata);
+    }
+
+    pub fn get_argument_metadata(&self, name: &str) -> Option<&ArgumentMetadata> {
+        self.declared_arguments.get(name)
+    }
+
+    pub fn declared_arguments(&self) -> &HashMap<String, ArgumentMetadata> {
+        &self.declared_arguments
+    }
+
+    pub fn set_global_parameter(&mut self, name: String, value: String) {
+        self.global_parameters.insert(name, value);
+    }
+
+    pub fn get_global_parameter(&self, name: &str) -> Option<String> {
+        self.global_parameters.get(name).cloned()
+    }
+
+    pub fn global_parameters(&self) -> &HashMap<String, String> {
+        &self.global_parameters
     }
 
     /// Push a namespace onto the stack
@@ -243,5 +299,115 @@ mod tests {
 
         context.pop_namespace();
         assert_eq!(context.current_namespace(), "/");
+    }
+
+    #[test]
+    fn test_set_environment_variable() {
+        let mut context = LaunchContext::new();
+        context.set_environment_variable("MY_VAR".to_string(), "my_value".to_string());
+        assert_eq!(
+            context.get_environment_variable("MY_VAR"),
+            Some("my_value".to_string())
+        );
+    }
+
+    #[test]
+    fn test_unset_environment_variable() {
+        let mut context = LaunchContext::new();
+        context.set_environment_variable("MY_VAR".to_string(), "my_value".to_string());
+        assert_eq!(
+            context.get_environment_variable("MY_VAR"),
+            Some("my_value".to_string())
+        );
+
+        context.unset_environment_variable("MY_VAR");
+        assert_eq!(context.get_environment_variable("MY_VAR"), None);
+    }
+
+    #[test]
+    fn test_get_nonexistent_environment_variable() {
+        let context = LaunchContext::new();
+        assert_eq!(context.get_environment_variable("NONEXISTENT"), None);
+    }
+
+    #[test]
+    fn test_override_environment_variable() {
+        let mut context = LaunchContext::new();
+        context.set_environment_variable("MY_VAR".to_string(), "value1".to_string());
+        context.set_environment_variable("MY_VAR".to_string(), "value2".to_string());
+        assert_eq!(
+            context.get_environment_variable("MY_VAR"),
+            Some("value2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_declare_argument() {
+        let mut context = LaunchContext::new();
+        let metadata = ArgumentMetadata {
+            name: "my_arg".to_string(),
+            default: Some("default_value".to_string()),
+            description: Some("Test argument".to_string()),
+            choices: None,
+        };
+
+        context.declare_argument(metadata);
+
+        let retrieved = context.get_argument_metadata("my_arg").unwrap();
+        assert_eq!(retrieved.name, "my_arg");
+        assert_eq!(retrieved.default, Some("default_value".to_string()));
+        assert_eq!(retrieved.description, Some("Test argument".to_string()));
+    }
+
+    #[test]
+    fn test_get_nonexistent_argument() {
+        let context = LaunchContext::new();
+        assert!(context.get_argument_metadata("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_declare_argument_with_choices() {
+        let mut context = LaunchContext::new();
+        let metadata = ArgumentMetadata {
+            name: "mode".to_string(),
+            default: Some("fast".to_string()),
+            description: None,
+            choices: Some(vec!["fast".to_string(), "slow".to_string()]),
+        };
+
+        context.declare_argument(metadata);
+
+        let retrieved = context.get_argument_metadata("mode").unwrap();
+        assert_eq!(
+            retrieved.choices,
+            Some(vec!["fast".to_string(), "slow".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_set_global_parameter() {
+        let mut context = LaunchContext::new();
+        context.set_global_parameter("use_sim_time".to_string(), "true".to_string());
+        assert_eq!(
+            context.get_global_parameter("use_sim_time"),
+            Some("true".to_string())
+        );
+    }
+
+    #[test]
+    fn test_get_nonexistent_global_parameter() {
+        let context = LaunchContext::new();
+        assert_eq!(context.get_global_parameter("nonexistent"), None);
+    }
+
+    #[test]
+    fn test_override_global_parameter() {
+        let mut context = LaunchContext::new();
+        context.set_global_parameter("param".to_string(), "value1".to_string());
+        context.set_global_parameter("param".to_string(), "value2".to_string());
+        assert_eq!(
+            context.get_global_parameter("param"),
+            Some("value2".to_string())
+        );
     }
 }
