@@ -34,7 +34,7 @@ pub struct Node {
     name: Option<String>,
     namespace: Option<String>,
     parameters: Vec<PyObject>,
-    remappings: Vec<(String, String)>,
+    remappings: Vec<PyObject>,
     arguments: Vec<String>,
     env_vars: Vec<(String, String)>,
     #[allow(dead_code)] // Used for condition evaluation, not stored in captures
@@ -65,7 +65,7 @@ impl Node {
         name: Option<PyObject>,
         namespace: Option<PyObject>,
         parameters: Option<Vec<PyObject>>,
-        remappings: Option<Vec<(String, String)>>,
+        remappings: Option<Vec<PyObject>>,
         arguments: Option<Vec<String>>,
         env: Option<Vec<(String, String)>>,
         condition: Option<PyObject>,
@@ -168,8 +168,9 @@ impl Node {
 
     /// Capture node to global storage
     fn capture_node(node: &Node) {
-        // Parse parameters from Python objects
+        // Parse parameters and remappings from Python objects
         let parameters = Python::with_gil(|py| node.parse_parameters(py).unwrap_or_default());
+        let remappings = Python::with_gil(|py| node.parse_remappings(py).unwrap_or_default());
 
         let capture = NodeCapture {
             package: node.package.clone(),
@@ -177,7 +178,7 @@ impl Node {
             name: node.name.clone(),
             namespace: node.namespace.clone(),
             parameters,
-            remappings: node.remappings.clone(),
+            remappings,
             arguments: node.arguments.clone(),
             env_vars: node.env_vars.clone(),
         };
@@ -324,6 +325,51 @@ impl Node {
 
         // Final fallback: use repr
         Ok(value.to_string())
+    }
+
+    /// Parse Python remappings to string tuples
+    ///
+    /// Handles:
+    /// - Tuple pairs: `[('old_topic', 'new_topic')]` -> `[("old_topic", "new_topic")]`
+    /// - LaunchConfiguration objects in tuples: `[('topic', LaunchConfiguration('name'))]`
+    /// - Substitutions that need string conversion
+    fn parse_remappings(&self, py: Python) -> PyResult<Vec<(String, String)>> {
+        let mut parsed_remaps = Vec::new();
+
+        for remap_obj in &self.remappings {
+            let remap_any = remap_obj.as_ref(py);
+
+            // Remappings should be tuples of (from, to)
+            if let Ok(remap_tuple) = remap_any.downcast::<pyo3::types::PyTuple>() {
+                if remap_tuple.len() == 2 {
+                    // Extract both elements and convert to strings
+                    // This handles both plain strings and LaunchConfiguration objects
+                    let from_obj = remap_tuple.get_item(0)?;
+                    let to_obj = remap_tuple.get_item(1)?;
+
+                    // Convert to strings (handles LaunchConfiguration via __str__)
+                    let from = if let Ok(s) = from_obj.extract::<String>() {
+                        s
+                    } else if let Ok(str_result) = from_obj.call_method0("__str__") {
+                        str_result.extract::<String>()?
+                    } else {
+                        from_obj.to_string()
+                    };
+
+                    let to = if let Ok(s) = to_obj.extract::<String>() {
+                        s
+                    } else if let Ok(str_result) = to_obj.call_method0("__str__") {
+                        str_result.extract::<String>()?
+                    } else {
+                        to_obj.to_string()
+                    };
+
+                    parsed_remaps.push((from, to));
+                }
+            }
+        }
+
+        Ok(parsed_remaps)
     }
 }
 
@@ -479,7 +525,7 @@ pub struct ComposableNode {
     name: String,
     namespace: Option<String>,
     parameters: Vec<PyObject>,
-    remappings: Vec<(String, String)>,
+    remappings: Vec<PyObject>,
 }
 
 #[pymethods]
@@ -501,7 +547,7 @@ impl ComposableNode {
         name: String,
         namespace: Option<String>,
         parameters: Option<Vec<PyObject>>,
-        remappings: Option<Vec<(String, String)>>,
+        remappings: Option<Vec<PyObject>>,
         _kwargs: Option<&PyDict>,
     ) -> PyResult<Self> {
         Ok(Self {
@@ -524,8 +570,9 @@ impl ComposableNode {
 
 impl ComposableNode {
     fn capture_as_load_node(&self, container_name: &str, container_namespace: &Option<String>) {
-        // Parse parameters from Python objects (reuse Node's logic)
+        // Parse parameters and remappings from Python objects
         let parameters = Python::with_gil(|py| self.parse_parameters(py).unwrap_or_default());
+        let remappings = Python::with_gil(|py| self.parse_remappings(py).unwrap_or_default());
 
         let capture = LoadNodeCapture {
             package: self.package.clone(),
@@ -538,7 +585,7 @@ impl ComposableNode {
                 .or_else(|| container_namespace.clone())
                 .unwrap_or_else(|| "/".to_string()),
             parameters,
-            remappings: self.remappings.clone(),
+            remappings,
         };
 
         log::debug!(
@@ -593,6 +640,51 @@ impl ComposableNode {
         }
 
         Ok(parsed_params)
+    }
+
+    /// Parse Python remappings to string tuples (same logic as Node)
+    ///
+    /// Handles:
+    /// - Tuple pairs: `[('old_topic', 'new_topic')]` -> `[("old_topic", "new_topic")]`
+    /// - LaunchConfiguration objects in tuples: `[('topic', LaunchConfiguration('name'))]`
+    /// - Substitutions that need string conversion
+    fn parse_remappings(&self, py: Python) -> PyResult<Vec<(String, String)>> {
+        let mut parsed_remaps = Vec::new();
+
+        for remap_obj in &self.remappings {
+            let remap_any = remap_obj.as_ref(py);
+
+            // Remappings should be tuples of (from, to)
+            if let Ok(remap_tuple) = remap_any.downcast::<pyo3::types::PyTuple>() {
+                if remap_tuple.len() == 2 {
+                    // Extract both elements and convert to strings
+                    // This handles both plain strings and LaunchConfiguration objects
+                    let from_obj = remap_tuple.get_item(0)?;
+                    let to_obj = remap_tuple.get_item(1)?;
+
+                    // Convert to strings (handles LaunchConfiguration via __str__)
+                    let from = if let Ok(s) = from_obj.extract::<String>() {
+                        s
+                    } else if let Ok(str_result) = from_obj.call_method0("__str__") {
+                        str_result.extract::<String>()?
+                    } else {
+                        from_obj.to_string()
+                    };
+
+                    let to = if let Ok(s) = to_obj.extract::<String>() {
+                        s
+                    } else if let Ok(str_result) = to_obj.call_method0("__str__") {
+                        str_result.extract::<String>()?
+                    } else {
+                        to_obj.to_string()
+                    };
+
+                    parsed_remaps.push((from, to));
+                }
+            }
+        }
+
+        Ok(parsed_remaps)
     }
 }
 
@@ -784,8 +876,28 @@ impl LifecycleNode {
         for remap_obj in &self.remappings {
             if let Ok(remap_tuple) = remap_obj.downcast::<pyo3::types::PyTuple>(py) {
                 if remap_tuple.len() == 2 {
-                    let from = remap_tuple.get_item(0)?.extract::<String>()?;
-                    let to = remap_tuple.get_item(1)?.extract::<String>()?;
+                    // Extract both elements and convert to strings
+                    // This handles both plain strings and LaunchConfiguration objects
+                    let from_obj = remap_tuple.get_item(0)?;
+                    let to_obj = remap_tuple.get_item(1)?;
+
+                    // Convert to strings (handles LaunchConfiguration via __str__)
+                    let from = if let Ok(s) = from_obj.extract::<String>() {
+                        s
+                    } else if let Ok(str_result) = from_obj.call_method0("__str__") {
+                        str_result.extract::<String>()?
+                    } else {
+                        from_obj.to_string()
+                    };
+
+                    let to = if let Ok(s) = to_obj.extract::<String>() {
+                        s
+                    } else if let Ok(str_result) = to_obj.call_method0("__str__") {
+                        str_result.extract::<String>()?
+                    } else {
+                        to_obj.to_string()
+                    };
+
                     parsed_remaps.push((from, to));
                 }
             }
@@ -1058,8 +1170,9 @@ impl LoadComposableNodes {
             for remap_item in remaps_list.iter() {
                 if let Ok(remap_tuple) = remap_item.downcast::<pyo3::types::PyTuple>() {
                     if remap_tuple.len() == 2 {
-                        let from = remap_tuple.get_item(0)?.extract::<String>()?;
-                        let to = remap_tuple.get_item(1)?.extract::<String>()?;
+                        // Use pyobject_to_string to handle LaunchConfiguration objects
+                        let from = Self::pyobject_to_string(remap_tuple.get_item(0)?)?;
+                        let to = Self::pyobject_to_string(remap_tuple.get_item(1)?)?;
                         parsed_remaps.push((from, to));
                     }
                 }
