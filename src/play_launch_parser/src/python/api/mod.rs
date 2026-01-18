@@ -6,6 +6,7 @@ pub mod event_handlers;
 pub mod launch;
 pub mod launch_description_sources;
 pub mod launch_ros;
+pub mod parameter_descriptions;
 pub mod substitutions;
 
 use pyo3::prelude::*;
@@ -20,6 +21,7 @@ use pyo3::prelude::*;
 /// - `launch_ros`
 /// - `launch_ros.actions`
 /// - `launch_ros.descriptions`
+/// - `launch_ros.parameter_descriptions`
 pub fn register_modules(py: Python) -> PyResult<()> {
     // Create launch module
     let launch_mod = PyModule::new(py, "launch")?;
@@ -104,10 +106,16 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     let launch_ros_subs = PyModule::new(py, "launch_ros.substitutions")?;
     launch_ros_subs.add_class::<substitutions::FindPackageShare>()?;
 
+    // Create launch_ros.parameter_descriptions submodule
+    let launch_ros_param_desc = PyModule::new(py, "launch_ros.parameter_descriptions")?;
+    launch_ros_param_desc.add_class::<parameter_descriptions::ParameterFile>()?;
+    launch_ros_param_desc.add_class::<parameter_descriptions::ParameterValue>()?;
+
     // Add submodules to parent module as attributes
     launch_ros_mod.add_submodule(launch_ros_actions)?;
     launch_ros_mod.add_submodule(launch_ros_desc)?;
     launch_ros_mod.add_submodule(launch_ros_subs)?;
+    launch_ros_mod.add_submodule(launch_ros_param_desc)?;
 
     // Register in sys.modules
     let sys = py.import("sys")?;
@@ -123,6 +131,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     modules.set_item("launch_ros.actions", launch_ros_actions)?;
     modules.set_item("launch_ros.descriptions", launch_ros_desc)?;
     modules.set_item("launch_ros.substitutions", launch_ros_subs)?;
+    modules.set_item("launch_ros.parameter_descriptions", launch_ros_param_desc)?;
 
     Ok(())
 }
