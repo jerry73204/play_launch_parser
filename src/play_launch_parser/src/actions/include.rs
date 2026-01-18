@@ -3,13 +3,13 @@
 use crate::error::{ParseError, Result};
 use crate::substitution::{parse_substitutions, Substitution};
 use crate::xml::{Entity, EntityExt, XmlEntity};
-use std::collections::HashMap;
 
 /// Include action representing a nested launch file
 #[derive(Debug, Clone)]
 pub struct IncludeAction {
     pub file: Vec<Substitution>,
-    pub args: HashMap<String, String>,
+    /// Args as Vec to preserve order (later args can reference earlier ones)
+    pub args: Vec<(String, String)>,
 }
 
 impl IncludeAction {
@@ -24,7 +24,8 @@ impl IncludeAction {
         let file = parse_substitutions(&file_str)?;
 
         // Parse child <arg> elements for passing arguments to the included file
-        let mut args = HashMap::new();
+        // Use Vec to preserve order (later args can reference earlier ones)
+        let mut args = Vec::new();
         for child in entity.children() {
             if child.type_name() == "arg" {
                 let name: String =
@@ -42,7 +43,7 @@ impl IncludeAction {
                     }
                 })?;
 
-                args.insert(name, value);
+                args.push((name, value));
             }
         }
 
@@ -79,8 +80,14 @@ mod tests {
         let include = IncludeAction::from_entity(&entity).unwrap();
 
         assert_eq!(include.args.len(), 2);
-        assert_eq!(include.args.get("param1"), Some(&"value1".to_string()));
-        assert_eq!(include.args.get("param2"), Some(&"value2".to_string()));
+        assert_eq!(
+            include.args[0],
+            ("param1".to_string(), "value1".to_string())
+        );
+        assert_eq!(
+            include.args[1],
+            ("param2".to_string(), "value2".to_string())
+        );
     }
 
     #[test]

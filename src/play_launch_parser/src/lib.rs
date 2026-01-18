@@ -161,6 +161,18 @@ impl LaunchTraverser {
 
         log::info!("Including launch file: {}", resolved_path.display());
 
+        // Log include arguments being passed
+        if !include.args.is_empty() {
+            let arg_names: Vec<&str> = include.args.iter().map(|(k, _)| k.as_str()).collect();
+            log::debug!("[RUST] Include args: {:?}", arg_names);
+        }
+
+        // Log current context state
+        log::debug!(
+            "[RUST] Context before include has {} configs",
+            self.context.configurations().len()
+        );
+
         // Check if this is a Python launch file
         // Check file extension and handle non-XML files
         if let Some(ext) = resolved_path.extension().and_then(|s| s.to_str()) {
@@ -207,12 +219,21 @@ impl LaunchTraverser {
         let mut include_context = self.context.clone();
         include_context.set_current_file(resolved_path.clone());
         for (key, value) in &include.args {
-            // Resolve substitutions in the argument value using the parent context
+            // IMPORTANT: Resolve substitutions in the argument value using the include_context
+            // (not the parent context) so that later args can reference earlier args
+            // Example: <arg name="A" value="x"/>
+            //          <arg name="B" value="$(var A)/y"/>  <-- B can reference A
             let resolved_value_subs = parse_substitutions(value)?;
-            let resolved_value = resolve_substitutions(&resolved_value_subs, &self.context)
+            let resolved_value = resolve_substitutions(&resolved_value_subs, &include_context)
                 .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+            log::debug!("[RUST] Setting include arg: {} = {}", key, resolved_value);
             include_context.set_configuration(key.clone(), resolved_value);
         }
+
+        log::debug!(
+            "[RUST] Include context has {} configs after setting include args",
+            include_context.configurations().len()
+        );
 
         // Parse and traverse the included file
         let content = std::fs::read_to_string(&resolved_path)?;
@@ -267,6 +288,12 @@ impl LaunchTraverser {
                     None
                 };
 
+                log::debug!(
+                    "[RUST] Declaring argument: {} = {:?}",
+                    declare_arg.name,
+                    default
+                );
+
                 // Store metadata
                 let metadata = ArgumentMetadata {
                     name: declare_arg.name.clone(),
@@ -281,6 +308,11 @@ impl LaunchTraverser {
                     if self.context.get_configuration(&declare_arg.name).is_none() {
                         let resolved_default = resolve_substitutions(default_val, &self.context)
                             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                        log::debug!(
+                            "[RUST] Setting default value for {}: {}",
+                            declare_arg.name,
+                            resolved_default
+                        );
                         self.context
                             .set_configuration(declare_arg.name, resolved_default);
                     }
@@ -432,17 +464,26 @@ impl LaunchTraverser {
                             .and_then(|v| v.as_str()),
                     ) {
                         // Declare the argument in the context
-                        log::debug!(
-                            "YAML launch file declares arg: {} = {:?}",
-                            name,
-                            default_value
-                        );
+                        log::debug!("[RUST] YAML declares arg: {} = {:?}", name, default_value);
                         self.context.declare_argument(ArgumentMetadata {
                             name: name.to_string(),
                             default: default_value.map(|s| s.to_string()),
                             description: None,
                             choices: None,
                         });
+
+                        // Set the configuration value if a default is provided and not already set
+                        if let Some(default) = default_value {
+                            if self.context.get_configuration(name).is_none() {
+                                log::debug!(
+                                    "[RUST] YAML setting default value for {}: {}",
+                                    name,
+                                    default
+                                );
+                                self.context
+                                    .set_configuration(name.to_string(), default.to_string());
+                            }
+                        }
                     }
                 }
             }
