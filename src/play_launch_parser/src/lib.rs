@@ -57,18 +57,37 @@ impl LaunchTraverser {
             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
         let file_path = Path::new(&file_path_str);
 
-        log::info!("Including launch file: {}", file_path.display());
+        // Resolve relative paths relative to the current launch file
+        let resolved_path = if file_path.is_relative() {
+            if let Some(current_file) = self.context.current_file() {
+                if let Some(parent_dir) = current_file.parent() {
+                    parent_dir.join(file_path)
+                } else {
+                    file_path.to_path_buf()
+                }
+            } else {
+                file_path.to_path_buf()
+            }
+        } else {
+            file_path.to_path_buf()
+        };
+
+        log::info!("Including launch file: {}", resolved_path.display());
 
         // Create a new context for the included file
         // Start with current context and apply include args
         let mut include_context = self.context.clone();
-        include_context.set_current_file(file_path.to_path_buf());
+        include_context.set_current_file(resolved_path.clone());
         for (key, value) in &include.args {
-            include_context.set_configuration(key.clone(), value.clone());
+            // Resolve substitutions in the argument value using the parent context
+            let resolved_value_subs = parse_substitutions(value)?;
+            let resolved_value = resolve_substitutions(&resolved_value_subs, &self.context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+            include_context.set_configuration(key.clone(), resolved_value);
         }
 
         // Parse and traverse the included file
-        let content = std::fs::read_to_string(file_path)?;
+        let content = std::fs::read_to_string(&resolved_path)?;
         let doc = roxmltree::Document::parse(&content)?;
         let root = xml::XmlEntity::new(doc.root_element());
 
