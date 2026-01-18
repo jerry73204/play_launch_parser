@@ -3,7 +3,7 @@
 use crate::error::{ParseError, Result};
 use crate::record::{ComposableNodeContainerRecord, LoadNodeRecord};
 use crate::substitution::{parse_substitutions, resolve_substitutions, LaunchContext};
-use crate::xml::{Entity, EntityExt, XmlEntity};
+use crate::xml::{Entity, XmlEntity};
 use std::collections::HashMap;
 
 /// Container action representing a composable node container

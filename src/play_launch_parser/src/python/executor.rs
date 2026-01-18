@@ -63,7 +63,7 @@ impl PythonLaunchExecutor {
             }
 
             // Execute the Python code with same dict for globals and locals
-            py.run(&code, Some(&namespace), Some(&namespace))?;
+            py.run(&code, Some(namespace), Some(namespace))?;
 
             // Look for generate_launch_description function
             let generate_fn = match namespace.get_item("generate_launch_description")? {

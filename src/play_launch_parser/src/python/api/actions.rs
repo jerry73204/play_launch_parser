@@ -1,5 +1,7 @@
 //! Mock `launch.actions` module classes
 
+#![allow(non_local_definitions)] // pyo3 macros generate non-local impls
+
 use pyo3::prelude::*;
 
 /// Mock DeclareLaunchArgument action
@@ -20,7 +22,9 @@ use pyo3::prelude::*;
 #[derive(Clone)]
 pub struct DeclareLaunchArgument {
     name: String,
+    #[allow(dead_code)] // Keep for future use when we fully support launch arguments
     default_value: Option<String>,
+    #[allow(dead_code)] // Keep for future use when we fully support launch arguments
     description: Option<String>,
 }
 

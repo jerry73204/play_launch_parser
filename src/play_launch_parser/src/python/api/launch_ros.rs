@@ -1,5 +1,7 @@
 //! Mock `launch_ros` module classes
 
+#![allow(non_local_definitions)] // pyo3 macros generate non-local impls
+
 use crate::python::bridge::{
     ContainerCapture, LoadNodeCapture, NodeCapture, CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES,
     CAPTURED_NODES,
@@ -31,6 +33,7 @@ pub struct Node {
     executable: String,
     name: Option<String>,
     namespace: Option<String>,
+    #[allow(dead_code)] // TODO: Parse Python parameters (dict/list to string tuples)
     parameters: Vec<PyObject>,
     remappings: Vec<(String, String)>,
     arguments: Vec<String>,
@@ -137,7 +140,9 @@ impl Node {
 pub struct ComposableNodeContainer {
     name: String,
     namespace: Option<String>,
+    #[allow(dead_code)] // Keep for API compatibility but not used in container record
     package: String,
+    #[allow(dead_code)] // Keep for API compatibility but not used in container record
     executable: String,
     composable_nodes: Vec<Py<ComposableNode>>,
 }
@@ -237,6 +242,7 @@ pub struct ComposableNode {
     plugin: String,
     name: String,
     namespace: Option<String>,
+    #[allow(dead_code)] // TODO: Parse Python parameters (dict/list to string tuples)
     parameters: Vec<PyObject>,
     remappings: Vec<(String, String)>,
 }

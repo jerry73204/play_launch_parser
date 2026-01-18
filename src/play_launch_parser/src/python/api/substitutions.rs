@@ -1,5 +1,7 @@
 //! Mock `launch.substitutions` module classes
 
+#![allow(non_local_definitions)] // pyo3 macros generate non-local impls
+
 use pyo3::prelude::*;
 
 /// Mock LaunchConfiguration substitution
