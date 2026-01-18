@@ -74,6 +74,17 @@ impl LaunchTraverser {
 
         log::info!("Including launch file: {}", resolved_path.display());
 
+        // Check if this is a Python launch file
+        if resolved_path.extension().and_then(|s| s.to_str()) == Some("py") {
+            log::warn!(
+                "Skipping Python launch file (not yet supported): {}",
+                resolved_path.display()
+            );
+            // Python launch files require Python runtime to execute
+            // For now, we skip them but could record them in the future
+            return Ok(());
+        }
+
         // Create a new context for the included file
         // Start with current context and apply include args
         let mut include_context = self.context.clone();

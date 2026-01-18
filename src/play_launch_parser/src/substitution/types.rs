@@ -41,8 +41,10 @@ impl Substitution {
             Substitution::Text(s) => Ok(s.clone()),
             Substitution::LaunchConfiguration(name_subs) => {
                 let name = resolve_substitutions(name_subs, context)?;
+                // Use lenient resolution to allow variables with unresolved nested substitutions
+                // This is important for static parsing where not all packages may be available
                 context
-                    .get_configuration(&name)
+                    .get_configuration_lenient(&name)
                     .ok_or(SubstitutionError::UndefinedVariable(name))
             }
             Substitution::EnvironmentVariable { name, default } => {
@@ -148,7 +150,9 @@ fn find_package_share(package_name: &str) -> Option<String> {
 fn execute_command(cmd: &str) -> Result<String, SubstitutionError> {
     use std::process::Command;
 
-    let output = Command::new("sh")
+    // Use bash instead of sh to ensure environment variables are preserved
+    // (sh is often dash which doesn't source the same RC files)
+    let output = Command::new("bash")
         .arg("-c")
         .arg(cmd)
         .output()

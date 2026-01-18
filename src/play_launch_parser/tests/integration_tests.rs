@@ -783,3 +783,50 @@ fn test_performance_with_includes() {
         avg_ms
     );
 }
+
+#[test]
+fn test_nested_variable_substitutions() {
+    // Test that variables containing substitutions are resolved correctly
+    let fixture = get_fixture_path("test_nested_var_substitutions.launch.xml");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    // Should parse successfully (packages may not exist, but lenient mode should handle it)
+    assert!(
+        result.is_ok(),
+        "Should parse with nested variable substitutions: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    // Check node uses the variable
+    let node = &nodes[0];
+    assert_eq!(node["name"].as_str().unwrap(), "test_node");
+
+    // Package should be resolved from pkg_name variable
+    assert_eq!(node["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // The exec_path parameter should contain either:
+    // 1. The resolved path if demo_nodes_cpp is installed
+    // 2. The literal $(find-pkg-share demo_nodes_cpp) if not found (lenient mode)
+    let params = node["params"].as_array().unwrap();
+    let exec_path_param = params
+        .iter()
+        .find(|p| p[0].as_str() == Some("exec_path"))
+        .expect("Should have exec_path parameter");
+
+    // The value should be present (either resolved or literal)
+    assert!(
+        !exec_path_param[1].as_str().unwrap().is_empty(),
+        "exec_path parameter should have a value"
+    );
+
+    println!("Nested variable substitution test passed!");
+    println!("exec_path value: {}", exec_path_param[1].as_str().unwrap());
+}

@@ -46,6 +46,17 @@ echo ""
 RUST_PARSER="$PROJECT_ROOT/src/play_launch_parser/target/release/play_launch_parser"
 MAP_PATH="${HOME}/autoware_map/sample-map-planning"
 
+# Source Autoware setup to get package paths
+if [ -f "$AUTOWARE_PATH/install/setup.bash" ]; then
+    # shellcheck disable=SC1091
+    source "$AUTOWARE_PATH/install/setup.bash" > /dev/null 2>&1
+    echo -e "${GREEN}✓${NC} Sourced Autoware environment"
+else
+    echo "WARNING: Autoware setup.bash not found"
+    exit 1
+fi
+echo ""
+
 mkdir -p "$OUTPUT_DIR"
 
 # Warmup

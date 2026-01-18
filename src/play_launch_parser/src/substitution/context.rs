@@ -1,7 +1,18 @@
 //! Launch context for managing configurations
 
+use crate::substitution::parser::parse_substitutions;
+use crate::substitution::types::{resolve_substitutions, Substitution};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Maximum recursion depth for variable resolution to prevent stack overflow
+const MAX_RESOLUTION_DEPTH: usize = 20;
+
+// Thread-local storage for tracking resolution depth
+thread_local! {
+    static RESOLUTION_DEPTH: Cell<usize> = const { Cell::new(0) };
+}
 
 /// Metadata for a declared argument
 #[derive(Debug, Clone)]
@@ -15,7 +26,8 @@ pub struct ArgumentMetadata {
 /// Launch context holding configurations and state
 #[derive(Debug, Clone)]
 pub struct LaunchContext {
-    configurations: HashMap<String, String>,
+    /// Store configurations as parsed substitutions for lazy evaluation
+    configurations: HashMap<String, Vec<Substitution>>,
     current_file: Option<PathBuf>,
     namespace_stack: Vec<String>,
     environment: HashMap<String, String>,
@@ -57,16 +69,84 @@ impl LaunchContext {
             .map(|s| s.to_string())
     }
 
+    /// Set a configuration value by parsing it as substitutions
+    /// This allows variables to contain nested substitutions that are resolved lazily
     pub fn set_configuration(&mut self, name: String, value: String) {
-        self.configurations.insert(name, value);
+        // Parse the value as substitutions
+        match parse_substitutions(&value) {
+            Ok(subs) => {
+                self.configurations.insert(name, subs);
+            }
+            Err(_) => {
+                // If parsing fails, store as literal text
+                self.configurations
+                    .insert(name, vec![Substitution::Text(value)]);
+            }
+        }
     }
 
+    /// Get a configuration value by resolving its stored substitutions
+    /// This resolves any nested substitutions at reference time
+    /// If resolution fails, returns None (variable exists but can't be resolved)
     pub fn get_configuration(&self, name: &str) -> Option<String> {
-        self.configurations.get(name).cloned()
+        self.configurations.get(name).and_then(|subs| {
+            // Try to resolve the substitutions in the context of the current state
+            // If resolution fails (e.g., package not found), return None
+            // This allows the caller to handle the error appropriately
+            resolve_substitutions(subs, self).ok()
+        })
     }
 
-    pub fn configurations(&self) -> &HashMap<String, String> {
-        &self.configurations
+    /// Get a configuration value by resolving its substitutions, with fallback
+    /// If resolution fails, constructs an unresolved string representation
+    /// This is used for lenient resolution where we want a value even if some
+    /// substitutions can't be resolved (e.g., for static analysis)
+    ///
+    /// To prevent infinite recursion from circular references, this uses a
+    /// resolution depth tracker stored in thread-local storage
+    pub fn get_configuration_lenient(&self, name: &str) -> Option<String> {
+        self.configurations.get(name).map(|subs| {
+            // Check recursion depth to prevent stack overflow from circular references
+            RESOLUTION_DEPTH.with(|depth| {
+                let current = depth.get();
+                if current >= MAX_RESOLUTION_DEPTH {
+                    // Circular reference detected or too deep nesting
+                    // Return the unresolved string
+                    return reconstruct_substitution_string(subs);
+                }
+
+                // Increment depth
+                depth.set(current + 1);
+
+                // Try to resolve substitutions
+                let result = resolve_substitutions(subs, self).unwrap_or_else(|_| {
+                    // If resolution fails, reconstruct the original string
+                    // This preserves unresolved substitutions like $(find-pkg-share pkg)
+                    reconstruct_substitution_string(subs)
+                });
+
+                // Decrement depth
+                depth.set(current);
+
+                result
+            })
+        })
+    }
+
+    /// Get the raw substitutions for a configuration (for debugging/testing)
+    pub fn get_configuration_raw(&self, name: &str) -> Option<&Vec<Substitution>> {
+        self.configurations.get(name)
+    }
+
+    pub fn configurations(&self) -> HashMap<String, String> {
+        // Return resolved configurations
+        let mut resolved = HashMap::new();
+        for (key, subs) in &self.configurations {
+            if let Ok(value) = resolve_substitutions(subs, self) {
+                resolved.insert(key.clone(), value);
+            }
+        }
+        resolved
     }
 
     pub fn set_environment_variable(&mut self, name: String, value: String) {
@@ -163,6 +243,63 @@ impl LaunchContext {
             .cloned()
             .unwrap_or_else(|| "/".to_string())
     }
+}
+
+/// Reconstruct the original string representation of substitutions
+/// Used when resolution fails but we still want a string value
+fn reconstruct_substitution_string(subs: &[Substitution]) -> String {
+    let mut result = String::new();
+    for sub in subs {
+        match sub {
+            Substitution::Text(s) => result.push_str(s),
+            Substitution::LaunchConfiguration(name_subs) => {
+                result.push_str("$(var ");
+                result.push_str(&reconstruct_substitution_string(name_subs));
+                result.push(')');
+            }
+            Substitution::EnvironmentVariable { name, default } => {
+                result.push_str("$(env ");
+                result.push_str(&reconstruct_substitution_string(name));
+                if let Some(def) = default {
+                    result.push(' ');
+                    result.push_str(&reconstruct_substitution_string(def));
+                }
+                result.push(')');
+            }
+            Substitution::OptionalEnvironmentVariable { name, default } => {
+                result.push_str("$(optenv ");
+                result.push_str(&reconstruct_substitution_string(name));
+                if let Some(def) = default {
+                    result.push(' ');
+                    result.push_str(&reconstruct_substitution_string(def));
+                }
+                result.push(')');
+            }
+            Substitution::Command(cmd) => {
+                result.push_str("$(command ");
+                result.push_str(&reconstruct_substitution_string(cmd));
+                result.push(')');
+            }
+            Substitution::FindPackageShare(pkg) => {
+                result.push_str("$(find-pkg-share ");
+                result.push_str(&reconstruct_substitution_string(pkg));
+                result.push(')');
+            }
+            Substitution::Dirname => result.push_str("$(dirname)"),
+            Substitution::Filename => result.push_str("$(filename)"),
+            Substitution::Anon(name) => {
+                result.push_str("$(anon ");
+                result.push_str(&reconstruct_substitution_string(name));
+                result.push(')');
+            }
+            Substitution::Eval(expr) => {
+                result.push_str("$(eval ");
+                result.push_str(&reconstruct_substitution_string(expr));
+                result.push(')');
+            }
+        }
+    }
+    result
 }
 
 /// Normalize a namespace string

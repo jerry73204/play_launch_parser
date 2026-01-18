@@ -57,6 +57,16 @@ echo ""
 
 RUST_PARSER="$PROJECT_ROOT/src/play_launch_parser/target/release/play_launch_parser"
 
+# Source Autoware setup to get package paths
+if [ -f "$AUTOWARE_PATH/install/setup.bash" ]; then
+    # shellcheck disable=SC1091
+    source "$AUTOWARE_PATH/install/setup.bash" > /dev/null 2>&1
+    echo -e "${GREEN}✓${NC} Sourced Autoware environment"
+else
+    echo -e "${YELLOW}⚠${NC} Autoware setup.bash not found, package resolution may fail"
+fi
+echo ""
+
 # Test Rust parser
 echo "Testing Rust parser..."
 RUST_OUTPUT="$OUTPUT_DIR/rust_output.json"
@@ -67,16 +77,21 @@ MAP_PATH="${HOME}/autoware_map/sample-map-planning"
 # Time the execution
 START_TIME=$(date +%s%N)
 
-if ! "$RUST_PARSER" file "$LAUNCH_FILE" \
+"$RUST_PARSER" file "$LAUNCH_FILE" \
     "map_path:=$MAP_PATH" \
-    -o "$RUST_OUTPUT" 2>&1 | tee "$OUTPUT_DIR/rust_stderr.log"; then
-    echo -e "${RED}✗ Rust parser failed${NC}"
-    echo "See error log: $OUTPUT_DIR/rust_stderr.log"
-    exit 1
-fi
+    -o "$RUST_OUTPUT" 2>&1 | tee "$OUTPUT_DIR/rust_stderr.log"
+
+# Check the parser exit code (from PIPESTATUS, not tee)
+PARSER_EXIT_CODE=${PIPESTATUS[0]}
 
 END_TIME=$(date +%s%N)
 RUST_TIME_MS=$(( (END_TIME - START_TIME) / 1000000 ))
+
+if [ "$PARSER_EXIT_CODE" -ne 0 ]; then
+    echo -e "${RED}✗ Rust parser failed (exit code: $PARSER_EXIT_CODE)${NC}"
+    echo "  See error log: $OUTPUT_DIR/rust_stderr.log"
+    exit 1
+fi
 
 echo -e "${GREEN}✓${NC} Rust parser succeeded"
 echo "  Output: $RUST_OUTPUT"

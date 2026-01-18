@@ -81,6 +81,37 @@ fn parse_substitutions_recursive(input: &str) -> Result<Vec<Substitution>> {
     Ok(result)
 }
 
+/// Extract the first quoted argument from a string like "'cmd' 'warn'"
+/// Returns the content of the first quoted string without the quotes.
+/// If there are TWO quoted strings, returns only the first one.
+/// If there is only ONE quoted string or unquoted text, returns everything.
+fn extract_first_quoted_arg(input: &str) -> &str {
+    let trimmed = input.trim();
+
+    // Check for single or double quotes at the start
+    if let Some(quote) = trimmed.chars().next() {
+        if quote == '\'' || quote == '"' {
+            // Find the matching closing quote
+            if let Some(end_idx) = trimmed[1..].find(quote) {
+                let first_quoted_content = &trimmed[1..end_idx + 1];
+
+                // Check if there's a second quoted string after this one
+                let after_first = &trimmed[end_idx + 2..].trim_start();
+                if !after_first.is_empty()
+                    && (after_first.starts_with('\'') || after_first.starts_with('"'))
+                {
+                    // There's a second quoted argument, so only return the first
+                    return first_quoted_content;
+                }
+                // Otherwise return the full input (handles single quoted arg)
+            }
+        }
+    }
+
+    // Return the full string (handles unquoted args or single quoted args)
+    trimmed
+}
+
 /// Parse the content inside a substitution $(...)
 /// This handles recursion: "var $(env X)" should parse inner $(env X) first
 fn parse_substitution_content(content: &str) -> Result<Substitution> {
@@ -204,7 +235,13 @@ fn parse_single_substitution(sub_type: &str, args: Option<&str>) -> Result<Subst
             let cmd_str = args.ok_or_else(|| {
                 ParseError::InvalidSubstitution("command requires an argument".to_string())
             })?;
-            let cmd_subs = parse_substitutions_recursive(cmd_str)?;
+
+            // ROS 2 command substitution supports two arguments:
+            // $(command 'cmd' 'error_mode')
+            // where error_mode is 'warn', 'ignore', or 'strict'
+            // For now, we extract only the first argument (the command itself)
+            let first_arg = extract_first_quoted_arg(cmd_str);
+            let cmd_subs = parse_substitutions_recursive(first_arg)?;
             Ok(Substitution::Command(cmd_subs))
         }
         "find-pkg-share" => {
