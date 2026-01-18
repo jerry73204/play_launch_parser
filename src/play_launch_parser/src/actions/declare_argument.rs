@@ -32,16 +32,12 @@ impl DeclareArgumentAction {
         let description = entity.get_attr_str("description", true)?;
 
         // Parse choices if present (comma-separated string)
-        let choices = if let Some(choices_str) = entity.get_attr_str("choices", true)? {
-            Some(
-                choices_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .collect(),
-            )
-        } else {
-            None
-        };
+        let choices = entity.get_attr_str("choices", true)?.map(|choices_str| {
+            choices_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .collect()
+        });
 
         Ok(DeclareArgumentAction {
             name,

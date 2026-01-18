@@ -81,12 +81,7 @@ impl CommandGenerator {
         let env = if merged_env.is_empty() {
             None
         } else {
-            Some(
-                merged_env
-                    .into_iter()
-                    .map(|(k, v)| (k, v))
-                    .collect::<Vec<_>>(),
-            )
+            Some(merged_env.into_iter().collect::<Vec<_>>())
         };
 
         // Get global parameters from context
@@ -207,12 +202,7 @@ impl CommandGenerator {
         let env = if merged_env.is_empty() {
             None
         } else {
-            Some(
-                merged_env
-                    .into_iter()
-                    .map(|(k, v)| (k, v))
-                    .collect::<Vec<_>>(),
-            )
+            Some(merged_env.into_iter().collect::<Vec<_>>())
         };
 
         Ok(NodeRecord {
