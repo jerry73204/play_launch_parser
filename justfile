@@ -132,3 +132,29 @@ compare-output PACKAGE LAUNCH_FILE:
     echo "Comparing outputs..."
     # diff -u record_python.json record_rust.json
     echo "Parser not yet implemented"
+
+# Test Rust parser with Autoware launch file (requires Autoware)
+test-autoware:
+    #!/usr/bin/env bash
+    set -e
+    cd tests/autoware_test
+
+    if [ ! -L "autoware" ]; then
+        echo "ERROR: Autoware symlink not found"
+        echo "Create symlink: cd tests/autoware_test && ln -s /path/to/autoware autoware"
+        exit 1
+    fi
+
+    ./scripts/test_parse.sh
+
+# Compare Rust and Python parser outputs for Autoware
+compare-autoware:
+    #!/usr/bin/env bash
+    cd tests/autoware_test
+    ./scripts/compare_outputs.py
+
+# Benchmark Rust parser performance with Autoware
+benchmark-autoware:
+    #!/usr/bin/env bash
+    cd tests/autoware_test
+    ./scripts/benchmark.sh
