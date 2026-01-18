@@ -224,13 +224,22 @@ impl LaunchTraverser {
                 self.context.set_global_parameter(set_param.name, value);
             }
             "push-ros-namespace" => {
-                // Get namespace from "ns" attribute
-                if let Some(ns_str) = entity.get_attr_str("ns", false)? {
-                    let ns_subs = parse_substitutions(&ns_str)?;
-                    let namespace = resolve_substitutions(&ns_subs, &self.context)
-                        .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-                    self.context.push_namespace(namespace);
-                }
+                // Try "namespace" attribute first (Autoware/ROS 2 standard),
+                // then fall back to "ns" for backwards compatibility
+                let ns_str = entity
+                    .get_attr_str("namespace", false)
+                    .ok()
+                    .flatten()
+                    .or_else(|| entity.get_attr_str("ns", false).ok().flatten())
+                    .ok_or_else(|| ParseError::MissingAttribute {
+                        element: "push-ros-namespace".to_string(),
+                        attribute: "namespace or ns".to_string(),
+                    })?;
+
+                let ns_subs = parse_substitutions(&ns_str)?;
+                let namespace = resolve_substitutions(&ns_subs, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.push_namespace(namespace);
             }
             "pop-ros-namespace" => {
                 self.context.pop_namespace();
