@@ -17,6 +17,12 @@ pub enum Substitution {
     },
     /// $(find-pkg-share package_name) - Find ROS 2 package share directory
     FindPackageShare(String),
+    /// $(dirname) - Directory of the current launch file
+    Dirname,
+    /// $(filename) - Filename of the current launch file
+    Filename,
+    /// $(anon name) - Generate anonymous unique name
+    Anon(String),
 }
 
 impl Substitution {
@@ -36,6 +42,28 @@ impl Substitution {
             }
             Substitution::FindPackageShare(package_name) => find_package_share(package_name)
                 .ok_or_else(|| SubstitutionError::PackageNotFound(package_name.clone())),
+            Substitution::Dirname => context
+                .current_dir()
+                .and_then(|p| p.to_str().map(String::from))
+                .ok_or_else(|| {
+                    SubstitutionError::InvalidSubstitution(
+                        "dirname: no current file set".to_string(),
+                    )
+                }),
+            Substitution::Filename => context.current_filename().ok_or_else(|| {
+                SubstitutionError::InvalidSubstitution("filename: no current file set".to_string())
+            }),
+            Substitution::Anon(name) => {
+                // Generate a unique anonymous name
+                // Format: name_<timestamp>_<random>
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let timestamp = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_micros();
+                let random: u32 = rand::random();
+                Ok(format!("{}_{:x}_{:x}", name, timestamp, random))
+            }
         }
     }
 }
@@ -143,5 +171,62 @@ mod tests {
             resolve_substitutions(&subs, &context).unwrap(),
             "Hello World!"
         );
+    }
+
+    #[test]
+    fn test_dirname_substitution() {
+        use std::path::PathBuf;
+
+        let sub = Substitution::Dirname;
+        let mut context = LaunchContext::new();
+        context.set_current_file(PathBuf::from("/home/user/launch/test.launch.xml"));
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "/home/user/launch");
+    }
+
+    #[test]
+    fn test_filename_substitution() {
+        use std::path::PathBuf;
+
+        let sub = Substitution::Filename;
+        let mut context = LaunchContext::new();
+        context.set_current_file(PathBuf::from("/home/user/launch/test.launch.xml"));
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "test.launch.xml");
+    }
+
+    #[test]
+    fn test_dirname_no_file_set() {
+        let sub = Substitution::Dirname;
+        let context = LaunchContext::new();
+        assert!(sub.resolve(&context).is_err());
+    }
+
+    #[test]
+    fn test_anon_substitution() {
+        let sub = Substitution::Anon("my_node".to_string());
+        let context = LaunchContext::new();
+
+        let result = sub.resolve(&context).unwrap();
+        // Should start with the name and have a timestamp and random suffix
+        assert!(result.starts_with("my_node_"));
+        // Should have the format name_timestamp_random
+        let parts: Vec<&str> = result.split('_').collect();
+        assert!(parts.len() >= 3);
+    }
+
+    #[test]
+    fn test_anon_uniqueness() {
+        let sub1 = Substitution::Anon("node".to_string());
+        let sub2 = Substitution::Anon("node".to_string());
+        let context = LaunchContext::new();
+
+        let result1 = sub1.resolve(&context).unwrap();
+        let result2 = sub2.resolve(&context).unwrap();
+
+        // Should generate different names
+        assert_ne!(result1, result2);
     }
 }

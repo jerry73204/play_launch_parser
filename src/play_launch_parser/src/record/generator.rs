@@ -1,6 +1,6 @@
 //! Command-line and record generation
 
-use crate::actions::NodeAction;
+use crate::actions::{ExecutableAction, NodeAction};
 use crate::error::GenerationError;
 use crate::record::types::NodeRecord;
 use crate::substitution::{resolve_substitutions, LaunchContext};
@@ -130,6 +130,59 @@ impl CommandGenerator {
         // Simplified for MVP: just construct path
         // TODO: Use ament_index for proper resolution
         Ok(format!("/opt/ros/humble/lib/{}/{}", package, executable))
+    }
+
+    pub fn generate_executable_record(
+        exec: &ExecutableAction,
+        context: &LaunchContext,
+    ) -> Result<NodeRecord, GenerationError> {
+        let cmd_str = resolve_substitutions(&exec.cmd, context)?;
+        let mut cmd = vec![cmd_str.clone()];
+
+        // Add arguments
+        for arg in &exec.arguments {
+            let arg_str = resolve_substitutions(arg, context)?;
+            cmd.push(arg_str);
+        }
+
+        let name = if let Some(name_subs) = &exec.name {
+            Some(resolve_substitutions(name_subs, context)?)
+        } else {
+            Some(cmd_str.clone())
+        };
+
+        let env = if exec.environment.is_empty() {
+            None
+        } else {
+            Some(exec.environment.clone())
+        };
+
+        Ok(NodeRecord {
+            executable: cmd_str,
+            package: None, // Executables don't have packages
+            name,
+            namespace: Some("/".to_string()),
+            exec_name: None,
+            params: Vec::new(),
+            params_files: Vec::new(),
+            remaps: Vec::new(),
+            ros_args: None,
+            args: if exec.arguments.is_empty() {
+                None
+            } else {
+                Some(
+                    exec.arguments
+                        .iter()
+                        .map(|a| resolve_substitutions(a, context))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )
+            },
+            cmd,
+            env,
+            respawn: None,
+            respawn_delay: None,
+            global_params: None,
+        })
     }
 }
 

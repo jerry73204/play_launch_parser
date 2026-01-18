@@ -7,7 +7,7 @@ pub mod record;
 pub mod substitution;
 pub mod xml;
 
-use actions::{ArgAction, GroupAction, IncludeAction, LetAction, NodeAction};
+use actions::{ArgAction, ExecutableAction, GroupAction, IncludeAction, LetAction, NodeAction};
 use condition::should_process_entity;
 use error::{ParseError, Result};
 use record::{CommandGenerator, RecordJson};
@@ -37,6 +37,9 @@ impl LaunchTraverser {
     }
 
     pub fn traverse_file(&mut self, path: &Path) -> Result<()> {
+        // Set current file in context
+        self.context.set_current_file(path.to_path_buf());
+
         let content = std::fs::read_to_string(path)?;
         let doc = roxmltree::Document::parse(&content)?;
         let root = xml::XmlEntity::new(doc.root_element());
@@ -55,6 +58,7 @@ impl LaunchTraverser {
         // Create a new context for the included file
         // Start with current context and apply include args
         let mut include_context = self.context.clone();
+        include_context.set_current_file(file_path.to_path_buf());
         for (key, value) in &include.args {
             include_context.set_configuration(key.clone(), value.clone());
         }
@@ -98,6 +102,12 @@ impl LaunchTraverser {
             "node" => {
                 let node = NodeAction::from_entity(entity)?;
                 let record = CommandGenerator::generate_node_record(&node, &self.context)
+                    .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
+                self.records.push(record);
+            }
+            "executable" => {
+                let exec = ExecutableAction::from_entity(entity)?;
+                let record = CommandGenerator::generate_executable_record(&exec, &self.context)
                     .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
                 self.records.push(record);
             }
@@ -212,5 +222,63 @@ mod tests {
         assert_eq!(record.node.len(), 2);
         assert_eq!(record.node[0].executable, "talker");
         assert_eq!(record.node[1].executable, "listener");
+    }
+
+    #[test]
+    fn test_parse_executable() {
+        let xml = r#"<launch>
+            <executable cmd="rosbag" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].executable, "rosbag");
+        assert_eq!(record.node[0].package, None);
+    }
+
+    #[test]
+    fn test_parse_executable_with_args() {
+        let xml = r#"<launch>
+            <executable cmd="rosbag">
+                <arg value="record" />
+                <arg value="-a" />
+            </executable>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].executable, "rosbag");
+        assert_eq!(record.node[0].cmd, vec!["rosbag", "record", "-a"]);
+        assert_eq!(
+            record.node[0].args,
+            Some(vec!["record".to_string(), "-a".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_parse_mixed_nodes_and_executables() {
+        let xml = r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker" />
+            <executable cmd="rviz2" />
+            <node pkg="demo_nodes_cpp" exec="listener" />
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 3);
+        assert_eq!(record.node[0].executable, "talker");
+        assert_eq!(record.node[0].package, Some("demo_nodes_cpp".to_string()));
+        assert_eq!(record.node[1].executable, "rviz2");
+        assert_eq!(record.node[1].package, None);
+        assert_eq!(record.node[2].executable, "listener");
+        assert_eq!(record.node[2].package, Some("demo_nodes_cpp".to_string()));
     }
 }

@@ -40,6 +40,9 @@ pub enum SubstitutionError {
 
     #[error("Package not found: {0}")]
     PackageNotFound(String),
+
+    #[error("Invalid substitution: {0}")]
+    InvalidSubstitution(String),
 }
 
 #[derive(Error, Debug)]

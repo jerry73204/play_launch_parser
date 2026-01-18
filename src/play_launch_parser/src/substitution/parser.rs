@@ -7,7 +7,8 @@ use regex::Regex;
 /// Parse substitution string like "$(var x)" or "text $(env Y) more"
 pub fn parse_substitutions(input: &str) -> Result<Vec<Substitution>> {
     let mut result = Vec::new();
-    let re = Regex::new(r"\$\(([a-z-]+)\s+([^)]+)\)").unwrap();
+    // Match both $(type args) and $(type) patterns
+    let re = Regex::new(r"\$\(([a-z-]+)(?:\s+([^)]+))?\)").unwrap();
 
     let mut last_end = 0;
 
@@ -26,7 +27,7 @@ pub fn parse_substitutions(input: &str) -> Result<Vec<Substitution>> {
 
         // Parse the substitution
         let sub_type = cap.get(1).unwrap().as_str();
-        let args = cap.get(2).unwrap().as_str();
+        let args = cap.get(2).map(|m| m.as_str());
 
         let substitution = parse_single_substitution(sub_type, args)?;
         result.push(substitution);
@@ -50,16 +51,48 @@ pub fn parse_substitutions(input: &str) -> Result<Vec<Substitution>> {
     Ok(result)
 }
 
-fn parse_single_substitution(sub_type: &str, args: &str) -> Result<Substitution> {
+fn parse_single_substitution(sub_type: &str, args: Option<&str>) -> Result<Substitution> {
     match sub_type {
-        "var" => Ok(Substitution::LaunchConfiguration(args.trim().to_string())),
+        "var" => {
+            let name = args
+                .ok_or_else(|| {
+                    ParseError::InvalidSubstitution("var requires an argument".to_string())
+                })?
+                .trim()
+                .to_string();
+            Ok(Substitution::LaunchConfiguration(name))
+        }
         "env" => {
-            let parts: Vec<&str> = args.splitn(2, ' ').map(|s| s.trim()).collect();
+            let args_str = args.ok_or_else(|| {
+                ParseError::InvalidSubstitution("env requires an argument".to_string())
+            })?;
+            let parts: Vec<&str> = args_str.splitn(2, ' ').map(|s| s.trim()).collect();
             let name = parts[0].to_string();
             let default = parts.get(1).map(|s| s.to_string());
             Ok(Substitution::EnvironmentVariable { name, default })
         }
-        "find-pkg-share" => Ok(Substitution::FindPackageShare(args.trim().to_string())),
+        "find-pkg-share" => {
+            let package = args
+                .ok_or_else(|| {
+                    ParseError::InvalidSubstitution(
+                        "find-pkg-share requires an argument".to_string(),
+                    )
+                })?
+                .trim()
+                .to_string();
+            Ok(Substitution::FindPackageShare(package))
+        }
+        "dirname" => Ok(Substitution::Dirname),
+        "filename" => Ok(Substitution::Filename),
+        "anon" => {
+            let name = args
+                .ok_or_else(|| {
+                    ParseError::InvalidSubstitution("anon requires a name argument".to_string())
+                })?
+                .trim()
+                .to_string();
+            Ok(Substitution::Anon(name))
+        }
         _ => Err(ParseError::InvalidSubstitution(format!(
             "Unknown substitution type: {}",
             sub_type
@@ -137,5 +170,42 @@ mod tests {
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[0], Substitution::LaunchConfiguration("a".to_string()));
         assert_eq!(subs[1], Substitution::LaunchConfiguration("b".to_string()));
+    }
+
+    #[test]
+    fn test_parse_dirname() {
+        let subs = parse_substitutions("$(dirname)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0], Substitution::Dirname);
+    }
+
+    #[test]
+    fn test_parse_filename() {
+        let subs = parse_substitutions("$(filename)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0], Substitution::Filename);
+    }
+
+    #[test]
+    fn test_parse_dirname_in_path() {
+        let subs = parse_substitutions("$(dirname)/config.yaml").unwrap();
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[0], Substitution::Dirname);
+        assert_eq!(subs[1], Substitution::Text("/config.yaml".to_string()));
+    }
+
+    #[test]
+    fn test_parse_anon() {
+        let subs = parse_substitutions("$(anon my_node)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0], Substitution::Anon("my_node".to_string()));
+    }
+
+    #[test]
+    fn test_parse_anon_in_name() {
+        let subs = parse_substitutions("node_$(anon suffix)").unwrap();
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[0], Substitution::Text("node_".to_string()));
+        assert_eq!(subs[1], Substitution::Anon("suffix".to_string()));
     }
 }
