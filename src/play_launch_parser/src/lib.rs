@@ -14,7 +14,7 @@ use error::{ParseError, Result};
 use record::{CommandGenerator, RecordJson};
 use std::collections::HashMap;
 use std::path::Path;
-use substitution::{resolve_substitutions, LaunchContext};
+use substitution::{parse_substitutions, resolve_substitutions, LaunchContext};
 use xml::{Entity, XmlEntity};
 
 /// Launch tree traverser for parsing launch files
@@ -117,11 +117,23 @@ impl LaunchTraverser {
                 self.process_include(&include)?;
             }
             "group" => {
-                let _group = GroupAction::from_entity(entity)?;
-                // For now, simply traverse children
-                // TODO: Implement namespace scoping
+                let group = GroupAction::from_entity(entity)?;
+
+                // Push namespace if specified
+                if let Some(ns_subs) = &group.namespace {
+                    let namespace = resolve_substitutions(ns_subs, &self.context)
+                        .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                    self.context.push_namespace(namespace);
+                }
+
+                // Traverse children with scoped namespace
                 for child in entity.children() {
                     self.traverse_entity(&child)?;
+                }
+
+                // Pop namespace if we pushed one
+                if group.namespace.is_some() {
+                    self.context.pop_namespace();
                 }
             }
             "let" => {
@@ -129,6 +141,18 @@ impl LaunchTraverser {
                 // Set variable in context (acts like arg)
                 self.context
                     .set_configuration(let_action.name, let_action.value);
+            }
+            "push-ros-namespace" => {
+                // Get namespace from "ns" attribute
+                if let Some(ns_str) = entity.get_attr_str("ns", false)? {
+                    let ns_subs = parse_substitutions(&ns_str)?;
+                    let namespace = resolve_substitutions(&ns_subs, &self.context)
+                        .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                    self.context.push_namespace(namespace);
+                }
+            }
+            "pop-ros-namespace" => {
+                self.context.pop_namespace();
             }
             other => {
                 log::warn!("Unsupported action type: {}", other);
@@ -357,5 +381,104 @@ test_node:
         // Check that the param file path is recorded
         assert_eq!(node.params_files.len(), 1);
         assert_eq!(node.params_files[0], param_file_path);
+    }
+
+    #[test]
+    fn test_namespace_scoping_simple() {
+        let xml = r#"<launch>
+            <group>
+                <push-ros-namespace ns="robot1" />
+                <node pkg="demo_nodes_cpp" exec="talker" />
+            </group>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(record.node[0].namespace, Some("/robot1".to_string()));
+    }
+
+    #[test]
+    fn test_namespace_scoping_nested() {
+        let xml = r#"<launch>
+            <group>
+                <push-ros-namespace ns="robot1" />
+                <group>
+                    <push-ros-namespace ns="sensors" />
+                    <node pkg="demo_nodes_cpp" exec="talker" />
+                </group>
+            </group>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        assert_eq!(
+            record.node[0].namespace,
+            Some("/robot1/sensors".to_string())
+        );
+    }
+
+    #[test]
+    fn test_namespace_scoping_with_group_attribute() {
+        let xml = r#"<launch>
+            <group ns="robot1">
+                <node pkg="demo_nodes_cpp" exec="talker" />
+                <group ns="sensors">
+                    <node pkg="demo_nodes_cpp" exec="listener" />
+                </group>
+            </group>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 2);
+        assert_eq!(record.node[0].namespace, Some("/robot1".to_string()));
+        assert_eq!(
+            record.node[1].namespace,
+            Some("/robot1/sensors".to_string())
+        );
+    }
+
+    #[test]
+    fn test_namespace_explicit_overrides_group() {
+        let xml = r#"<launch>
+            <group ns="robot1">
+                <node pkg="demo_nodes_cpp" exec="talker" namespace="/override" />
+            </group>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // Explicit namespace should override group namespace
+        assert_eq!(record.node[0].namespace, Some("/override".to_string()));
+    }
+
+    #[test]
+    fn test_namespace_absolute() {
+        let xml = r#"<launch>
+            <group ns="robot1">
+                <group ns="/absolute">
+                    <node pkg="demo_nodes_cpp" exec="talker" />
+                </group>
+            </group>
+        </launch>"#;
+
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(xml.as_bytes()).unwrap();
+
+        let record = parse_launch_file(file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+        // Absolute namespace should override parent
+        assert_eq!(record.node[0].namespace, Some("/absolute".to_string()));
     }
 }

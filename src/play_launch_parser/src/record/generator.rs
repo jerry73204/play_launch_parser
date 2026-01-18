@@ -26,9 +26,11 @@ impl CommandGenerator {
         };
 
         let namespace = if let Some(ns_subs) = &node.namespace {
+            // Node has explicit namespace
             Some(resolve_substitutions(ns_subs, context)?)
         } else {
-            Some("/".to_string())
+            // Use namespace from context (group scoping)
+            Some(context.current_namespace())
         };
 
         // Process inline parameters
