@@ -49,9 +49,9 @@ echo ""
 mkdir -p "$OUTPUT_DIR"
 
 # Build Rust parser if needed
-echo "Building Rust parser..."
+echo "Building Rust parser (with Python support)..."
 cd "$PROJECT_ROOT/src/play_launch_parser"
-cargo build --release --quiet
+cargo build --release --features python --quiet
 echo -e "${GREEN}✓${NC} Rust parser built"
 echo ""
 

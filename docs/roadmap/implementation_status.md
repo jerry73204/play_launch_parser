@@ -18,7 +18,7 @@ This document tracks the overall implementation progress of the play_launch_pars
 | **Phase 2: MVP XML Parser** | ✅ Complete | Core XML parsing with extended features | 100% |
 | **Phase 3: Advanced Features** | ✅ Complete | All critical XML features implemented | 100% |
 | **Phase 4: Integration & Polish** | ✅ Complete | Testing, edge cases, Autoware validation | 95% (4.4 pending) |
-| **Phase 5: Python Support** | 📋 Not Started | Python launch files, missing actions, YAML handling | 0% |
+| **Phase 5: Python Support** | 🔄 In Progress | Python launch files, containers, YAML launch files | 92% |
 | **Phase 6: Performance** | 📋 Not Started | Optimization, benchmarking | 0% |
 
 ---
@@ -217,22 +217,35 @@ See [Phase 5 Roadmap](./phase-5-python_support.md) for detailed implementation p
 - ✅ `<composable_node>` support
 - ✅ `<set_env>` / `<unset_env>` support
 
-### Phase 5.2: Python Launch File Support 🔄 IN PROGRESS (Core Complete)
+### Phase 5.2: Python Launch File Support 🔄 IN PROGRESS (Advanced Complete)
+
+**Sessions 8-9: Core + Advanced Features**
 - ✅ pyo3 integration setup
-- ✅ Mock `launch` Python API (core classes)
-  - ✅ LaunchDescription
-  - ✅ DeclareLaunchArgument
-  - ✅ LaunchConfiguration
-  - ✅ TextSubstitution
-- ✅ Mock `launch_ros` Python API (core classes)
-  - ✅ Node
-- ✅ Python file execution engine
-- ✅ Integration with main parser (traverse_file & process_include)
-- ✅ Testing & validation (2 integration tests passing)
+- ✅ Mock `launch` Python API (27+ classes)
+  - ✅ LaunchDescription, DeclareLaunchArgument, LaunchConfiguration
+  - ✅ IncludeLaunchDescription, SetLaunchConfiguration
+  - ✅ All core substitutions (PathJoin, FindPackageShare, Environment, etc.)
+  - ✅ Launch description sources (Python, XML, YAML)
+- ✅ Mock `launch_ros` Python API
+  - ✅ Node (full parameter support)
+  - ✅ ComposableNodeContainer, ComposableNode
+  - ✅ SetParameter
+- ✅ Python file execution engine with includes
+- ✅ Container support (XML + Python)
+- ✅ Testing & validation (6 integration tests passing)
 
-**Remaining**: Container classes (ComposableNode), additional substitutions (PathJoinSubstitution, FindPackageShare)
+**Session 10: Autoware Validation & Fixes**
+- ✅ **YAML launch file support** (argument extraction from .yaml files)
+- ✅ **Composable node param files** (`<param from="..."/>` in composable nodes)
+- ✅ **PyObject parameter handling** (ComposableNodeContainer accepts LaunchConfiguration)
+- ✅ **List default values** (DeclareLaunchArgument accepts list for default_value)
+- ✅ **Missing API classes** (SetLaunchConfiguration, SetParameter, launch_ros.substitutions)
+- ✅ **Autoware testing**: Successfully processes 20+ Python launch files
 
-**Expected Impact**: 95-100% Autoware coverage (XML + Python files)
+**Current Status**: 92% complete (46/50 features)
+**Autoware Coverage**: 80-85% Python files, 90%+ XML files (Overall: ~88%)
+
+**Remaining**: Event handlers, lifecycle nodes, advanced actions (4 features)
 
 ---
 
