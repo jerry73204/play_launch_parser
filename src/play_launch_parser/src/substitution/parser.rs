@@ -1,7 +1,7 @@
 //! Substitution parser
 
 use crate::error::{ParseError, Result};
-use crate::substitution::types::Substitution;
+use crate::substitution::types::{CommandErrorMode, Substitution};
 
 /// Parse substitution string like "$(var x)" or "text $(env Y) more"
 /// Supports nested substitutions like "$(var $(env NAME)_config)"
@@ -110,6 +110,35 @@ fn extract_first_quoted_arg(input: &str) -> &str {
 
     // Return the full string (handles unquoted args or single quoted args)
     trimmed
+}
+
+/// Extract the second quoted argument from a string like "'cmd' 'warn'"
+/// Returns the content of the second quoted string without the quotes.
+/// Returns None if there is no second argument.
+fn extract_second_quoted_arg(input: &str) -> Option<&str> {
+    let trimmed = input.trim();
+
+    // Check for single or double quotes at the start
+    if let Some(quote) = trimmed.chars().next() {
+        if quote == '\'' || quote == '"' {
+            // Find the matching closing quote for the first arg
+            if let Some(end_idx) = trimmed[1..].find(quote) {
+                // Look for the second quoted string after the first
+                let after_first = trimmed[end_idx + 2..].trim_start();
+
+                if let Some(quote2) = after_first.chars().next() {
+                    if quote2 == '\'' || quote2 == '"' {
+                        // Find the matching closing quote for the second arg
+                        if let Some(end_idx2) = after_first[1..].find(quote2) {
+                            return Some(&after_first[1..end_idx2 + 1]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Parse the content inside a substitution $(...)
@@ -238,11 +267,26 @@ fn parse_single_substitution(sub_type: &str, args: Option<&str>) -> Result<Subst
 
             // ROS 2 command substitution supports two arguments:
             // $(command 'cmd' 'error_mode')
-            // where error_mode is 'warn', 'ignore', or 'strict'
-            // For now, we extract only the first argument (the command itself)
+            // where error_mode is 'warn', 'ignore', or 'strict' (default: strict)
             let first_arg = extract_first_quoted_arg(cmd_str);
             let cmd_subs = parse_substitutions_recursive(first_arg)?;
-            Ok(Substitution::Command(cmd_subs))
+
+            // Extract optional second argument for error mode
+            let error_mode = if let Some(mode_str) = extract_second_quoted_arg(cmd_str) {
+                match mode_str {
+                    "warn" => CommandErrorMode::Warn,
+                    "ignore" => CommandErrorMode::Ignore,
+                    "strict" => CommandErrorMode::Strict,
+                    _ => CommandErrorMode::Strict, // Default to strict for unknown modes
+                }
+            } else {
+                CommandErrorMode::Strict // Default when no second argument
+            };
+
+            Ok(Substitution::Command {
+                cmd: cmd_subs,
+                error_mode,
+            })
         }
         "find-pkg-share" => {
             let package_str = args
@@ -455,7 +499,10 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(
             subs[0],
-            Substitution::Command(vec![Substitution::Text("echo hello".to_string())])
+            Substitution::Command {
+                cmd: vec![Substitution::Text("echo hello".to_string())],
+                error_mode: CommandErrorMode::Strict,
+            }
         );
     }
 
@@ -465,7 +512,10 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(
             subs[0],
-            Substitution::Command(vec![Substitution::Text("ls -la".to_string())])
+            Substitution::Command {
+                cmd: vec![Substitution::Text("ls -la".to_string())],
+                error_mode: CommandErrorMode::Strict,
+            }
         );
     }
 
@@ -476,7 +526,10 @@ mod tests {
         assert_eq!(subs[0], Substitution::Text("Version: ".to_string()));
         assert_eq!(
             subs[1],
-            Substitution::Command(vec![Substitution::Text("cat /etc/os-release".to_string())])
+            Substitution::Command {
+                cmd: vec![Substitution::Text("cat /etc/os-release".to_string())],
+                error_mode: CommandErrorMode::Strict,
+            }
         );
     }
 
@@ -486,9 +539,10 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(
             subs[0],
-            Substitution::Command(vec![Substitution::Text(
-                "echo test | tr a-z A-Z".to_string()
-            )])
+            Substitution::Command {
+                cmd: vec![Substitution::Text("echo test | tr a-z A-Z".to_string())],
+                error_mode: CommandErrorMode::Strict,
+            }
         );
     }
 
@@ -568,12 +622,13 @@ mod tests {
         let subs = parse_substitutions("$(command echo $(var value))").unwrap();
         assert_eq!(subs.len(), 1);
 
-        if let Substitution::Command(cmd_subs) = &subs[0] {
-            assert_eq!(cmd_subs.len(), 2);
+        if let Substitution::Command { cmd, error_mode } = &subs[0] {
+            assert_eq!(*error_mode, CommandErrorMode::Strict);
+            assert_eq!(cmd.len(), 2);
             // First part is "echo "
-            assert_eq!(cmd_subs[0], Substitution::Text("echo ".to_string()));
+            assert_eq!(cmd[0], Substitution::Text("echo ".to_string()));
             // Second part is the nested $(var value)
-            assert!(matches!(cmd_subs[1], Substitution::LaunchConfiguration(_)));
+            assert!(matches!(cmd[1], Substitution::LaunchConfiguration(_)));
         } else {
             panic!("Expected Command");
         }
@@ -730,5 +785,57 @@ mod tests {
         let subs = parse_substitutions("$(eval (3 + 4) * 2)").unwrap();
         assert_eq!(subs.len(), 1);
         assert!(matches!(subs[0], Substitution::Eval(_)));
+    }
+
+    // Command error mode tests
+    #[test]
+    fn test_parse_command_with_warn_mode() {
+        let subs = parse_substitutions("$(command 'exit 1' 'warn')").unwrap();
+        assert_eq!(subs.len(), 1);
+        if let Substitution::Command { cmd, error_mode } = &subs[0] {
+            assert_eq!(*error_mode, CommandErrorMode::Warn);
+            assert_eq!(cmd.len(), 1);
+            assert_eq!(cmd[0], Substitution::Text("exit 1".to_string()));
+        } else {
+            panic!("Expected Command");
+        }
+    }
+
+    #[test]
+    fn test_parse_command_with_ignore_mode() {
+        let subs = parse_substitutions("$(command 'exit 1' 'ignore')").unwrap();
+        assert_eq!(subs.len(), 1);
+        if let Substitution::Command { cmd, error_mode } = &subs[0] {
+            assert_eq!(*error_mode, CommandErrorMode::Ignore);
+            assert_eq!(cmd.len(), 1);
+            assert_eq!(cmd[0], Substitution::Text("exit 1".to_string()));
+        } else {
+            panic!("Expected Command");
+        }
+    }
+
+    #[test]
+    fn test_parse_command_with_strict_mode() {
+        let subs = parse_substitutions("$(command 'exit 1' 'strict')").unwrap();
+        assert_eq!(subs.len(), 1);
+        if let Substitution::Command { cmd, error_mode } = &subs[0] {
+            assert_eq!(*error_mode, CommandErrorMode::Strict);
+            assert_eq!(cmd.len(), 1);
+            assert_eq!(cmd[0], Substitution::Text("exit 1".to_string()));
+        } else {
+            panic!("Expected Command");
+        }
+    }
+
+    #[test]
+    fn test_parse_command_without_error_mode() {
+        // Should default to Strict
+        let subs = parse_substitutions("$(command 'echo test')").unwrap();
+        assert_eq!(subs.len(), 1);
+        if let Substitution::Command { error_mode, .. } = &subs[0] {
+            assert_eq!(*error_mode, CommandErrorMode::Strict);
+        } else {
+            panic!("Expected Command");
+        }
     }
 }

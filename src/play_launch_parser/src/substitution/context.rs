@@ -275,9 +275,19 @@ fn reconstruct_substitution_string(subs: &[Substitution]) -> String {
                 }
                 result.push(')');
             }
-            Substitution::Command(cmd) => {
+            Substitution::Command { cmd, error_mode } => {
                 result.push_str("$(command ");
                 result.push_str(&reconstruct_substitution_string(cmd));
+                // Include error mode if not default (Strict)
+                if *error_mode != crate::substitution::types::CommandErrorMode::Strict {
+                    result.push_str(" '");
+                    result.push_str(match error_mode {
+                        crate::substitution::types::CommandErrorMode::Warn => "warn",
+                        crate::substitution::types::CommandErrorMode::Ignore => "ignore",
+                        crate::substitution::types::CommandErrorMode::Strict => "strict",
+                    });
+                    result.push('\'');
+                }
                 result.push(')');
             }
             Substitution::FindPackageShare(pkg) => {

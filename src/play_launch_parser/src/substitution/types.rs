@@ -3,6 +3,18 @@
 use crate::error::SubstitutionError;
 use crate::substitution::context::LaunchContext;
 
+/// Error handling mode for command substitutions
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum CommandErrorMode {
+    /// Fail on any error (default)
+    #[default]
+    Strict,
+    /// Log stderr as warning but continue (return stdout)
+    Warn,
+    /// Ignore all errors (return stdout regardless)
+    Ignore,
+}
+
 /// Substitution enum representing different types of substitutions
 #[derive(Debug, Clone, PartialEq)]
 pub enum Substitution {
@@ -20,8 +32,11 @@ pub enum Substitution {
         name: Vec<Substitution>,
         default: Option<Vec<Substitution>>,
     },
-    /// $(command cmd) - Execute shell command and capture output
-    Command(Vec<Substitution>),
+    /// $(command cmd [error_mode]) - Execute shell command and capture output
+    Command {
+        cmd: Vec<Substitution>,
+        error_mode: CommandErrorMode,
+    },
     /// $(find-pkg-share package_name) - Find ROS 2 package share directory
     FindPackageShare(Vec<Substitution>),
     /// $(dirname) - Directory of the current launch file
@@ -69,9 +84,9 @@ impl Substitution {
                     }
                 }))
             }
-            Substitution::Command(cmd_subs) => {
-                let cmd = resolve_substitutions(cmd_subs, context)?;
-                execute_command(&cmd)
+            Substitution::Command { cmd, error_mode } => {
+                let cmd_str = resolve_substitutions(cmd, context)?;
+                execute_command(&cmd_str, error_mode)
             }
             Substitution::FindPackageShare(package_subs) => {
                 let package_name = resolve_substitutions(package_subs, context)?;
@@ -147,7 +162,7 @@ fn find_package_share(package_name: &str) -> Option<String> {
 /// # Security Note
 /// This function executes arbitrary shell commands. Only use with trusted input.
 /// Commands are executed in a shell context and can access the full system.
-fn execute_command(cmd: &str) -> Result<String, SubstitutionError> {
+fn execute_command(cmd: &str, error_mode: &CommandErrorMode) -> Result<String, SubstitutionError> {
     use std::process::Command;
 
     // Use bash instead of sh to ensure environment variables are preserved
@@ -176,7 +191,21 @@ fn execute_command(cmd: &str) -> Result<String, SubstitutionError> {
                 stderr.trim()
             )
         };
-        return Err(SubstitutionError::CommandFailed(error_msg));
+
+        // Handle error based on error mode
+        match error_mode {
+            CommandErrorMode::Strict => {
+                // Fail on error
+                return Err(SubstitutionError::CommandFailed(error_msg));
+            }
+            CommandErrorMode::Warn => {
+                // Log warning but continue with stdout
+                log::warn!("Command failed: {}", error_msg);
+            }
+            CommandErrorMode::Ignore => {
+                // Silently ignore errors
+            }
+        }
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -564,7 +593,10 @@ mod tests {
 
     #[test]
     fn test_command_simple() {
-        let sub = Substitution::Command(vec![Substitution::Text("echo hello".to_string())]);
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("echo hello".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         assert_eq!(result, "hello");
@@ -572,7 +604,10 @@ mod tests {
 
     #[test]
     fn test_command_with_output_trimming() {
-        let sub = Substitution::Command(vec![Substitution::Text("echo '  spaces  '".to_string())]);
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("echo '  spaces  '".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         // Output should be trimmed
@@ -581,9 +616,10 @@ mod tests {
 
     #[test]
     fn test_command_with_newlines() {
-        let sub = Substitution::Command(vec![Substitution::Text(
-            "printf 'line1\\nline2\\n'".to_string(),
-        )]);
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("printf 'line1\\nline2\\n'".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         // Trailing newline should be trimmed
@@ -592,7 +628,10 @@ mod tests {
 
     #[test]
     fn test_command_failed() {
-        let sub = Substitution::Command(vec![Substitution::Text("exit 1".to_string())]);
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("exit 1".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
         let context = LaunchContext::new();
         let result = sub.resolve(&context);
         assert!(result.is_err());
@@ -600,7 +639,10 @@ mod tests {
 
     #[test]
     fn test_command_with_args() {
-        let sub = Substitution::Command(vec![Substitution::Text("echo foo bar".to_string())]);
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("echo foo bar".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         assert_eq!(result, "foo bar");
@@ -608,7 +650,10 @@ mod tests {
 
     #[test]
     fn test_command_pwd() {
-        let sub = Substitution::Command(vec![Substitution::Text("pwd".to_string())]);
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("pwd".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         // Should return some directory path (non-empty)
@@ -619,7 +664,10 @@ mod tests {
     #[test]
     fn test_command_env_access() {
         std::env::set_var("TEST_CMD_VAR", "test_value");
-        let sub = Substitution::Command(vec![Substitution::Text("echo $TEST_CMD_VAR".to_string())]);
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("echo $TEST_CMD_VAR".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         assert_eq!(result, "test_value");
@@ -683,10 +731,13 @@ mod tests {
     #[test]
     fn test_resolve_nested_var_in_command() {
         // $(command echo $(var greeting)) where greeting=hello
-        let sub = Substitution::Command(vec![
-            Substitution::Text("echo ".to_string()),
-            Substitution::LaunchConfiguration(vec![Substitution::Text("greeting".to_string())]),
-        ]);
+        let sub = Substitution::Command {
+            cmd: vec![
+                Substitution::Text("echo ".to_string()),
+                Substitution::LaunchConfiguration(vec![Substitution::Text("greeting".to_string())]),
+            ],
+            error_mode: CommandErrorMode::Strict,
+        };
 
         let mut context = LaunchContext::new();
         context.set_configuration("greeting".to_string(), "hello".to_string());
@@ -785,13 +836,16 @@ mod tests {
         // $(command echo $(env USER))
         std::env::set_var("TEST_USER_NESTED", "testuser");
 
-        let sub = Substitution::Command(vec![
-            Substitution::Text("echo ".to_string()),
-            Substitution::EnvironmentVariable {
-                name: vec![Substitution::Text("TEST_USER_NESTED".to_string())],
-                default: None,
-            },
-        ]);
+        let sub = Substitution::Command {
+            cmd: vec![
+                Substitution::Text("echo ".to_string()),
+                Substitution::EnvironmentVariable {
+                    name: vec![Substitution::Text("TEST_USER_NESTED".to_string())],
+                    default: None,
+                },
+            ],
+            error_mode: CommandErrorMode::Strict,
+        };
 
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
@@ -919,5 +973,65 @@ mod tests {
         let context = LaunchContext::new();
         let result = sub.resolve(&context);
         assert!(result.is_err());
+    }
+
+    // Command error mode execution tests
+    #[test]
+    fn test_command_strict_mode_fails_on_error() {
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("exit 1".to_string())],
+            error_mode: CommandErrorMode::Strict,
+        };
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context);
+        // Should fail with Strict mode
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_warn_mode_continues_on_error() {
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("echo output && exit 1".to_string())],
+            error_mode: CommandErrorMode::Warn,
+        };
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context);
+        // Should succeed with Warn mode even though command failed
+        assert!(result.is_ok());
+        // Should return stdout (output)
+        assert_eq!(result.unwrap(), "output");
+    }
+
+    #[test]
+    fn test_command_ignore_mode_continues_on_error() {
+        let sub = Substitution::Command {
+            cmd: vec![Substitution::Text("echo output && exit 1".to_string())],
+            error_mode: CommandErrorMode::Ignore,
+        };
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context);
+        // Should succeed with Ignore mode even though command failed
+        assert!(result.is_ok());
+        // Should return stdout (output)
+        assert_eq!(result.unwrap(), "output");
+    }
+
+    #[test]
+    fn test_command_all_modes_succeed_on_success() {
+        // All modes should succeed when command succeeds
+        for error_mode in [
+            CommandErrorMode::Strict,
+            CommandErrorMode::Warn,
+            CommandErrorMode::Ignore,
+        ] {
+            let sub = Substitution::Command {
+                cmd: vec![Substitution::Text("echo success".to_string())],
+                error_mode,
+            };
+            let context = LaunchContext::new();
+            let result = sub.resolve(&context);
+            assert!(result.is_ok());
+            assert_eq!(result.unwrap(), "success");
+        }
     }
 }
