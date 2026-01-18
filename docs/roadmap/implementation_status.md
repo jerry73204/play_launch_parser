@@ -204,26 +204,33 @@ This document tracks the overall implementation progress of the play_launch_pars
 
 ---
 
-## Phase 5: Python Support & Remaining Features - 📋 NOT STARTED
+## Phase 5: Python Support & Remaining Features - 🔄 IN PROGRESS
 
 **Priority**: HIGH (for 95-100% Autoware coverage)
 **Estimated Time**: 3-4 weeks
 
 See [Phase 5 Roadmap](./phase-5-python_support.md) for detailed implementation plan.
 
-### Phase 5.1: Quick Wins ⚠️
-- ⚠️ YAML configuration file handling (30 min)
-- ⚠️ `<node_container>` support (1-2 hours)
-- ⚠️ `<composable_node>` support (1-2 hours)
-- ⚠️ `<set_env>` / `<unset_env>` support (1-2 hours)
+### Phase 5.1: Quick Wins ✅ COMPLETE
+- ✅ YAML configuration file handling
+- ✅ `<node_container>` support
+- ✅ `<composable_node>` support
+- ✅ `<set_env>` / `<unset_env>` support
 
-### Phase 5.2: Python Launch File Support ⚠️
-- ⚠️ pyo3 integration setup (1 day)
-- ⚠️ Mock `launch` Python API (3-4 days)
-- ⚠️ Mock `launch_ros` Python API (2-3 days)
-- ⚠️ Python file execution engine (2-3 days)
-- ⚠️ Integration with main parser (1 day)
-- ⚠️ Testing & validation (2 days)
+### Phase 5.2: Python Launch File Support 🔄 IN PROGRESS (Core Complete)
+- ✅ pyo3 integration setup
+- ✅ Mock `launch` Python API (core classes)
+  - ✅ LaunchDescription
+  - ✅ DeclareLaunchArgument
+  - ✅ LaunchConfiguration
+  - ✅ TextSubstitution
+- ✅ Mock `launch_ros` Python API (core classes)
+  - ✅ Node
+- ✅ Python file execution engine
+- ✅ Integration with main parser (traverse_file & process_include)
+- ✅ Testing & validation (2 integration tests passing)
+
+**Remaining**: Container classes (ComposableNode), additional substitutions (PathJoinSubstitution, FindPackageShare)
 
 **Expected Impact**: 95-100% Autoware coverage (XML + Python files)
 

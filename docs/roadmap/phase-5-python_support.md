@@ -1,6 +1,6 @@
 # Phase 5: Python Launch File Support
 
-**Status**: ✅ Phase 5.1 Complete | 📋 Phase 5.2 Not Started
+**Status**: ✅ Phase 5.1 Complete | 🔄 Phase 5.2 Core Complete (Session 8)
 **Priority**: HIGH (for 95-100% Autoware coverage)
 **Dependencies**: Phase 4 Complete ✅
 
@@ -10,8 +10,8 @@
 
 Achieve **full Autoware compatibility** through Python launch file support via pyo3 embedded interpreter with mock ROS 2 API.
 
-**Current**: 90% coverage (XML only)
-**Target**: 95-100% coverage (XML + Python)
+**Current**: ~70% coverage (XML 90% + Python ~40% - core classes only)
+**Target**: 95-100% coverage (XML + Python with full API support)
 
 ---
 
@@ -33,8 +33,8 @@ Achieve **full Autoware compatibility** through Python launch file support via p
 
 ## Phase 5.2: Python Support via pyo3
 
-**Time**: 3-4 weeks
-**Status**: 📋 Not Started
+**Time**: 3-4 weeks (1 week completed)
+**Status**: 🔄 Core Complete (Session 8) - Additional APIs Needed
 
 ### Architecture
 
@@ -48,209 +48,706 @@ XML file → Python include → Execute with mock API → Capture nodes → Node
 
 ### Work Items
 
-#### 5.2.1: Workspace Setup (Day 1)
+### Completed Work Items ✅
+
+#### 5.2.1: Workspace Setup ✅ COMPLETE (Session 8)
 
 **Tasks**:
-- [ ] Add pyo3 dependency with `python` feature flag
-- [ ] Create `src/python/` module structure
-- [ ] Set up conditional compilation
-- [ ] Add build configuration
+- [x] Add pyo3 dependency with `python` feature flag
+- [x] Create `src/python/` module structure
+- [x] Set up conditional compilation
+- [x] Add build configuration
+- [x] Thread-safe global capture storage
 
 **Files**:
-- `Cargo.toml`: Add pyo3, feature flags
-- `src/python/mod.rs`: Module root
-- `src/lib.rs`: Conditional Python integration
+- `Cargo.toml`: pyo3 0.20, feature flags ✅
+- `src/python/mod.rs`: Module root ✅
+- `src/python/bridge.rs`: Capture storage ✅
+- `src/lib.rs`: Conditional Python integration ✅
 
-**Expected Result**: Compiles with/without `--features python`
-
-**Guidance**:
-```toml
-[dependencies]
-pyo3 = { version = "0.20", features = ["auto-initialize"], optional = true }
-
-[features]
-python = ["pyo3"]
-```
+**Result**: ✅ Compiles with/without `--features python`
 
 ---
 
-#### 5.2.2: Python Executor (Days 1-2)
+#### 5.2.2: Python Executor ✅ COMPLETE (Session 8)
 
 **Tasks**:
-- [ ] `PythonLaunchExecutor` struct
-- [ ] Initialize Python interpreter (cached)
-- [ ] Execute Python file with `Python::with_gil`
-- [ ] Call `generate_launch_description()`
-- [ ] Global capture storage (`CAPTURED_NODES`)
+- [x] `PythonLaunchExecutor` struct
+- [x] Initialize Python interpreter
+- [x] Execute Python file with `Python::with_gil`
+- [x] Call `generate_launch_description()`
+- [x] Global capture storage (`CAPTURED_NODES`, `CAPTURED_CONTAINERS`, `CAPTURED_LOAD_NODES`)
+- [x] Use `__main__` module dict for proper Python environment
 
 **Files**:
-- `src/python/executor.rs`
-- `src/python/bridge.rs`
+- `src/python/executor.rs` ✅
+- `src/python/bridge.rs` ✅
 
-**Expected Result**: Can execute simple Python file
-
-**Guidance**:
-```rust
-static CAPTURED_NODES: Lazy<Arc<Mutex<Vec<NodeCapture>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
-```
+**Result**: ✅ Can execute Python files and capture nodes
 
 ---
 
-#### 5.2.3: Mock Core API (Days 2-4)
-
-**Priority Order**:
-1. **Node** (most critical)
-2. **LaunchDescription**
-3. **LaunchConfiguration**
-4. **DeclareLaunchArgument**
+#### 5.2.3: Mock Core API ✅ COMPLETE (Session 8)
 
 **Tasks**:
-- [ ] `#[pyclass] Node` with capture on construction
-- [ ] `#[pyclass] LaunchDescription`
-- [ ] `#[pyclass] LaunchConfiguration`
-- [ ] `#[pyclass] DeclareLaunchArgument`
-- [ ] Module registration in `sys.modules`
+- [x] `#[pyclass] Node` with capture on construction
+- [x] `#[pyclass] LaunchDescription`
+- [x] `#[pyclass] LaunchConfiguration`
+- [x] `#[pyclass] DeclareLaunchArgument`
+- [x] `#[pyclass] TextSubstitution`
+- [x] Module registration in `sys.modules`
 
 **Files**:
-- `src/python/api/launch_ros.rs`: Node
-- `src/python/api/launch.rs`: LaunchDescription
-- `src/python/api/substitutions.rs`: LaunchConfiguration
-- `src/python/api/actions.rs`: DeclareLaunchArgument
-- `src/python/api/mod.rs`: Module registration
+- `src/python/api/launch_ros.rs`: Node ✅
+- `src/python/api/launch.rs`: LaunchDescription ✅
+- `src/python/api/substitutions.rs`: LaunchConfiguration, TextSubstitution ✅
+- `src/python/api/actions.rs`: DeclareLaunchArgument ✅
+- `src/python/api/mod.rs`: Module registration ✅
 
-**Expected Result**: Simple Python launch files work
+**Result**: ✅ Simple Python launch files work
 
-**Guidance**:
+---
+
+#### 5.2.4: Container Support ✅ COMPLETE (Session 8)
+
+**Tasks**:
+- [x] `#[pyclass] ComposableNodeContainer`
+- [x] `#[pyclass] ComposableNode`
+- [x] Container-node association
+- [x] Namespace inheritance from container to composable nodes
+
+**Files**:
+- `src/python/api/launch_ros.rs`: Container classes ✅
+
+**Result**: ✅ Composable nodes work in Python
+
+---
+
+#### 5.2.6: Integration ✅ COMPLETE (Session 8)
+
+**Tasks**:
+- [x] Integrate executor in `LaunchTraverser`
+- [x] Convert `NodeCapture` → `NodeRecord`
+- [x] Convert `ContainerCapture` → `ComposableNodeContainerRecord`
+- [x] Convert `LoadNodeCapture` → `LoadNodeRecord`
+- [x] Pass LaunchContext to Python (basic)
+- [x] Merge Python + XML nodes, containers, load_nodes
+
+**Files**:
+- `src/lib.rs`: `traverse_file()`, `process_include()` ✅
+- `src/python/bridge.rs`: Conversion logic ✅
+
+**Result**: ✅ Mixed XML+Python launch files work
+
+---
+
+#### 5.2.7: Testing ✅ PARTIAL (Session 8)
+
+**Tasks**:
+- [x] Python fixture files (simple, no imports, containers)
+- [x] Integration tests (3 tests)
+- [ ] ⚠️ More comprehensive parameter tests needed
+- [ ] ⚠️ Autoware validation needed
+- [ ] ⚠️ Error handling tests needed
+
+**Files**:
+- `tests/integration_tests.rs` ✅ (3 Python tests)
+- `tests/fixtures/launch/*.launch.py` ✅ (3 test files)
+
+**Current Result**: 246 tests passing (243 without Python, +3 with Python)
+
+---
+
+### Remaining Work Items 🔄
+
+#### 5.2.5: Advanced Substitution Support 📋 HIGH PRIORITY
+
+**Priority**: HIGH - Commonly used in Autoware Python launch files
+
+**Tasks**:
+- [ ] `PathJoinSubstitution` - Join path components
+- [ ] `FindPackageShare` - Find ROS package share directory
+- [ ] `EnvironmentVariable` - Access environment variables
+- [ ] `PythonExpression` - Evaluate Python expressions
+- [ ] `Command` - Execute shell commands
+- [ ] `ThisLaunchFileDir` - Get current launch file directory
+- [ ] `LocalSubstitution` - Local variable substitution
+
+**Implementation Guidance**:
 ```rust
+// src/python/api/substitutions.rs
+
+/// PathJoinSubstitution - joins path components
+#[pyclass]
+#[derive(Clone)]
+pub struct PathJoinSubstitution {
+    substitutions: Vec<PyObject>,
+}
+
 #[pymethods]
-impl Node {
+impl PathJoinSubstitution {
     #[new]
-    fn new(package: String, executable: String, /* ... */) -> Self {
-        let node = Self { package, executable, /* ... */ };
-        CAPTURED_NODES.lock().unwrap().push(NodeCapture::from_node(&node));
-        node
+    fn new(substitutions: Vec<PyObject>) -> Self {
+        Self { substitutions }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        // Convert each substitution to string and join with '/'
+        let parts: Result<Vec<String>, _> = self.substitutions
+            .iter()
+            .map(|obj| obj.extract::<String>(py))
+            .collect();
+        Ok(parts?.join("/"))
     }
 }
-```
 
----
+/// FindPackageShare - finds ROS package share directory
+#[pyclass]
+#[derive(Clone)]
+pub struct FindPackageShare {
+    package_name: String,
+}
 
-#### 5.2.4: Container Support (Days 5-6)
+#[pymethods]
+impl FindPackageShare {
+    #[new]
+    fn new(package_name: String) -> Self {
+        Self { package_name }
+    }
 
-**Tasks**:
-- [ ] `#[pyclass] ComposableNodeContainer`
-- [ ] `#[pyclass] ComposableNode`
-- [ ] Container-node association
-
-**Files**:
-- `src/python/api/launch_ros.rs`: Container classes
-
-**Expected Result**: Composable nodes work in Python
-
----
-
-#### 5.2.5: Substitution Support (Days 7-8)
-
-**Tasks**:
-- [ ] `PathJoinSubstitution`
-- [ ] `FindPackageShare`
-- [ ] `TextSubstitution`
-- [ ] Resolve to Rust substitution format
-
-**Files**:
-- `src/python/api/substitutions.rs`
-
-**Expected Result**: Substitutions in Python resolve correctly
-
-**Guidance**:
-```rust
-impl LaunchConfiguration {
     fn __str__(&self) -> String {
-        format!("$(var {})", self.variable_name)
+        format!("$(find-pkg-share {})", self.package_name)
+    }
+}
+
+/// EnvironmentVariable - access environment variables
+#[pyclass]
+#[derive(Clone)]
+pub struct EnvironmentVariable {
+    name: String,
+    default_value: Option<String>,
+}
+
+#[pymethods]
+impl EnvironmentVariable {
+    #[new]
+    #[pyo3(signature = (name, *, default_value=None))]
+    fn new(name: String, default_value: Option<String>) -> Self {
+        Self { name, default_value }
+    }
+
+    fn __str__(&self) -> String {
+        if let Some(default) = &self.default_value {
+            format!("$(optenv {} {})", self.name, default)
+        } else {
+            format!("$(env {})", self.name)
+        }
     }
 }
 ```
 
+**Files to Update**:
+- `src/python/api/substitutions.rs`: Add new substitution classes
+- `src/python/api/mod.rs`: Register new classes in module
+
+**Testing**:
+- Create `tests/fixtures/launch/test_python_substitutions.launch.py`
+- Test PathJoinSubstitution with mixed strings and substitutions
+- Test FindPackageShare resolution
+- Test EnvironmentVariable with and without defaults
+
+**Expected Result**: Python launch files can use path and package substitutions
+
 ---
 
-#### 5.2.6: Integration (Days 9-10)
+#### 5.2.9: Action Classes Support 📋 MEDIUM PRIORITY
+
+**Priority**: MEDIUM - Used in advanced launch files
 
 **Tasks**:
-- [ ] Integrate executor in `LaunchTraverser`
-- [ ] Convert `NodeCapture` → `NodeRecord`
-- [ ] Pass LaunchContext to Python
-- [ ] Merge Python + XML nodes
+- [ ] `IncludeLaunchDescription` - Include other launch files
+- [ ] `PythonLaunchDescriptionSource` - Source for Python launch files
+- [ ] `GroupAction` - Group actions with scoped push_namespace
+- [ ] `SetEnvironmentVariable` - Set environment variables
+- [ ] `SetParameter` - Set global parameters
+- [ ] `ExecuteProcess` - Run non-ROS processes
+- [ ] `LogInfo` - Log information messages
+- [ ] `TimerAction` - Execute action after delay
+- [ ] `OpaqueFunction` - Execute Python function (limited support)
 
-**Files**:
-- `src/lib.rs`: `process_python_file()`
-- `src/python/bridge.rs`: Conversion logic
-
-**Expected Result**: Mixed XML+Python launch files work
-
-**Guidance**:
+**Implementation Guidance**:
 ```rust
-#[cfg(feature = "python")]
-fn process_python_file(&mut self, path: &Path) -> Result<()> {
-    let executor = python::PythonLaunchExecutor::new()?;
-    let nodes = executor.execute_launch_file(path, &self.context.configurations())?;
-    self.records.extend(nodes);
-    Ok(())
+// src/python/api/actions.rs
+
+/// IncludeLaunchDescription - includes another launch file
+#[pyclass]
+#[derive(Clone)]
+pub struct IncludeLaunchDescription {
+    launch_description_source: PyObject,
+    launch_arguments: Vec<(String, String)>,
+}
+
+#[pymethods]
+impl IncludeLaunchDescription {
+    #[new]
+    #[pyo3(signature = (launch_description_source, *, launch_arguments=None, **_kwargs))]
+    fn new(
+        launch_description_source: PyObject,
+        launch_arguments: Option<Vec<(String, String)>>,
+        _kwargs: Option<&PyDict>,
+    ) -> Self {
+        Self {
+            launch_description_source,
+            launch_arguments: launch_arguments.unwrap_or_default(),
+        }
+    }
+}
+
+/// GroupAction - groups actions with scoped namespace
+#[pyclass]
+#[derive(Clone)]
+pub struct GroupAction {
+    actions: Vec<PyObject>,
+    scoped: bool,
+    forwarding: bool,
+}
+
+#[pymethods]
+impl GroupAction {
+    #[new]
+    #[pyo3(signature = (actions, *, scoped=True, forwarding=True, **_kwargs))]
+    fn new(
+        actions: Vec<PyObject>,
+        scoped: Option<bool>,
+        forwarding: Option<bool>,
+        _kwargs: Option<&PyDict>,
+    ) -> Self {
+        Self {
+            actions,
+            scoped: scoped.unwrap_or(true),
+            forwarding: forwarding.unwrap_or(true),
+        }
+    }
+}
+
+/// SetEnvironmentVariable - sets environment variable
+#[pyclass]
+#[derive(Clone)]
+pub struct SetEnvironmentVariable {
+    name: String,
+    value: String,
+}
+
+#[pymethods]
+impl SetEnvironmentVariable {
+    #[new]
+    fn new(name: String, value: String) -> Self {
+        // TODO: Capture this to apply to launched nodes
+        Self { name, value }
+    }
+}
+
+/// ExecuteProcess - executes non-ROS process
+#[pyclass]
+#[derive(Clone)]
+pub struct ExecuteProcess {
+    cmd: Vec<String>,
+    cwd: Option<String>,
+    name: Option<String>,
+    output: String,
+}
+
+#[pymethods]
+impl ExecuteProcess {
+    #[new]
+    #[pyo3(signature = (*, cmd, cwd=None, name=None, output="screen", **_kwargs))]
+    fn new(
+        cmd: Vec<String>,
+        cwd: Option<String>,
+        name: Option<String>,
+        output: Option<String>,
+        _kwargs: Option<&PyDict>,
+    ) -> Self {
+        // TODO: Capture as ExecutableRecord
+        Self {
+            cmd,
+            cwd,
+            name,
+            output: output.unwrap_or_else(|| "screen".to_string()),
+        }
+    }
+}
+
+/// LogInfo - logs information message
+#[pyclass]
+#[derive(Clone)]
+pub struct LogInfo {
+    msg: String,
+}
+
+#[pymethods]
+impl LogInfo {
+    #[new]
+    fn new(msg: String) -> Self {
+        log::info!("Python Launch: {}", msg);
+        Self { msg }
+    }
 }
 ```
 
+**Files to Update**:
+- `src/python/api/actions.rs`: Add new action classes
+- `src/python/api/launch.rs`: Add `PythonLaunchDescriptionSource`
+- `src/python/api/mod.rs`: Register new classes
+
+**Testing**:
+- Test GroupAction with scoped namespaces
+- Test SetEnvironmentVariable capture
+- Test ExecuteProcess capture
+- Test LogInfo output
+
+**Expected Result**: Advanced Python launch file patterns supported
+
 ---
 
-#### 5.2.7: Testing (Days 11-14)
+#### 5.2.10: Condition Classes Support 📋 MEDIUM PRIORITY
+
+**Priority**: MEDIUM - Used for conditional node launching
 
 **Tasks**:
-- [ ] Unit tests for each mock class
-- [ ] Python fixture files (simple, params, containers)
-- [ ] Integration tests with Autoware files
-- [ ] Error handling tests
+- [ ] `IfCondition` - Condition based on substitution
+- [ ] `UnlessCondition` - Inverted condition
+- [ ] `LaunchConfigurationEquals` - Compare launch configuration value
+- [ ] `LaunchConfigurationNotEquals` - Compare launch configuration value (not equals)
+- [ ] `EnvironmentVariableEquals` - Compare environment variable value
 
-**Files**:
-- `tests/python_tests.rs`
-- `tests/fixtures/python/*.launch.py`
+**Implementation Guidance**:
+```rust
+// src/python/api/conditions.rs
 
-**Expected Result**: 95%+ Autoware coverage
+/// IfCondition - evaluates to true if predicate is true
+#[pyclass]
+#[derive(Clone)]
+pub struct IfCondition {
+    predicate: PyObject,
+}
 
-**Test Fixtures**:
+#[pymethods]
+impl IfCondition {
+    #[new]
+    fn new(predicate: PyObject) -> Self {
+        Self { predicate }
+    }
+
+    /// Evaluate the condition (Python will call this)
+    fn evaluate(&self, py: Python) -> PyResult<bool> {
+        // Convert substitution to string and evaluate as boolean
+        let value = self.predicate.extract::<String>(py)?;
+        Ok(value.to_lowercase() == "true" || value == "1")
+    }
+}
+
+/// UnlessCondition - evaluates to true if predicate is false
+#[pyclass]
+#[derive(Clone)]
+pub struct UnlessCondition {
+    predicate: PyObject,
+}
+
+#[pymethods]
+impl UnlessCondition {
+    #[new]
+    fn new(predicate: PyObject) -> Self {
+        Self { predicate }
+    }
+
+    fn evaluate(&self, py: Python) -> PyResult<bool> {
+        let value = self.predicate.extract::<String>(py)?;
+        Ok(value.to_lowercase() != "true" && value != "1")
+    }
+}
+```
+
+**Files to Create**:
+- `src/python/api/conditions.rs`: Condition classes
+
+**Files to Update**:
+- `src/python/api/mod.rs`: Register condition classes in module
+
+**Testing**:
+- Test IfCondition with LaunchConfiguration
+- Test UnlessCondition with boolean values
+- Test conditions in Node construction
+
+**Expected Result**: Conditional node launching works in Python
+
+---
+
+#### 5.2.11: Launch Description Sources 📋 LOW PRIORITY
+
+**Priority**: LOW - Used for advanced launch file inclusion
+
+**Tasks**:
+- [ ] `PythonLaunchDescriptionSource` - Source for Python launch files
+- [ ] `XMLLaunchDescriptionSource` - Source for XML launch files
+- [ ] `YAMLLaunchDescriptionSource` - Source for YAML launch files (rare)
+
+**Implementation Guidance**:
+```rust
+// src/python/api/launch_description_sources.rs
+
+/// PythonLaunchDescriptionSource - represents a Python launch file source
+#[pyclass]
+#[derive(Clone)]
+pub struct PythonLaunchDescriptionSource {
+    launch_file_path: String,
+}
+
+#[pymethods]
+impl PythonLaunchDescriptionSource {
+    #[new]
+    fn new(launch_file_path: String) -> Self {
+        Self { launch_file_path }
+    }
+
+    fn get_launch_file_path(&self) -> String {
+        self.launch_file_path.clone()
+    }
+}
+```
+
+**Files to Create**:
+- `src/python/api/launch_description_sources.rs`
+
+**Files to Update**:
+- `src/python/api/mod.rs`: Register source classes
+
+---
+
+#### 5.2.12: Parameter Support Enhancement 📋 HIGH PRIORITY
+
+**Priority**: HIGH - Parameters are commonly used
+
+**Tasks**:
+- [ ] Parse Python dict parameters to YAML-compatible format
+- [ ] Parse Python list parameters
+- [ ] Support `ParameterFile` class for YAML parameter files
+- [ ] Support `Parameter` class for explicit parameter definitions
+- [ ] Convert Python parameter types (dict/list) to string tuples
+
+**Implementation Guidance**:
+```rust
+// Update Node class in src/python/api/launch_ros.rs
+
+impl Node {
+    fn parse_parameters(&self, py: Python) -> PyResult<Vec<(String, String)>> {
+        let mut parsed_params = Vec::new();
+
+        for param_obj in &self.parameters {
+            // Handle dict: {key: value}
+            if let Ok(dict) = param_obj.extract::<HashMap<String, PyObject>>(py) {
+                for (key, value) in dict {
+                    // Convert Python value to string
+                    let value_str = if let Ok(s) = value.extract::<String>(py) {
+                        s
+                    } else if let Ok(i) = value.extract::<i64>(py) {
+                        i.to_string()
+                    } else if let Ok(f) = value.extract::<f64>(py) {
+                        f.to_string()
+                    } else if let Ok(b) = value.extract::<bool>(py) {
+                        b.to_string()
+                    } else {
+                        // Fallback to string representation
+                        value.to_string()
+                    };
+                    parsed_params.push((key, value_str));
+                }
+            }
+            // Handle parameter file path
+            else if let Ok(path) = param_obj.extract::<String>(py) {
+                // Mark as parameter file
+                parsed_params.push(("__param_file".to_string(), path));
+            }
+        }
+
+        Ok(parsed_params)
+    }
+}
+```
+
+**Files to Update**:
+- `src/python/api/launch_ros.rs`: Node parameter parsing
+- `src/python/bridge.rs`: NodeCapture parameter conversion
+
+**Testing**:
+- Test dict parameters: `{'param': 'value'}`
+- Test nested dict parameters: `{'ns': {'param': 'value'}}`
+- Test list parameters: `[{'param1': 'value1'}, {'param2': 'value2'}]`
+- Test parameter files: `/path/to/params.yaml`
+
+**Expected Result**: Python parameter formats convert correctly to record.json format
+
+---
+
+#### 5.2.13: Enhanced Testing & Validation 📋 HIGH PRIORITY
+
+**Priority**: HIGH - Ensure quality and coverage
+
+**Tasks**:
+- [ ] Add comprehensive parameter tests
+- [ ] Add substitution resolution tests
+- [ ] Add error handling tests (malformed Python, missing functions, etc.)
+- [ ] Validate against real Autoware Python launch files
+- [ ] Add performance benchmarks for Python execution
+- [ ] Test mixed XML+Python launch file chains (XML→Python→XML)
+- [ ] Test parameter passing from XML to Python via `<arg>`
+
+**Test Cases to Add**:
 ```python
-# tests/fixtures/python/simple.launch.py
-from launch import LaunchDescription
-from launch_ros.actions import Node
-
+# tests/fixtures/launch/test_python_parameters.launch.py
 def generate_launch_description():
     return LaunchDescription([
-        Node(package='demo', executable='talker', name='talker')
+        Node(
+            package='demo',
+            executable='node',
+            parameters=[
+                {'string_param': 'value'},
+                {'int_param': 42},
+                {'float_param': 3.14},
+                {'bool_param': True},
+                {'nested': {'param': 'value'}},
+                '/path/to/params.yaml',  # Parameter file
+            ]
+        )
+    ])
+
+# tests/fixtures/launch/test_python_substitutions.launch.py
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('package_name', default_value='demo'),
+        Node(
+            package=LaunchConfiguration('package_name'),
+            executable='node',
+            parameters=[{
+                'config_path': PathJoinSubstitution([
+                    FindPackageShare(LaunchConfiguration('package_name')),
+                    'config',
+                    'default.yaml'
+                ])
+            }]
+        )
+    ])
+
+# tests/fixtures/launch/test_python_conditions.launch.py
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('use_sim', default_value='false'),
+        Node(
+            package='demo',
+            executable='sim_node',
+            condition=IfCondition(LaunchConfiguration('use_sim'))
+        ),
+        Node(
+            package='demo',
+            executable='real_node',
+            condition=UnlessCondition(LaunchConfiguration('use_sim'))
+        )
     ])
 ```
 
+**Files to Update**:
+- `tests/integration_tests.rs`: Add new Python integration tests
+- `tests/fixtures/launch/`: Add new test fixtures
+
+**Expected Result**: 300+ total tests, 95%+ Autoware coverage
+
 ---
 
-#### 5.2.8: Documentation (Days 15-16)
+#### 5.2.14: Documentation Update 📋 MEDIUM PRIORITY
+
+**Priority**: MEDIUM - Needed for users
 
 **Tasks**:
-- [ ] Update README with Python support
-- [ ] Document supported/unsupported features
-- [ ] Python API compatibility guide
-- [ ] Build instructions with `--features python`
+- [ ] Update README.md with Python support section
+- [ ] Create `docs/PYTHON_API_SUPPORT.md` with compatibility matrix
+- [ ] Document build instructions with `--features python`
+- [ ] Document supported vs unsupported Python API features
+- [ ] Add examples of common Python launch file patterns
+- [ ] Document parameter format conversions
+- [ ] Document substitution conversion rules
 
-**Files**:
-- `README.md`
-- `docs/PYTHON_API_SUPPORT.md`
+**Documentation Structure**:
+```markdown
+# docs/PYTHON_API_SUPPORT.md
+
+## Python Launch File Support
+
+### Supported Python API
+
+#### Actions (launch.actions)
+- ✅ DeclareLaunchArgument
+- ✅ LogInfo
+- ⚠️ IncludeLaunchDescription (partial)
+- ⚠️ GroupAction (partial)
+- ❌ RegisterEventHandler (not supported)
+- ❌ TimerAction (not supported)
+
+#### Actions (launch_ros.actions)
+- ✅ Node (full support)
+- ✅ ComposableNodeContainer (full support)
+- ❌ LifecycleNode (not supported)
+- ❌ LoadComposableNodes (not supported)
+
+#### Substitutions (launch.substitutions)
+- ✅ LaunchConfiguration
+- ✅ TextSubstitution
+- ✅ PathJoinSubstitution
+- ✅ FindPackageShare
+- ✅ EnvironmentVariable
+- ⚠️ PythonExpression (limited)
+- ❌ AnonName (not supported)
+
+#### Conditions (launch.conditions)
+- ✅ IfCondition
+- ✅ UnlessCondition
+- ❌ LaunchConfigurationEquals (not supported)
+
+### Usage Examples
+
+#### Basic Node
+[examples...]
+
+#### Parameters
+[examples...]
+
+#### Substitutions
+[examples...]
+
+### Limitations
+
+[document limitations...]
+```
+
+**Files to Create/Update**:
+- `docs/PYTHON_API_SUPPORT.md`: New documentation
+- `README.md`: Add Python support section
+- `docs/feature_list.md`: Update Python feature status
+
+**Expected Result**: Clear documentation for Python API support
 
 ---
 
 ### Implementation Timeline
 
-| Week | Focus | Deliverable |
-|------|-------|-------------|
-| **1** | Setup + Core API | Node, LaunchDescription working |
-| **2** | Containers + Substitutions | Composable nodes, path substitutions |
-| **3** | Integration + Error Handling | Mixed XML+Python files |
-| **4** | Testing + Documentation | Autoware validation, docs |
+| Week | Focus | Status | Deliverable |
+|------|-------|--------|-------------|
+| **1** | Setup + Core API | ✅ Complete | Node, LaunchDescription, Containers working |
+| **2** | Advanced Substitutions + Actions | 📋 Pending | PathJoinSubstitution, FindPackageShare, additional actions |
+| **3** | Parameters + Conditions | 📋 Pending | Parameter parsing, IfCondition, UnlessCondition |
+| **4** | Testing + Documentation | 📋 Pending | Comprehensive tests, Autoware validation, docs |
+
+**Completed (Session 8)**: Core infrastructure, basic API, containers, integration
+**Next**: Advanced substitutions, parameter parsing, comprehensive testing
 
 ---
 
@@ -262,40 +759,64 @@ def generate_launch_description():
 - [x] composable_node handled
 - [x] 0 errors on Autoware XML
 
-### Phase 5.2 📋
-- [ ] Simple Python launch files execute
-- [ ] Nodes captured from Python
-- [ ] LaunchConfiguration resolves
-- [ ] Composable nodes in containers
+### Phase 5.2 Core ✅ (Session 8)
+- [x] Simple Python launch files execute
+- [x] Nodes captured from Python
+- [x] LaunchConfiguration resolves (basic)
+- [x] Composable nodes in containers
+- [x] No crashes on Python files
+- [x] 246 tests passing
+
+### Phase 5.2 Remaining 📋
+- [ ] Advanced substitutions (PathJoinSubstitution, FindPackageShare)
+- [ ] Parameter parsing (dict/list to string tuples)
+- [ ] Condition classes (IfCondition, UnlessCondition)
+- [ ] Additional action classes (GroupAction, IncludeLaunchDescription, etc.)
+- [ ] Comprehensive testing (parameters, substitutions, conditions)
 - [ ] 95%+ Autoware node coverage
-- [ ] No crashes on Python files
+- [ ] 300+ total tests
 
 ---
 
 ## API Support Matrix
 
-### Must Implement (Week 1-2)
-| API | Priority | Notes |
-|-----|----------|-------|
-| `launch.LaunchDescription` | Critical | Container for actions |
-| `launch_ros.actions.Node` | Critical | Primary node type |
-| `launch.actions.DeclareLaunchArgument` | Critical | Arguments |
-| `launch.substitutions.LaunchConfiguration` | Critical | Variable access |
+### Core Classes ✅ IMPLEMENTED (Session 8)
+| API | Status | Notes |
+|-----|--------|-------|
+| `launch.LaunchDescription` | ✅ | Container for actions |
+| `launch_ros.actions.Node` | ✅ | Primary node type (full support) |
+| `launch.actions.DeclareLaunchArgument` | ✅ | Arguments (placeholder) |
+| `launch.substitutions.LaunchConfiguration` | ✅ | Variable access |
+| `launch.substitutions.TextSubstitution` | ✅ | Literal text |
+| `launch_ros.actions.ComposableNodeContainer` | ✅ | Composable node container |
+| `launch_ros.descriptions.ComposableNode` | ✅ | Component definitions |
 
-### Should Implement (Week 2-3)
+### High Priority 📋 PENDING (Week 2)
 | API | Priority | Notes |
 |-----|----------|-------|
-| `launch_ros.actions.ComposableNodeContainer` | High | Autoware uses heavily |
-| `launch_ros.descriptions.ComposableNode` | High | Component definitions |
-| `launch.substitutions.PathJoinSubstitution` | High | Path manipulation |
-| `launch.substitutions.FindPackageShare` | High | Package paths |
+| `launch.substitutions.PathJoinSubstitution` | HIGH | Path manipulation |
+| `launch.substitutions.FindPackageShare` | HIGH | Package paths |
+| `launch.substitutions.EnvironmentVariable` | HIGH | Env var access |
+| Parameter parsing (dict/list) | HIGH | Convert Python params to string tuples |
 
-### Nice to Have (Week 3-4)
+### Medium Priority 📋 PENDING (Week 2-3)
 | API | Priority | Notes |
 |-----|----------|-------|
-| `launch.actions.OpaqueFunction` | Medium | Limited support |
-| `launch.conditions.IfCondition` | Medium | Conditionals |
-| `launch.conditions.UnlessCondition` | Medium | Conditionals |
+| `launch.conditions.IfCondition` | MEDIUM | Conditionals |
+| `launch.conditions.UnlessCondition` | MEDIUM | Conditionals |
+| `launch.actions.GroupAction` | MEDIUM | Scoped namespaces |
+| `launch.actions.IncludeLaunchDescription` | MEDIUM | Include launch files |
+| `launch.actions.SetEnvironmentVariable` | MEDIUM | Set env vars |
+| `launch.actions.ExecuteProcess` | MEDIUM | Non-ROS processes |
+| `launch.actions.LogInfo` | MEDIUM | Logging |
+
+### Low Priority 📋 PENDING (Week 3-4)
+| API | Priority | Notes |
+|-----|----------|-------|
+| `launch.actions.OpaqueFunction` | LOW | Limited support |
+| `launch.launch_description_sources.PythonLaunchDescriptionSource` | LOW | Python file sources |
+| `launch.substitutions.PythonExpression` | LOW | Python expressions |
+| `launch.substitutions.Command` | LOW | Shell commands |
 
 ---
 
@@ -393,5 +914,5 @@ cargo clippy --features python
 
 ---
 
-**Last Updated**: 2026-01-18
-**Status**: Phase 5.1 Complete ✅ | Phase 5.2 Design Phase
+**Last Updated**: 2026-01-18 (Session 8)
+**Status**: Phase 5.1 Complete ✅ | Phase 5.2 Core Complete 🔄 (Advanced APIs Pending)
