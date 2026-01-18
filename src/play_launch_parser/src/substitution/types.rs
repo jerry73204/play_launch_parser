@@ -8,28 +8,30 @@ use crate::substitution::context::LaunchContext;
 pub enum Substitution {
     /// Plain text (no substitution)
     Text(String),
-    /// $(var name) - Launch configuration variable
-    LaunchConfiguration(String),
+    /// $(var name) - Launch configuration variable (name can contain nested substitutions)
+    LaunchConfiguration(Vec<Substitution>),
     /// $(env VAR [default]) - Environment variable with optional default
     EnvironmentVariable {
-        name: String,
-        default: Option<String>,
+        name: Vec<Substitution>,
+        default: Option<Vec<Substitution>>,
     },
     /// $(optenv VAR [default]) - Optional environment variable (returns empty string if not set)
     OptionalEnvironmentVariable {
-        name: String,
-        default: Option<String>,
+        name: Vec<Substitution>,
+        default: Option<Vec<Substitution>>,
     },
     /// $(command cmd) - Execute shell command and capture output
-    Command(String),
+    Command(Vec<Substitution>),
     /// $(find-pkg-share package_name) - Find ROS 2 package share directory
-    FindPackageShare(String),
+    FindPackageShare(Vec<Substitution>),
     /// $(dirname) - Directory of the current launch file
     Dirname,
     /// $(filename) - Filename of the current launch file
     Filename,
     /// $(anon name) - Generate anonymous unique name
-    Anon(String),
+    Anon(Vec<Substitution>),
+    /// $(eval expr) - Evaluate simple expression
+    Eval(Vec<Substitution>),
 }
 
 impl Substitution {
@@ -37,24 +39,43 @@ impl Substitution {
     pub fn resolve(&self, context: &LaunchContext) -> Result<String, SubstitutionError> {
         match self {
             Substitution::Text(s) => Ok(s.clone()),
-            Substitution::LaunchConfiguration(name) => context
-                .get_configuration(name)
-                .ok_or_else(|| SubstitutionError::UndefinedVariable(name.clone())),
+            Substitution::LaunchConfiguration(name_subs) => {
+                let name = resolve_substitutions(name_subs, context)?;
+                context
+                    .get_configuration(&name)
+                    .ok_or(SubstitutionError::UndefinedVariable(name))
+            }
             Substitution::EnvironmentVariable { name, default } => {
-                std::env::var(name).or_else(|_| {
-                    default
-                        .clone()
-                        .ok_or_else(|| SubstitutionError::UndefinedEnvVar(name.clone()))
+                let name_str = resolve_substitutions(name, context)?;
+                std::env::var(&name_str).or_else(|_| {
+                    if let Some(default_subs) = default {
+                        resolve_substitutions(default_subs, context)
+                    } else {
+                        Err(SubstitutionError::UndefinedEnvVar(name_str))
+                    }
                 })
             }
             Substitution::OptionalEnvironmentVariable { name, default } => {
                 // Never errors - returns default or empty string if not set
-                Ok(std::env::var(name)
-                    .unwrap_or_else(|_| default.clone().unwrap_or_else(|| String::new())))
+                let name_str = resolve_substitutions(name, context)?;
+                Ok(std::env::var(&name_str).unwrap_or_else(|_| {
+                    if let Some(default_subs) = default {
+                        resolve_substitutions(default_subs, context)
+                            .unwrap_or_else(|_| String::new())
+                    } else {
+                        String::new()
+                    }
+                }))
             }
-            Substitution::Command(cmd) => execute_command(cmd),
-            Substitution::FindPackageShare(package_name) => find_package_share(package_name)
-                .ok_or_else(|| SubstitutionError::PackageNotFound(package_name.clone())),
+            Substitution::Command(cmd_subs) => {
+                let cmd = resolve_substitutions(cmd_subs, context)?;
+                execute_command(&cmd)
+            }
+            Substitution::FindPackageShare(package_subs) => {
+                let package_name = resolve_substitutions(package_subs, context)?;
+                find_package_share(&package_name)
+                    .ok_or(SubstitutionError::PackageNotFound(package_name))
+            }
             Substitution::Dirname => context
                 .current_dir()
                 .and_then(|p| p.to_str().map(String::from))
@@ -66,9 +87,10 @@ impl Substitution {
             Substitution::Filename => context.current_filename().ok_or_else(|| {
                 SubstitutionError::InvalidSubstitution("filename: no current file set".to_string())
             }),
-            Substitution::Anon(name) => {
+            Substitution::Anon(name_subs) => {
                 // Generate a unique anonymous name
                 // Format: name_<timestamp>_<random>
+                let name = resolve_substitutions(name_subs, context)?;
                 use std::time::{SystemTime, UNIX_EPOCH};
                 let timestamp = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -76,6 +98,12 @@ impl Substitution {
                     .as_micros();
                 let random: u32 = rand::random();
                 Ok(format!("{}_{:x}_{:x}", name, timestamp, random))
+            }
+            Substitution::Eval(expr_subs) => {
+                // Resolve the expression string first
+                let expr = resolve_substitutions(expr_subs, context)?;
+                // Evaluate the expression
+                evaluate_expression(&expr)
             }
         }
     }
@@ -154,6 +182,197 @@ pub fn resolve_substitutions(
     Ok(result)
 }
 
+/// Simple expression evaluator for $(eval expr)
+/// Supports: +, -, *, /, %, parentheses, integers, and floats
+fn evaluate_expression(expr: &str) -> Result<String, SubstitutionError> {
+    let expr = expr.trim();
+
+    // Try to parse and evaluate as a numeric expression
+    match eval_expr(expr) {
+        Ok(value) => {
+            // If the result is a whole number, format without decimal
+            if value.fract() == 0.0 {
+                Ok(format!("{}", value as i64))
+            } else {
+                Ok(format!("{}", value))
+            }
+        }
+        Err(e) => Err(SubstitutionError::InvalidSubstitution(format!(
+            "Failed to evaluate expression '{}': {}",
+            expr, e
+        ))),
+    }
+}
+
+/// Evaluate arithmetic expression
+fn eval_expr(expr: &str) -> Result<f64, String> {
+    let tokens = tokenize(expr)?;
+    let mut pos = 0;
+    let result = parse_addition(&tokens, &mut pos)?;
+
+    if pos < tokens.len() {
+        return Err(format!("Unexpected token: {:?}", tokens[pos]));
+    }
+
+    Ok(result)
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Token {
+    Number(f64),
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    Modulo,
+    LeftParen,
+    RightParen,
+}
+
+fn tokenize(expr: &str) -> Result<Vec<Token>, String> {
+    let mut tokens = Vec::new();
+    let mut chars = expr.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            ' ' | '\t' => {
+                chars.next();
+            }
+            '+' => {
+                tokens.push(Token::Plus);
+                chars.next();
+            }
+            '-' => {
+                tokens.push(Token::Minus);
+                chars.next();
+            }
+            '*' => {
+                tokens.push(Token::Multiply);
+                chars.next();
+            }
+            '/' => {
+                tokens.push(Token::Divide);
+                chars.next();
+            }
+            '%' => {
+                tokens.push(Token::Modulo);
+                chars.next();
+            }
+            '(' => {
+                tokens.push(Token::LeftParen);
+                chars.next();
+            }
+            ')' => {
+                tokens.push(Token::RightParen);
+                chars.next();
+            }
+            '0'..='9' | '.' => {
+                let mut num_str = String::new();
+                while let Some(&ch) = chars.peek() {
+                    if ch.is_ascii_digit() || ch == '.' {
+                        num_str.push(ch);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                let num = num_str
+                    .parse::<f64>()
+                    .map_err(|_| format!("Invalid number: {}", num_str))?;
+                tokens.push(Token::Number(num));
+            }
+            _ => {
+                return Err(format!("Unexpected character: {}", ch));
+            }
+        }
+    }
+
+    Ok(tokens)
+}
+
+fn parse_addition(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
+    let mut result = parse_multiplication(tokens, pos)?;
+
+    while *pos < tokens.len() {
+        match &tokens[*pos] {
+            Token::Plus => {
+                *pos += 1;
+                let right = parse_multiplication(tokens, pos)?;
+                result += right;
+            }
+            Token::Minus => {
+                *pos += 1;
+                let right = parse_multiplication(tokens, pos)?;
+                result -= right;
+            }
+            _ => break,
+        }
+    }
+
+    Ok(result)
+}
+
+fn parse_multiplication(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
+    let mut result = parse_primary(tokens, pos)?;
+
+    while *pos < tokens.len() {
+        match &tokens[*pos] {
+            Token::Multiply => {
+                *pos += 1;
+                let right = parse_primary(tokens, pos)?;
+                result *= right;
+            }
+            Token::Divide => {
+                *pos += 1;
+                let right = parse_primary(tokens, pos)?;
+                if right == 0.0 {
+                    return Err("Division by zero".to_string());
+                }
+                result /= right;
+            }
+            Token::Modulo => {
+                *pos += 1;
+                let right = parse_primary(tokens, pos)?;
+                if right == 0.0 {
+                    return Err("Modulo by zero".to_string());
+                }
+                result %= right;
+            }
+            _ => break,
+        }
+    }
+
+    Ok(result)
+}
+
+fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<f64, String> {
+    if *pos >= tokens.len() {
+        return Err("Unexpected end of expression".to_string());
+    }
+
+    match &tokens[*pos] {
+        Token::Number(n) => {
+            *pos += 1;
+            Ok(*n)
+        }
+        Token::Minus => {
+            *pos += 1;
+            let value = parse_primary(tokens, pos)?;
+            Ok(-value)
+        }
+        Token::LeftParen => {
+            *pos += 1;
+            let result = parse_addition(tokens, pos)?;
+            if *pos >= tokens.len() || tokens[*pos] != Token::RightParen {
+                return Err("Missing closing parenthesis".to_string());
+            }
+            *pos += 1;
+            Ok(result)
+        }
+        _ => Err(format!("Unexpected token at position {}", pos)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_launch_configuration() {
-        let sub = Substitution::LaunchConfiguration("my_var".to_string());
+        let sub = Substitution::LaunchConfiguration(vec![Substitution::Text("my_var".to_string())]);
         let mut context = LaunchContext::new();
         context.set_configuration("my_var".to_string(), "value123".to_string());
         assert_eq!(sub.resolve(&context).unwrap(), "value123");
@@ -175,7 +394,8 @@ mod tests {
 
     #[test]
     fn test_undefined_variable() {
-        let sub = Substitution::LaunchConfiguration("undefined".to_string());
+        let sub =
+            Substitution::LaunchConfiguration(vec![Substitution::Text("undefined".to_string())]);
         let context = LaunchContext::new();
         assert!(sub.resolve(&context).is_err());
     }
@@ -184,7 +404,7 @@ mod tests {
     fn test_env_var() {
         std::env::set_var("TEST_VAR", "test_value");
         let sub = Substitution::EnvironmentVariable {
-            name: "TEST_VAR".to_string(),
+            name: vec![Substitution::Text("TEST_VAR".to_string())],
             default: None,
         };
         let context = LaunchContext::new();
@@ -194,8 +414,8 @@ mod tests {
     #[test]
     fn test_env_var_with_default() {
         let sub = Substitution::EnvironmentVariable {
-            name: "NONEXISTENT_VAR".to_string(),
-            default: Some("default_value".to_string()),
+            name: vec![Substitution::Text("NONEXISTENT_VAR".to_string())],
+            default: Some(vec![Substitution::Text("default_value".to_string())]),
         };
         let context = LaunchContext::new();
         assert_eq!(sub.resolve(&context).unwrap(), "default_value");
@@ -205,7 +425,7 @@ mod tests {
     fn test_resolve_multiple() {
         let subs = vec![
             Substitution::Text("Hello ".to_string()),
-            Substitution::LaunchConfiguration("name".to_string()),
+            Substitution::LaunchConfiguration(vec![Substitution::Text("name".to_string())]),
             Substitution::Text("!".to_string()),
         ];
         let mut context = LaunchContext::new();
@@ -249,7 +469,7 @@ mod tests {
 
     #[test]
     fn test_anon_substitution() {
-        let sub = Substitution::Anon("my_node".to_string());
+        let sub = Substitution::Anon(vec![Substitution::Text("my_node".to_string())]);
         let context = LaunchContext::new();
 
         let result = sub.resolve(&context).unwrap();
@@ -262,8 +482,8 @@ mod tests {
 
     #[test]
     fn test_anon_uniqueness() {
-        let sub1 = Substitution::Anon("node".to_string());
-        let sub2 = Substitution::Anon("node".to_string());
+        let sub1 = Substitution::Anon(vec![Substitution::Text("node".to_string())]);
+        let sub2 = Substitution::Anon(vec![Substitution::Text("node".to_string())]);
         let context = LaunchContext::new();
 
         let result1 = sub1.resolve(&context).unwrap();
@@ -277,7 +497,7 @@ mod tests {
     fn test_optenv_with_existing_var() {
         std::env::set_var("TEST_OPTENV_VAR", "test_value");
         let sub = Substitution::OptionalEnvironmentVariable {
-            name: "TEST_OPTENV_VAR".to_string(),
+            name: vec![Substitution::Text("TEST_OPTENV_VAR".to_string())],
             default: None,
         };
         let context = LaunchContext::new();
@@ -289,7 +509,7 @@ mod tests {
         // Make sure the variable doesn't exist
         std::env::remove_var("NONEXISTENT_OPTENV_VAR");
         let sub = Substitution::OptionalEnvironmentVariable {
-            name: "NONEXISTENT_OPTENV_VAR".to_string(),
+            name: vec![Substitution::Text("NONEXISTENT_OPTENV_VAR".to_string())],
             default: None,
         };
         let context = LaunchContext::new();
@@ -301,8 +521,8 @@ mod tests {
     fn test_optenv_with_missing_var_with_default() {
         std::env::remove_var("NONEXISTENT_OPTENV_VAR2");
         let sub = Substitution::OptionalEnvironmentVariable {
-            name: "NONEXISTENT_OPTENV_VAR2".to_string(),
-            default: Some("default_value".to_string()),
+            name: vec![Substitution::Text("NONEXISTENT_OPTENV_VAR2".to_string())],
+            default: Some(vec![Substitution::Text("default_value".to_string())]),
         };
         let context = LaunchContext::new();
         assert_eq!(sub.resolve(&context).unwrap(), "default_value");
@@ -314,7 +534,7 @@ mod tests {
 
         // optenv should not error
         let optenv = Substitution::OptionalEnvironmentVariable {
-            name: "MISSING_VAR_TEST".to_string(),
+            name: vec![Substitution::Text("MISSING_VAR_TEST".to_string())],
             default: None,
         };
         let context = LaunchContext::new();
@@ -322,7 +542,7 @@ mod tests {
 
         // env should error without default
         let env = Substitution::EnvironmentVariable {
-            name: "MISSING_VAR_TEST".to_string(),
+            name: vec![Substitution::Text("MISSING_VAR_TEST".to_string())],
             default: None,
         };
         assert!(env.resolve(&context).is_err());
@@ -330,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_command_simple() {
-        let sub = Substitution::Command("echo hello".to_string());
+        let sub = Substitution::Command(vec![Substitution::Text("echo hello".to_string())]);
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         assert_eq!(result, "hello");
@@ -338,7 +558,7 @@ mod tests {
 
     #[test]
     fn test_command_with_output_trimming() {
-        let sub = Substitution::Command("echo '  spaces  '".to_string());
+        let sub = Substitution::Command(vec![Substitution::Text("echo '  spaces  '".to_string())]);
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         // Output should be trimmed
@@ -347,7 +567,9 @@ mod tests {
 
     #[test]
     fn test_command_with_newlines() {
-        let sub = Substitution::Command("printf 'line1\\nline2\\n'".to_string());
+        let sub = Substitution::Command(vec![Substitution::Text(
+            "printf 'line1\\nline2\\n'".to_string(),
+        )]);
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         // Trailing newline should be trimmed
@@ -356,7 +578,7 @@ mod tests {
 
     #[test]
     fn test_command_failed() {
-        let sub = Substitution::Command("exit 1".to_string());
+        let sub = Substitution::Command(vec![Substitution::Text("exit 1".to_string())]);
         let context = LaunchContext::new();
         let result = sub.resolve(&context);
         assert!(result.is_err());
@@ -364,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_command_with_args() {
-        let sub = Substitution::Command("echo foo bar".to_string());
+        let sub = Substitution::Command(vec![Substitution::Text("echo foo bar".to_string())]);
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         assert_eq!(result, "foo bar");
@@ -372,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_command_pwd() {
-        let sub = Substitution::Command("pwd".to_string());
+        let sub = Substitution::Command(vec![Substitution::Text("pwd".to_string())]);
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         // Should return some directory path (non-empty)
@@ -383,9 +605,305 @@ mod tests {
     #[test]
     fn test_command_env_access() {
         std::env::set_var("TEST_CMD_VAR", "test_value");
-        let sub = Substitution::Command("echo $TEST_CMD_VAR".to_string());
+        let sub = Substitution::Command(vec![Substitution::Text("echo $TEST_CMD_VAR".to_string())]);
         let context = LaunchContext::new();
         let result = sub.resolve(&context).unwrap();
         assert_eq!(result, "test_value");
+    }
+
+    // Nested substitution resolution tests
+    #[test]
+    fn test_resolve_nested_var_in_var() {
+        // $(var $(var name)_config) where name=robot, robot_config=my_robot.yaml
+        let sub = Substitution::LaunchConfiguration(vec![
+            Substitution::LaunchConfiguration(vec![Substitution::Text("name".to_string())]),
+            Substitution::Text("_config".to_string()),
+        ]);
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("name".to_string(), "robot".to_string());
+        context.set_configuration("robot_config".to_string(), "my_robot.yaml".to_string());
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "my_robot.yaml");
+    }
+
+    #[test]
+    fn test_resolve_nested_env_in_var() {
+        // $(var $(env ROBOT_NAME)_config) where ROBOT_NAME=turtlebot, turtlebot_config=tb3.yaml
+        std::env::set_var("TEST_ROBOT_NAME", "turtlebot");
+
+        let sub = Substitution::LaunchConfiguration(vec![
+            Substitution::EnvironmentVariable {
+                name: vec![Substitution::Text("TEST_ROBOT_NAME".to_string())],
+                default: None,
+            },
+            Substitution::Text("_config".to_string()),
+        ]);
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("turtlebot_config".to_string(), "tb3.yaml".to_string());
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "tb3.yaml");
+    }
+
+    #[test]
+    fn test_resolve_nested_var_in_env_default() {
+        // $(env MISSING_VAR $(var my_default)) where my_default=fallback_value
+        let sub = Substitution::EnvironmentVariable {
+            name: vec![Substitution::Text("NONEXISTENT_NESTED_VAR".to_string())],
+            default: Some(vec![Substitution::LaunchConfiguration(vec![
+                Substitution::Text("my_default".to_string()),
+            ])]),
+        };
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("my_default".to_string(), "fallback_value".to_string());
+
+        std::env::remove_var("NONEXISTENT_NESTED_VAR");
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "fallback_value");
+    }
+
+    #[test]
+    fn test_resolve_nested_var_in_command() {
+        // $(command echo $(var greeting)) where greeting=hello
+        let sub = Substitution::Command(vec![
+            Substitution::Text("echo ".to_string()),
+            Substitution::LaunchConfiguration(vec![Substitution::Text("greeting".to_string())]),
+        ]);
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("greeting".to_string(), "hello".to_string());
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_resolve_triple_nested() {
+        // $(var $(env $(var prefix)_NAME)_suffix)
+        // prefix=ROBOT, ROBOT_NAME=turtlebot, turtlebot_suffix=final_value
+        std::env::set_var("TEST_ROBOT_NAME_TRIPLE", "turtlebot");
+
+        let sub = Substitution::LaunchConfiguration(vec![
+            Substitution::EnvironmentVariable {
+                name: vec![
+                    Substitution::LaunchConfiguration(vec![Substitution::Text(
+                        "prefix".to_string(),
+                    )]),
+                    Substitution::Text("_NAME_TRIPLE".to_string()),
+                ],
+                default: None,
+            },
+            Substitution::Text("_suffix".to_string()),
+        ]);
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("prefix".to_string(), "TEST_ROBOT".to_string());
+        context.set_configuration("turtlebot_suffix".to_string(), "final_value".to_string());
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "final_value");
+    }
+
+    #[test]
+    fn test_resolve_nested_in_optenv() {
+        // $(optenv MISSING $(var backup)) where backup=default_val
+        let sub = Substitution::OptionalEnvironmentVariable {
+            name: vec![Substitution::Text("MISSING_OPTENV_NESTED".to_string())],
+            default: Some(vec![Substitution::LaunchConfiguration(vec![
+                Substitution::Text("backup".to_string()),
+            ])]),
+        };
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("backup".to_string(), "default_val".to_string());
+
+        std::env::remove_var("MISSING_OPTENV_NESTED");
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "default_val");
+    }
+
+    #[test]
+    fn test_resolve_complex_nested_string() {
+        // "prefix_$(var $(env TYPE)_name)_suffix" where TYPE=robot, robot_name=turtlebot
+        std::env::set_var("TEST_TYPE_NESTED", "robot");
+
+        let subs = vec![
+            Substitution::Text("prefix_".to_string()),
+            Substitution::LaunchConfiguration(vec![
+                Substitution::EnvironmentVariable {
+                    name: vec![Substitution::Text("TEST_TYPE_NESTED".to_string())],
+                    default: None,
+                },
+                Substitution::Text("_name".to_string()),
+            ]),
+            Substitution::Text("_suffix".to_string()),
+        ];
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("robot_name".to_string(), "turtlebot".to_string());
+
+        let result = resolve_substitutions(&subs, &context).unwrap();
+        assert_eq!(result, "prefix_turtlebot_suffix");
+    }
+
+    #[test]
+    fn test_resolve_nested_anon() {
+        // $(anon $(var base_name)) where base_name=my_node
+        let sub = Substitution::Anon(vec![Substitution::LaunchConfiguration(vec![
+            Substitution::Text("base_name".to_string()),
+        ])]);
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("base_name".to_string(), "my_node".to_string());
+
+        let result = sub.resolve(&context).unwrap();
+        assert!(result.starts_with("my_node_"));
+        let parts: Vec<&str> = result.split('_').collect();
+        assert!(parts.len() >= 3);
+    }
+
+    #[test]
+    fn test_resolve_nested_command_with_env() {
+        // $(command echo $(env USER))
+        std::env::set_var("TEST_USER_NESTED", "testuser");
+
+        let sub = Substitution::Command(vec![
+            Substitution::Text("echo ".to_string()),
+            Substitution::EnvironmentVariable {
+                name: vec![Substitution::Text("TEST_USER_NESTED".to_string())],
+                default: None,
+            },
+        ]);
+
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "testuser");
+    }
+
+    // Eval tests
+    #[test]
+    fn test_eval_simple_addition() {
+        let sub = Substitution::Eval(vec![Substitution::Text("1 + 2".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "3");
+    }
+
+    #[test]
+    fn test_eval_multiplication() {
+        let sub = Substitution::Eval(vec![Substitution::Text("4 * 5".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "20");
+    }
+
+    #[test]
+    fn test_eval_division() {
+        let sub = Substitution::Eval(vec![Substitution::Text("10 / 2".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "5");
+    }
+
+    #[test]
+    fn test_eval_modulo() {
+        let sub = Substitution::Eval(vec![Substitution::Text("10 % 3".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "1");
+    }
+
+    #[test]
+    fn test_eval_subtraction() {
+        let sub = Substitution::Eval(vec![Substitution::Text("10 - 3".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "7");
+    }
+
+    #[test]
+    fn test_eval_with_parentheses() {
+        let sub = Substitution::Eval(vec![Substitution::Text("(3 + 4) * 2".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "14");
+    }
+
+    #[test]
+    fn test_eval_order_of_operations() {
+        let sub = Substitution::Eval(vec![Substitution::Text("2 + 3 * 4".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "14");
+    }
+
+    #[test]
+    fn test_eval_negative_numbers() {
+        let sub = Substitution::Eval(vec![Substitution::Text("-5 + 10".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "5");
+    }
+
+    #[test]
+    fn test_eval_float_result() {
+        let sub = Substitution::Eval(vec![Substitution::Text("5 / 2".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "2.5");
+    }
+
+    #[test]
+    fn test_eval_with_var_substitution() {
+        // $(eval $(var x) + 5) where x=10
+        let sub = Substitution::Eval(vec![
+            Substitution::LaunchConfiguration(vec![Substitution::Text("x".to_string())]),
+            Substitution::Text(" + 5".to_string()),
+        ]);
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("x".to_string(), "10".to_string());
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "15");
+    }
+
+    #[test]
+    fn test_eval_complex_with_vars() {
+        // $(eval ($(var a) + $(var b)) * 2) where a=3, b=4
+        let sub = Substitution::Eval(vec![
+            Substitution::Text("(".to_string()),
+            Substitution::LaunchConfiguration(vec![Substitution::Text("a".to_string())]),
+            Substitution::Text(" + ".to_string()),
+            Substitution::LaunchConfiguration(vec![Substitution::Text("b".to_string())]),
+            Substitution::Text(") * 2".to_string()),
+        ]);
+
+        let mut context = LaunchContext::new();
+        context.set_configuration("a".to_string(), "3".to_string());
+        context.set_configuration("b".to_string(), "4".to_string());
+
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "14");
+    }
+
+    #[test]
+    fn test_eval_division_by_zero() {
+        let sub = Substitution::Eval(vec![Substitution::Text("1 / 0".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_eval_invalid_expression() {
+        let sub = Substitution::Eval(vec![Substitution::Text("1 + + 2".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context);
+        assert!(result.is_err());
     }
 }

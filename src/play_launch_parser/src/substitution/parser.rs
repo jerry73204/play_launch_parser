@@ -2,42 +2,72 @@
 
 use crate::error::{ParseError, Result};
 use crate::substitution::types::Substitution;
-use regex::Regex;
 
 /// Parse substitution string like "$(var x)" or "text $(env Y) more"
+/// Supports nested substitutions like "$(var $(env NAME)_config)"
 pub fn parse_substitutions(input: &str) -> Result<Vec<Substitution>> {
+    parse_substitutions_recursive(input)
+}
+
+/// Internal recursive parser that handles nested substitutions
+fn parse_substitutions_recursive(input: &str) -> Result<Vec<Substitution>> {
     let mut result = Vec::new();
-    // Match both $(type args) and $(type) patterns
-    let re = Regex::new(r"\$\(([a-z-]+)(?:\s+([^)]+))?\)").unwrap();
+    let mut chars = input.char_indices().peekable();
+    let mut last_pos = 0;
 
-    let mut last_end = 0;
+    while let Some((i, ch)) = chars.next() {
+        if ch == '$' {
+            if let Some((_, '(')) = chars.peek() {
+                // Found start of substitution
+                // Add any text before this substitution
+                if i > last_pos {
+                    let text = &input[last_pos..i];
+                    if !text.is_empty() {
+                        result.push(Substitution::Text(text.to_string()));
+                    }
+                }
 
-    for cap in re.captures_iter(input) {
-        let match_obj = cap.get(0).unwrap();
-        let start = match_obj.start();
-        let end = match_obj.end();
+                // Skip the '('
+                chars.next();
 
-        // Add text before the substitution
-        if start > last_end {
-            let text = &input[last_end..start];
-            if !text.is_empty() {
-                result.push(Substitution::Text(text.to_string()));
+                // Find matching ')' by counting parentheses
+                let sub_start = i + 2; // Position after "$("
+                let mut depth = 1;
+                let mut sub_end = sub_start;
+
+                for (pos, c) in chars.by_ref() {
+                    if c == '(' {
+                        depth += 1;
+                    } else if c == ')' {
+                        depth -= 1;
+                        if depth == 0 {
+                            sub_end = pos;
+                            break;
+                        }
+                    }
+                }
+
+                if depth != 0 {
+                    return Err(ParseError::InvalidSubstitution(
+                        "Unmatched parentheses in substitution".to_string(),
+                    ));
+                }
+
+                // Extract the content inside $()
+                let content = &input[sub_start..sub_end];
+
+                // Parse the substitution (which may contain nested substitutions)
+                let substitution = parse_substitution_content(content)?;
+                result.push(substitution);
+
+                last_pos = sub_end + 1;
             }
         }
-
-        // Parse the substitution
-        let sub_type = cap.get(1).unwrap().as_str();
-        let args = cap.get(2).map(|m| m.as_str());
-
-        let substitution = parse_single_substitution(sub_type, args)?;
-        result.push(substitution);
-
-        last_end = end;
     }
 
-    // Add remaining text
-    if last_end < input.len() {
-        let text = &input[last_end..];
+    // Add any remaining text
+    if last_pos < input.len() {
+        let text = &input[last_pos..];
         if !text.is_empty() {
             result.push(Substitution::Text(text.to_string()));
         }
@@ -51,64 +81,164 @@ pub fn parse_substitutions(input: &str) -> Result<Vec<Substitution>> {
     Ok(result)
 }
 
+/// Parse the content inside a substitution $(...)
+/// This handles recursion: "var $(env X)" should parse inner $(env X) first
+fn parse_substitution_content(content: &str) -> Result<Substitution> {
+    // Find the substitution type (first word)
+    let trimmed = content.trim();
+    let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
+
+    if parts.is_empty() {
+        return Err(ParseError::InvalidSubstitution(
+            "Empty substitution".to_string(),
+        ));
+    }
+
+    let sub_type = parts[0];
+    let args = if parts.len() > 1 {
+        Some(parts[1])
+    } else {
+        None
+    };
+
+    parse_single_substitution(sub_type, args)
+}
+
+/// Split arguments respecting nested substitutions
+/// For "env X default" or "optenv X default", split into (name, default)
+/// But if X contains nested substitutions with spaces, don't split inside them
+fn split_env_args(args: &str) -> (&str, Option<&str>) {
+    let args = args.trim();
+
+    // If args starts with $(, we need to find the matching ) to know where the name ends
+    if args.starts_with("$(") {
+        let mut depth = 0;
+        let mut name_end = args.len();
+
+        for (i, ch) in args.char_indices() {
+            if ch == '(' {
+                depth += 1;
+            } else if ch == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    // Found the end of the nested substitution
+                    // Check if there's more content after this
+                    name_end = i + 1;
+                    // Skip any non-space chars that are part of the name (like "_suffix")
+                    while name_end < args.len() {
+                        let ch = args.chars().nth(name_end).unwrap();
+                        if ch.is_whitespace() {
+                            break;
+                        }
+                        name_end += 1;
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Everything up to name_end is the name
+        let name = args[..name_end].trim();
+        // Everything after (if any) is the default
+        let default = if name_end < args.len() {
+            Some(args[name_end..].trim())
+        } else {
+            None
+        };
+
+        (name, default)
+    } else {
+        // No nested substitution, just split on first space
+        let parts: Vec<&str> = args.splitn(2, ' ').collect();
+        let name = parts[0].trim();
+        let default = parts.get(1).map(|s| s.trim());
+        (name, default)
+    }
+}
+
 fn parse_single_substitution(sub_type: &str, args: Option<&str>) -> Result<Substitution> {
     match sub_type {
         "var" => {
-            let name = args
+            let args_str = args
                 .ok_or_else(|| {
                     ParseError::InvalidSubstitution("var requires an argument".to_string())
                 })?
-                .trim()
-                .to_string();
-            Ok(Substitution::LaunchConfiguration(name))
+                .trim();
+            // Parse the argument which may contain nested substitutions
+            let name_subs = parse_substitutions_recursive(args_str)?;
+            Ok(Substitution::LaunchConfiguration(name_subs))
         }
         "env" => {
             let args_str = args.ok_or_else(|| {
                 ParseError::InvalidSubstitution("env requires an argument".to_string())
             })?;
-            let parts: Vec<&str> = args_str.splitn(2, ' ').map(|s| s.trim()).collect();
-            let name = parts[0].to_string();
-            let default = parts.get(1).map(|s| s.to_string());
-            Ok(Substitution::EnvironmentVariable { name, default })
+            let (name_str, default_str) = split_env_args(args_str);
+            let name_subs = parse_substitutions_recursive(name_str)?;
+            let default = if let Some(def) = default_str {
+                Some(parse_substitutions_recursive(def)?)
+            } else {
+                None
+            };
+            Ok(Substitution::EnvironmentVariable {
+                name: name_subs,
+                default,
+            })
         }
         "optenv" => {
             let args_str = args.ok_or_else(|| {
                 ParseError::InvalidSubstitution("optenv requires an argument".to_string())
             })?;
-            let parts: Vec<&str> = args_str.splitn(2, ' ').map(|s| s.trim()).collect();
-            let name = parts[0].to_string();
-            let default = parts.get(1).map(|s| s.to_string());
-            Ok(Substitution::OptionalEnvironmentVariable { name, default })
+            let (name_str, default_str) = split_env_args(args_str);
+            let name_subs = parse_substitutions_recursive(name_str)?;
+            let default = if let Some(def) = default_str {
+                Some(parse_substitutions_recursive(def)?)
+            } else {
+                None
+            };
+            Ok(Substitution::OptionalEnvironmentVariable {
+                name: name_subs,
+                default,
+            })
         }
         "command" => {
-            let cmd = args
-                .ok_or_else(|| {
-                    ParseError::InvalidSubstitution("command requires an argument".to_string())
-                })?
-                .to_string();
-            Ok(Substitution::Command(cmd))
+            let cmd_str = args.ok_or_else(|| {
+                ParseError::InvalidSubstitution("command requires an argument".to_string())
+            })?;
+            let cmd_subs = parse_substitutions_recursive(cmd_str)?;
+            Ok(Substitution::Command(cmd_subs))
         }
         "find-pkg-share" => {
-            let package = args
+            let package_str = args
                 .ok_or_else(|| {
                     ParseError::InvalidSubstitution(
                         "find-pkg-share requires an argument".to_string(),
                     )
                 })?
-                .trim()
-                .to_string();
-            Ok(Substitution::FindPackageShare(package))
+                .trim();
+            let package_subs = parse_substitutions_recursive(package_str)?;
+            Ok(Substitution::FindPackageShare(package_subs))
         }
         "dirname" => Ok(Substitution::Dirname),
         "filename" => Ok(Substitution::Filename),
         "anon" => {
-            let name = args
+            let name_str = args
                 .ok_or_else(|| {
                     ParseError::InvalidSubstitution("anon requires a name argument".to_string())
                 })?
-                .trim()
-                .to_string();
-            Ok(Substitution::Anon(name))
+                .trim();
+            let name_subs = parse_substitutions_recursive(name_str)?;
+            Ok(Substitution::Anon(name_subs))
+        }
+        "eval" => {
+            let expr_str = args
+                .ok_or_else(|| {
+                    ParseError::InvalidSubstitution(
+                        "eval requires an expression argument".to_string(),
+                    )
+                })?
+                .trim();
+            let expr_subs = parse_substitutions_recursive(expr_str)?;
+            Ok(Substitution::Eval(expr_subs))
         }
         _ => Err(ParseError::InvalidSubstitution(format!(
             "Unknown substitution type: {}",
@@ -134,7 +264,7 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(
             subs[0],
-            Substitution::LaunchConfiguration("my_var".to_string())
+            Substitution::LaunchConfiguration(vec![Substitution::Text("my_var".to_string())])
         );
     }
 
@@ -145,7 +275,7 @@ mod tests {
         assert_eq!(
             subs[0],
             Substitution::EnvironmentVariable {
-                name: "HOME".to_string(),
+                name: vec![Substitution::Text("HOME".to_string())],
                 default: None
             }
         );
@@ -158,8 +288,8 @@ mod tests {
         assert_eq!(
             subs[0],
             Substitution::EnvironmentVariable {
-                name: "MY_VAR".to_string(),
-                default: Some("default_value".to_string())
+                name: vec![Substitution::Text("MY_VAR".to_string())],
+                default: Some(vec![Substitution::Text("default_value".to_string())])
             }
         );
     }
@@ -169,12 +299,15 @@ mod tests {
         let subs = parse_substitutions("prefix $(var x) middle $(env Y) suffix").unwrap();
         assert_eq!(subs.len(), 5);
         assert_eq!(subs[0], Substitution::Text("prefix ".to_string()));
-        assert_eq!(subs[1], Substitution::LaunchConfiguration("x".to_string()));
+        assert_eq!(
+            subs[1],
+            Substitution::LaunchConfiguration(vec![Substitution::Text("x".to_string())])
+        );
         assert_eq!(subs[2], Substitution::Text(" middle ".to_string()));
         assert_eq!(
             subs[3],
             Substitution::EnvironmentVariable {
-                name: "Y".to_string(),
+                name: vec![Substitution::Text("Y".to_string())],
                 default: None
             }
         );
@@ -185,8 +318,14 @@ mod tests {
     fn test_parse_consecutive_substitutions() {
         let subs = parse_substitutions("$(var a)$(var b)").unwrap();
         assert_eq!(subs.len(), 2);
-        assert_eq!(subs[0], Substitution::LaunchConfiguration("a".to_string()));
-        assert_eq!(subs[1], Substitution::LaunchConfiguration("b".to_string()));
+        assert_eq!(
+            subs[0],
+            Substitution::LaunchConfiguration(vec![Substitution::Text("a".to_string())])
+        );
+        assert_eq!(
+            subs[1],
+            Substitution::LaunchConfiguration(vec![Substitution::Text("b".to_string())])
+        );
     }
 
     #[test]
@@ -215,7 +354,10 @@ mod tests {
     fn test_parse_anon() {
         let subs = parse_substitutions("$(anon my_node)").unwrap();
         assert_eq!(subs.len(), 1);
-        assert_eq!(subs[0], Substitution::Anon("my_node".to_string()));
+        assert_eq!(
+            subs[0],
+            Substitution::Anon(vec![Substitution::Text("my_node".to_string())])
+        );
     }
 
     #[test]
@@ -223,7 +365,10 @@ mod tests {
         let subs = parse_substitutions("node_$(anon suffix)").unwrap();
         assert_eq!(subs.len(), 2);
         assert_eq!(subs[0], Substitution::Text("node_".to_string()));
-        assert_eq!(subs[1], Substitution::Anon("suffix".to_string()));
+        assert_eq!(
+            subs[1],
+            Substitution::Anon(vec![Substitution::Text("suffix".to_string())])
+        );
     }
 
     #[test]
@@ -233,7 +378,7 @@ mod tests {
         assert_eq!(
             subs[0],
             Substitution::OptionalEnvironmentVariable {
-                name: "MY_VAR".to_string(),
+                name: vec![Substitution::Text("MY_VAR".to_string())],
                 default: None
             }
         );
@@ -246,8 +391,8 @@ mod tests {
         assert_eq!(
             subs[0],
             Substitution::OptionalEnvironmentVariable {
-                name: "MY_VAR".to_string(),
-                default: Some("default_value".to_string())
+                name: vec![Substitution::Text("MY_VAR".to_string())],
+                default: Some(vec![Substitution::Text("default_value".to_string())])
             }
         );
     }
@@ -260,8 +405,8 @@ mod tests {
         assert_eq!(
             subs[1],
             Substitution::OptionalEnvironmentVariable {
-                name: "VAR".to_string(),
-                default: Some("suffix".to_string())
+                name: vec![Substitution::Text("VAR".to_string())],
+                default: Some(vec![Substitution::Text("suffix".to_string())])
             }
         );
         assert_eq!(subs[2], Substitution::Text("_end".to_string()));
@@ -271,14 +416,20 @@ mod tests {
     fn test_parse_command() {
         let subs = parse_substitutions("$(command echo hello)").unwrap();
         assert_eq!(subs.len(), 1);
-        assert_eq!(subs[0], Substitution::Command("echo hello".to_string()));
+        assert_eq!(
+            subs[0],
+            Substitution::Command(vec![Substitution::Text("echo hello".to_string())])
+        );
     }
 
     #[test]
     fn test_parse_command_with_args() {
         let subs = parse_substitutions("$(command ls -la)").unwrap();
         assert_eq!(subs.len(), 1);
-        assert_eq!(subs[0], Substitution::Command("ls -la".to_string()));
+        assert_eq!(
+            subs[0],
+            Substitution::Command(vec![Substitution::Text("ls -la".to_string())])
+        );
     }
 
     #[test]
@@ -288,7 +439,7 @@ mod tests {
         assert_eq!(subs[0], Substitution::Text("Version: ".to_string()));
         assert_eq!(
             subs[1],
-            Substitution::Command("cat /etc/os-release".to_string())
+            Substitution::Command(vec![Substitution::Text("cat /etc/os-release".to_string())])
         );
     }
 
@@ -298,7 +449,249 @@ mod tests {
         assert_eq!(subs.len(), 1);
         assert_eq!(
             subs[0],
-            Substitution::Command("echo test | tr a-z A-Z".to_string())
+            Substitution::Command(vec![Substitution::Text(
+                "echo test | tr a-z A-Z".to_string()
+            )])
         );
+    }
+
+    // Nested substitution tests
+    #[test]
+    fn test_parse_nested_var_in_var() {
+        let subs = parse_substitutions("$(var $(var name)_config)").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        // Outer should be a LaunchConfiguration
+        if let Substitution::LaunchConfiguration(inner_subs) = &subs[0] {
+            assert_eq!(inner_subs.len(), 2);
+            // First part is the nested $(var name)
+            assert!(matches!(
+                inner_subs[0],
+                Substitution::LaunchConfiguration(_)
+            ));
+            // Second part is the literal "_config"
+            assert_eq!(inner_subs[1], Substitution::Text("_config".to_string()));
+
+            // Check the nested substitution
+            if let Substitution::LaunchConfiguration(nested) = &inner_subs[0] {
+                assert_eq!(nested.len(), 1);
+                assert_eq!(nested[0], Substitution::Text("name".to_string()));
+            } else {
+                panic!("Expected nested LaunchConfiguration");
+            }
+        } else {
+            panic!("Expected outer LaunchConfiguration");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_env_in_var() {
+        let subs = parse_substitutions("$(var $(env ROBOT_NAME)_config)").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        if let Substitution::LaunchConfiguration(inner_subs) = &subs[0] {
+            assert_eq!(inner_subs.len(), 2);
+            // First part is $(env ROBOT_NAME)
+            assert!(matches!(
+                inner_subs[0],
+                Substitution::EnvironmentVariable { .. }
+            ));
+            // Second part is "_config"
+            assert_eq!(inner_subs[1], Substitution::Text("_config".to_string()));
+        } else {
+            panic!("Expected LaunchConfiguration");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_var_in_env_default() {
+        let subs = parse_substitutions("$(env MY_VAR $(var default_val))").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        if let Substitution::EnvironmentVariable { name, default } = &subs[0] {
+            // Name should be simple text
+            assert_eq!(name.len(), 1);
+            assert_eq!(name[0], Substitution::Text("MY_VAR".to_string()));
+
+            // Default should contain nested substitution
+            assert!(default.is_some());
+            let default_subs = default.as_ref().unwrap();
+            assert_eq!(default_subs.len(), 1);
+            assert!(matches!(
+                default_subs[0],
+                Substitution::LaunchConfiguration(_)
+            ));
+        } else {
+            panic!("Expected EnvironmentVariable");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_var_in_command() {
+        let subs = parse_substitutions("$(command echo $(var value))").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        if let Substitution::Command(cmd_subs) = &subs[0] {
+            assert_eq!(cmd_subs.len(), 2);
+            // First part is "echo "
+            assert_eq!(cmd_subs[0], Substitution::Text("echo ".to_string()));
+            // Second part is the nested $(var value)
+            assert!(matches!(cmd_subs[1], Substitution::LaunchConfiguration(_)));
+        } else {
+            panic!("Expected Command");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_optenv_in_string() {
+        let subs = parse_substitutions("prefix_$(optenv VAR $(var default))_suffix").unwrap();
+        assert_eq!(subs.len(), 3);
+
+        // First: "prefix_"
+        assert_eq!(subs[0], Substitution::Text("prefix_".to_string()));
+
+        // Middle: $(optenv VAR $(var default))
+        if let Substitution::OptionalEnvironmentVariable { name, default } = &subs[1] {
+            assert_eq!(name.len(), 1);
+            assert_eq!(name[0], Substitution::Text("VAR".to_string()));
+
+            // Default should have nested var
+            assert!(default.is_some());
+            let def = default.as_ref().unwrap();
+            assert_eq!(def.len(), 1);
+            assert!(matches!(def[0], Substitution::LaunchConfiguration(_)));
+        } else {
+            panic!("Expected OptionalEnvironmentVariable");
+        }
+
+        // Last: "_suffix"
+        assert_eq!(subs[2], Substitution::Text("_suffix".to_string()));
+    }
+
+    #[test]
+    fn test_parse_consecutive_nested_substitutions() {
+        let subs = parse_substitutions("$(var $(env A))$(var $(env B))").unwrap();
+        assert_eq!(subs.len(), 2);
+
+        // Both should be LaunchConfiguration with nested EnvironmentVariable
+        for sub in &subs {
+            if let Substitution::LaunchConfiguration(inner) = sub {
+                assert_eq!(inner.len(), 1);
+                assert!(matches!(inner[0], Substitution::EnvironmentVariable { .. }));
+            } else {
+                panic!("Expected LaunchConfiguration");
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_triple_nested_debug() {
+        // Test simpler triple nesting first: $(var $(var $(var x)))
+        let subs = parse_substitutions("$(var $(var $(var x)))").unwrap();
+        assert_eq!(subs.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_triple_nested_with_text() {
+        // Test with text after inner: $(var $(var $(var x)_y))
+        let subs = parse_substitutions("$(var $(var $(var x)_y))").unwrap();
+        assert_eq!(subs.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_triple_nested_with_env() {
+        // Test with env in middle: $(var $(env $(var x)_Y))
+        let subs = parse_substitutions("$(var $(env $(var x)_Y))").unwrap();
+        assert_eq!(subs.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_triple_nested() {
+        // $(var $(env $(var prefix)_NAME)_suffix)
+        let subs = parse_substitutions("$(var $(env $(var prefix)_NAME)_suffix)").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        // Outermost: LaunchConfiguration
+        if let Substitution::LaunchConfiguration(level1) = &subs[0] {
+            assert_eq!(level1.len(), 2);
+
+            // First element should be EnvironmentVariable (middle level)
+            if let Substitution::EnvironmentVariable { name, .. } = &level1[0] {
+                assert_eq!(name.len(), 2);
+                // name[0] should be the innermost LaunchConfiguration
+                assert!(matches!(name[0], Substitution::LaunchConfiguration(_)));
+                // name[1] should be "_NAME"
+                assert_eq!(name[1], Substitution::Text("_NAME".to_string()));
+            } else {
+                panic!("Expected EnvironmentVariable at level 1");
+            }
+
+            // level1[1] should be "_suffix"
+            assert_eq!(level1[1], Substitution::Text("_suffix".to_string()));
+        } else {
+            panic!("Expected LaunchConfiguration at top level");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_anon() {
+        let subs = parse_substitutions("$(anon $(var node_name))").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        if let Substitution::Anon(inner) = &subs[0] {
+            assert_eq!(inner.len(), 1);
+            assert!(matches!(inner[0], Substitution::LaunchConfiguration(_)));
+        } else {
+            panic!("Expected Anon");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_find_pkg_share() {
+        let subs = parse_substitutions("$(find-pkg-share $(var package_name))").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        if let Substitution::FindPackageShare(inner) = &subs[0] {
+            assert_eq!(inner.len(), 1);
+            assert!(matches!(inner[0], Substitution::LaunchConfiguration(_)));
+        } else {
+            panic!("Expected FindPackageShare");
+        }
+    }
+
+    // Eval tests
+    #[test]
+    fn test_parse_eval_simple() {
+        let subs = parse_substitutions("$(eval 1 + 2)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert!(matches!(subs[0], Substitution::Eval(_)));
+    }
+
+    #[test]
+    fn test_parse_eval_with_var() {
+        let subs = parse_substitutions("$(eval $(var x) + 5)").unwrap();
+        assert_eq!(subs.len(), 1);
+
+        if let Substitution::Eval(expr) = &subs[0] {
+            // Should have nested var substitution
+            assert!(expr.len() > 1);
+        } else {
+            panic!("Expected Eval");
+        }
+    }
+
+    #[test]
+    fn test_parse_eval_in_string() {
+        let subs = parse_substitutions("value is $(eval 10 * 5)").unwrap();
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[0], Substitution::Text("value is ".to_string()));
+        assert!(matches!(subs[1], Substitution::Eval(_)));
+    }
+
+    #[test]
+    fn test_parse_eval_complex() {
+        let subs = parse_substitutions("$(eval (3 + 4) * 2)").unwrap();
+        assert_eq!(subs.len(), 1);
+        assert!(matches!(subs[0], Substitution::Eval(_)));
     }
 }
