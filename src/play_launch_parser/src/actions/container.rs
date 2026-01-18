@@ -144,25 +144,35 @@ impl ComposableNodeAction {
         for child in entity.children() {
             match child.type_name() {
                 "param" => {
-                    let name = child.get_attr_str("name", false)?.ok_or_else(|| {
-                        ParseError::MissingAttribute {
-                            element: "param".to_string(),
-                            attribute: "name".to_string(),
-                        }
-                    })?;
-                    let value = child.get_attr_str("value", false)?.ok_or_else(|| {
-                        ParseError::MissingAttribute {
-                            element: "param".to_string(),
-                            attribute: "value".to_string(),
-                        }
-                    })?;
-                    let name_parsed = parse_substitutions(&name)?;
-                    let value_parsed = parse_substitutions(&value)?;
-                    let name_resolved = resolve_substitutions(&name_parsed, context)
-                        .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-                    let value_resolved = resolve_substitutions(&value_parsed, context)
-                        .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-                    parameters.push((name_resolved, value_resolved));
+                    // Check if this is a parameter file reference
+                    if let Some(from_attr) = child.get_attr_str("from", true)? {
+                        // This is a parameter file - mark it with special prefix
+                        let from_parsed = parse_substitutions(&from_attr)?;
+                        let from_resolved = resolve_substitutions(&from_parsed, context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                        parameters.push(("__param_file".to_string(), from_resolved));
+                    } else {
+                        // This is an inline parameter
+                        let name = child.get_attr_str("name", false)?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
+                                element: "param".to_string(),
+                                attribute: "name".to_string(),
+                            }
+                        })?;
+                        let value = child.get_attr_str("value", false)?.ok_or_else(|| {
+                            ParseError::MissingAttribute {
+                                element: "param".to_string(),
+                                attribute: "value".to_string(),
+                            }
+                        })?;
+                        let name_parsed = parse_substitutions(&name)?;
+                        let value_parsed = parse_substitutions(&value)?;
+                        let name_resolved = resolve_substitutions(&name_parsed, context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                        let value_resolved = resolve_substitutions(&value_parsed, context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                        parameters.push((name_resolved, value_resolved));
+                    }
                 }
                 "remap" => {
                     let from = child.get_attr_str("from", false)?.ok_or_else(|| {
