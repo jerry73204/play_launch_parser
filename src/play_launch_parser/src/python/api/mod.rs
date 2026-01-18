@@ -7,6 +7,7 @@ pub mod launch;
 pub mod launch_description_sources;
 pub mod launch_ros;
 pub mod parameter_descriptions;
+pub mod some_substitutions_type;
 pub mod substitutions;
 
 use pyo3::prelude::*;
@@ -26,6 +27,18 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     // Create launch module
     let launch_mod = PyModule::new(py, "launch")?;
     launch_mod.add_class::<launch::LaunchDescription>()?;
+
+    // Add SomeSubstitutionsType_types_tuple to launch module (for top-level imports)
+    let str_type = py.get_type::<pyo3::types::PyString>();
+    let tuple_type = py.get_type::<pyo3::types::PyTuple>();
+    let list_type = py.get_type::<pyo3::types::PyList>();
+    let types_tuple = pyo3::types::PyTuple::new(
+        py,
+        [str_type.as_ref(), tuple_type.as_ref(), list_type.as_ref()],
+    );
+    launch_mod.add("SomeSubstitutionsType_types_tuple", types_tuple)?;
+    // Also add SomeSubstitutionsType as None (it's a type alias used for type hints)
+    launch_mod.add("SomeSubstitutionsType", py.None())?;
 
     // Create launch.actions submodule
     let launch_actions = PyModule::new(py, "launch.actions")?;
@@ -77,6 +90,64 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_sources.add_class::<launch_description_sources::PythonLaunchDescriptionSource>()?;
     launch_sources.add_class::<launch_description_sources::XMLLaunchDescriptionSource>()?;
     launch_sources.add_class::<launch_description_sources::YAMLLaunchDescriptionSource>()?;
+    launch_sources.add_class::<launch_description_sources::FrontendLaunchDescriptionSource>()?;
+    launch_sources.add_class::<launch_description_sources::AnyLaunchDescriptionSource>()?;
+
+    // Create launch.frontend submodule with stub classes for import compatibility
+    let launch_frontend = PyModule::new(py, "launch.frontend")?;
+    // Add stub Entity class - not used in our static parsing but needed for imports
+    let entity_class = py.eval("type('Entity', (), {})", None, None)?;
+    launch_frontend.add("Entity", entity_class)?;
+    // Add stub Parser class
+    let parser_class = py.eval("type('Parser', (), {})", None, None)?;
+    launch_frontend.add("Parser", parser_class)?;
+    // Add stub functions
+    launch_frontend.add("expose_action", py.None())?;
+    launch_frontend.add("expose_substitution", py.None())?;
+
+    // Create launch.frontend.type_utils submodule with stub functions
+    let launch_frontend_type_utils = PyModule::new(py, "launch.frontend.type_utils")?;
+    // Add stub functions that return None - not used in static parsing
+    launch_frontend_type_utils.add("check_is_list_entity", py.None())?;
+    launch_frontend_type_utils.add("get_data_type", py.None())?;
+    launch_frontend_type_utils.add("is_iterable", py.None())?;
+    launch_frontend.add_submodule(launch_frontend_type_utils)?;
+
+    // Create launch.utilities submodule (empty placeholder for imports)
+    let launch_utilities = PyModule::new(py, "launch.utilities")?;
+    // Create launch.utilities.type_utils submodule with common type aliases
+    let launch_utilities_type_utils = PyModule::new(py, "launch.utilities.type_utils")?;
+    // Add all type aliases as None - these are just for type hints at runtime
+    launch_utilities_type_utils.add("ScalarTypesType", py.None())?;
+    launch_utilities_type_utils.add("ListTypesType", py.None())?;
+    launch_utilities_type_utils.add("AllowedTypesType", py.None())?;
+    launch_utilities_type_utils.add("ScalarValueType", py.None())?;
+    launch_utilities_type_utils.add("ListValueType", py.None())?;
+    launch_utilities_type_utils.add("SequenceValueType", py.None())?;
+    launch_utilities_type_utils.add("AllowedValueType", py.None())?;
+    launch_utilities_type_utils.add("SomeScalarType", py.None())?;
+    launch_utilities_type_utils.add("SomeSequenceType", py.None())?;
+    launch_utilities_type_utils.add("SomeValueType", py.None())?;
+    launch_utilities_type_utils.add("NormalizedScalarType", py.None())?;
+    launch_utilities_type_utils.add("NormalizedSequenceType", py.None())?;
+    launch_utilities_type_utils.add("NormalizedValueType", py.None())?;
+    launch_utilities_type_utils.add("StrSomeScalarType", py.None())?;
+    launch_utilities_type_utils.add("StrSomeSequenceType", py.None())?;
+    launch_utilities_type_utils.add("StrSomeValueType", py.None())?;
+    // Add stub functions
+    launch_utilities_type_utils.add("get_typed_value", py.None())?;
+    launch_utilities_type_utils.add("is_typing_list", py.None())?;
+    launch_utilities_type_utils.add("is_valid_scalar_type", py.None())?;
+    launch_utilities_type_utils.add("extract_type", py.None())?;
+    launch_utilities_type_utils.add("is_instance_of_valid_type", py.None())?;
+    launch_utilities_type_utils.add("is_instance_of", py.None())?;
+    launch_utilities_type_utils.add("coerce_to_type", py.None())?;
+    launch_utilities_type_utils.add("coerce_list", py.None())?;
+    launch_utilities_type_utils.add("is_substitution", py.None())?;
+    launch_utilities_type_utils.add("normalize_typed_substitution", py.None())?;
+    launch_utilities_type_utils.add("is_normalized_substitution", py.None())?;
+    launch_utilities_type_utils.add("perform_typed_substitution", py.None())?;
+    launch_utilities.add_submodule(launch_utilities_type_utils)?;
 
     // Add submodules to parent module as attributes
     launch_mod.add_submodule(launch_actions)?;
@@ -84,6 +155,8 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_mod.add_submodule(launch_conditions)?;
     launch_mod.add_submodule(launch_event_handlers)?;
     launch_mod.add_submodule(launch_sources)?;
+    launch_mod.add_submodule(launch_frontend)?;
+    launch_mod.add_submodule(launch_utilities)?;
 
     // Create launch_ros module
     let launch_ros_mod = PyModule::new(py, "launch_ros")?;
@@ -127,11 +200,32 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     modules.set_item("launch.conditions", launch_conditions)?;
     modules.set_item("launch.event_handlers", launch_event_handlers)?;
     modules.set_item("launch.launch_description_sources", launch_sources)?;
+    modules.set_item("launch.frontend", launch_frontend)?;
+    modules.set_item("launch.frontend.type_utils", launch_frontend_type_utils)?;
+    modules.set_item("launch.utilities", launch_utilities)?;
+    modules.set_item("launch.utilities.type_utils", launch_utilities_type_utils)?;
     modules.set_item("launch_ros", launch_ros_mod)?;
     modules.set_item("launch_ros.actions", launch_ros_actions)?;
     modules.set_item("launch_ros.descriptions", launch_ros_desc)?;
     modules.set_item("launch_ros.substitutions", launch_ros_subs)?;
     modules.set_item("launch_ros.parameter_descriptions", launch_ros_param_desc)?;
+
+    // Create and register launch.some_substitutions_type submodule
+    let launch_some_subs_type = some_substitutions_type::register_module(py)?;
+    launch_mod.add_submodule(launch_some_subs_type)?;
+    modules.set_item("launch.some_substitutions_type", launch_some_subs_type)?;
+
+    // Create launch_xml module
+    let launch_xml_mod = PyModule::new(py, "launch_xml")?;
+
+    // Create launch_xml.launch_description_sources submodule
+    let launch_xml_sources = PyModule::new(py, "launch_xml.launch_description_sources")?;
+    launch_xml_sources.add_class::<launch_description_sources::XMLLaunchDescriptionSource>()?;
+    launch_xml_mod.add_submodule(launch_xml_sources)?;
+
+    // Register launch_xml in sys.modules
+    modules.set_item("launch_xml", launch_xml_mod)?;
+    modules.set_item("launch_xml.launch_description_sources", launch_xml_sources)?;
 
     Ok(())
 }
