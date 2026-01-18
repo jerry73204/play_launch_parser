@@ -1033,3 +1033,88 @@ fn test_composable_node_in_container() {
     assert_eq!(nodes.len(), 1, "Should have 1 node (container)");
     assert_eq!(nodes[0]["name"].as_str().unwrap(), "my_container");
 }
+
+#[test]
+#[cfg(feature = "python")]
+fn test_parse_python_no_import() {
+    // Test that sys.modules registration works
+    let fixture = get_fixture_path("test_no_import.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file (sys.modules access) should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    // Check the node
+    let node = &nodes[0];
+    assert_eq!(
+        node["package"].as_str().unwrap(),
+        "demo_nodes_cpp",
+        "Should have correct package"
+    );
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "sys_modules_test",
+        "Should have correct name"
+    );
+}
+
+#[test]
+#[cfg(feature = "python")]
+fn test_parse_simple_python_launch() {
+    let fixture = get_fixture_path("test_simple_python.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    // Check the node
+    let node = &nodes[0];
+    assert_eq!(
+        node["package"].as_str().unwrap(),
+        "demo_nodes_cpp",
+        "Should have correct package"
+    );
+    assert_eq!(
+        node["executable"].as_str().unwrap(),
+        "talker",
+        "Should have correct executable"
+    );
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "my_talker",
+        "Should have correct name"
+    );
+    assert_eq!(
+        node["namespace"].as_str().unwrap(),
+        "/test",
+        "Should have correct namespace"
+    );
+}

@@ -4,6 +4,10 @@ pub mod actions;
 pub mod condition;
 pub mod error;
 pub mod params;
+
+#[cfg(feature = "python")]
+pub mod python;
+
 pub mod record;
 pub mod substitution;
 pub mod xml;
@@ -45,11 +49,19 @@ impl LaunchTraverser {
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
             match ext {
                 "py" => {
-                    log::warn!(
-                        "Skipping Python launch file (not yet supported): {}",
-                        path.display()
-                    );
-                    return Ok(());
+                    #[cfg(feature = "python")]
+                    {
+                        log::info!("Executing Python launch file: {}", path.display());
+                        return self.execute_python_file(path, &self.context.configurations());
+                    }
+                    #[cfg(not(feature = "python"))]
+                    {
+                        log::warn!(
+                            "Skipping Python launch file (Python support not enabled): {}",
+                            path.display()
+                        );
+                        return Ok(());
+                    }
                 }
                 "yaml" | "yml" => {
                     log::info!("Skipping YAML configuration file: {}", path.display());
@@ -67,6 +79,20 @@ impl LaunchTraverser {
         let doc = roxmltree::Document::parse(&content)?;
         let root = xml::XmlEntity::new(doc.root_element());
         self.traverse_entity(&root)?;
+        Ok(())
+    }
+
+    #[cfg(feature = "python")]
+    fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
+        use crate::python::PythonLaunchExecutor;
+
+        let executor =
+            PythonLaunchExecutor::new().map_err(|e| ParseError::PythonError(e.to_string()))?;
+        let nodes = executor.execute_launch_file(path, args)?;
+
+        log::info!("Captured {} nodes from Python launch file", nodes.len());
+        self.records.extend(nodes);
+
         Ok(())
     }
 
@@ -98,13 +124,30 @@ impl LaunchTraverser {
         if let Some(ext) = resolved_path.extension().and_then(|s| s.to_str()) {
             match ext {
                 "py" => {
-                    log::warn!(
-                        "Skipping Python launch file (not yet supported): {}",
-                        resolved_path.display()
-                    );
-                    // Python launch files require Python runtime to execute
-                    // For now, we skip them but could record them in the future
-                    return Ok(());
+                    #[cfg(feature = "python")]
+                    {
+                        log::info!("Including Python launch file: {}", resolved_path.display());
+
+                        // Create args for the Python file (include args override current context)
+                        let mut python_args = self.context.configurations();
+                        for (key, value) in &include.args {
+                            let resolved_value_subs = parse_substitutions(value)?;
+                            let resolved_value =
+                                resolve_substitutions(&resolved_value_subs, &self.context)
+                                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                            python_args.insert(key.clone(), resolved_value);
+                        }
+
+                        return self.execute_python_file(&resolved_path, &python_args);
+                    }
+                    #[cfg(not(feature = "python"))]
+                    {
+                        log::warn!(
+                            "Skipping Python launch file (Python support not enabled): {}",
+                            resolved_path.display()
+                        );
+                        return Ok(());
+                    }
                 }
                 "yaml" | "yml" => {
                     log::info!(
