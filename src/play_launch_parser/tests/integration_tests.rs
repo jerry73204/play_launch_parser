@@ -129,7 +129,6 @@ fn test_parse_conditions_with_args() {
 }
 
 #[test]
-#[ignore] // TODO: Requires relative path resolution in includes
 fn test_parse_include_fixture() {
     let fixture = get_fixture_path("test_include.launch.xml");
     assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
@@ -175,7 +174,6 @@ fn test_parse_include_fixture() {
 }
 
 #[test]
-#[ignore] // TODO: Requires relative path resolution in includes
 fn test_parse_all_features() {
     let fixture = get_fixture_path("test_all_features.launch.xml");
     assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
@@ -204,23 +202,34 @@ fn test_parse_all_features() {
 
     let nodes = json["node"].as_array().unwrap();
 
-    // With use_sim=true (default), should have talker (if condition)
-    let has_talker = nodes.iter().any(|n| n["name"].as_str() == Some("talker"));
-    assert!(has_talker, "Should have talker when use_sim=true");
+    // With use_sim=true (default), should have 2 nodes: talker and included_node
+    assert_eq!(nodes.len(), 2, "Should have 2 nodes with use_sim=true");
+
+    // Should have talker (if condition)
+    let talker = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("talker"))
+        .expect("Should have talker when use_sim=true");
+    assert_eq!(
+        talker["namespace"].as_str().unwrap(),
+        "/robots",
+        "Talker should be in /robots namespace from group"
+    );
 
     // Should not have listener (unless condition)
     let has_listener = nodes.iter().any(|n| n["name"].as_str() == Some("listener"));
     assert!(!has_listener, "Should not have listener when use_sim=true");
 
-    // Check namespace is applied to nodes
-    for node in nodes {
-        let ns = node["namespace"].as_str().unwrap();
-        // Should have /robots namespace from group
-        assert!(
-            ns.starts_with("/robots"),
-            "Nodes should be in /robots namespace"
-        );
-    }
+    // Should have included_node from the include
+    let included_node = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("included_node"))
+        .expect("Should have included_node from include");
+    assert_eq!(
+        included_node["namespace"].as_str().unwrap(),
+        "/",
+        "Included node should be in root namespace (not affected by group)"
+    );
 }
 
 #[test]
@@ -463,4 +472,314 @@ fn test_push_ros_namespace_with_substitution() {
 
     // Should use the substituted namespace
     assert_eq!(nodes[0]["namespace"].as_str().unwrap(), "/my_robot");
+}
+
+#[test]
+fn test_complex_nested_launch() {
+    // Test complex nested launch file with multiple levels of namespaces and includes
+    let fixture = get_fixture_path("test_complex_nested.launch.xml");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    // Test with default args (use_sim_time=true, use_rviz=false)
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+    assert!(
+        result.is_ok(),
+        "Should parse complex file: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    // Should have multiple nodes from different namespaces
+    assert!(nodes.len() >= 5, "Should have at least 5 nodes");
+
+    // Check camera node namespace
+    let camera = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("front_camera"))
+        .expect("Should have front_camera node");
+    assert_eq!(
+        camera["namespace"].as_str().unwrap(),
+        "/robot1/sensors/camera",
+        "Camera should be in /robot1/sensors/camera namespace"
+    );
+
+    // Check lidar node (should be present with use_sim_time=true)
+    let lidar = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("front_lidar"));
+    assert!(
+        lidar.is_some(),
+        "Lidar should be present when use_sim_time=true"
+    );
+    assert_eq!(
+        lidar.unwrap()["namespace"].as_str().unwrap(),
+        "/robot1/sensors/lidar",
+        "Lidar should be in /robot1/sensors/lidar namespace"
+    );
+
+    // Check AMCL node namespace
+    let amcl = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("amcl"))
+        .expect("Should have amcl node");
+    assert_eq!(
+        amcl["namespace"].as_str().unwrap(),
+        "/robot1/navigation",
+        "AMCL should be in /robot1/navigation namespace"
+    );
+
+    // Check that map_server is NOT present (unless condition with use_sim_time=true)
+    let map_server = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("map_server"));
+    assert!(
+        map_server.is_none(),
+        "Map server should not be present when use_sim_time=true"
+    );
+
+    // Check that RViz is NOT present (use_rviz=false by default)
+    let rviz = nodes.iter().find(|n| n["name"].as_str() == Some("rviz2"));
+    assert!(
+        rviz.is_none(),
+        "RViz should not be present when use_rviz=false"
+    );
+
+    // Check nodes from included file
+    let robot_state_pub = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("robot_state_publisher"))
+        .expect("Should have robot_state_publisher from include");
+    assert_eq!(
+        robot_state_pub["namespace"].as_str().unwrap(),
+        "/robot1",
+        "Robot state publisher should be in /robot1 namespace"
+    );
+
+    // Joint state publisher should be present (use_sim_time=true in include)
+    let joint_state_pub = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("joint_state_publisher"));
+    assert!(
+        joint_state_pub.is_some(),
+        "Joint state publisher should be present in sim mode"
+    );
+}
+
+#[test]
+fn test_complex_nested_with_args_override() {
+    // Test same complex file but with overridden arguments
+    let fixture = get_fixture_path("test_complex_nested.launch.xml");
+
+    let mut args = HashMap::new();
+    args.insert("robot_name".to_string(), "test_bot".to_string());
+    args.insert("use_sim_time".to_string(), "false".to_string());
+    args.insert("use_rviz".to_string(), "true".to_string());
+
+    let result = parse_launch_file(&fixture, args);
+    assert!(result.is_ok(), "Should parse with overridden args");
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+
+    // Check camera is in test_bot namespace
+    let camera = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("front_camera"))
+        .expect("Should have front_camera");
+    assert!(
+        camera["namespace"]
+            .as_str()
+            .unwrap()
+            .starts_with("/test_bot"),
+        "Camera should be in test_bot namespace"
+    );
+
+    // Lidar should NOT be present (use_sim_time=false)
+    let lidar = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("front_lidar"));
+    assert!(
+        lidar.is_none(),
+        "Lidar should not be present when use_sim_time=false"
+    );
+
+    // Map server SHOULD be present (unless condition with use_sim_time=false)
+    let map_server = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("map_server"));
+    assert!(
+        map_server.is_some(),
+        "Map server should be present when use_sim_time=false"
+    );
+
+    // RViz SHOULD be present (use_rviz=true)
+    let rviz = nodes.iter().find(|n| n["name"].as_str() == Some("rviz2"));
+    assert!(rviz.is_some(), "RViz should be present when use_rviz=true");
+}
+
+#[test]
+fn test_deeply_nested_namespaces() {
+    // Test that deeply nested namespace stacking works correctly
+    let xml = r#"<launch>
+        <group ns="level1">
+            <push-ros-namespace ns="level2" />
+            <group>
+                <push-ros-namespace ns="level3" />
+                <group>
+                    <push-ros-namespace ns="level4" />
+                    <node pkg="test_pkg" exec="test_node" name="deep_node" />
+                    <pop-ros-namespace />
+                </group>
+                <node pkg="test_pkg" exec="test_node" name="mid_node" />
+                <pop-ros-namespace />
+            </group>
+            <node pkg="test_pkg" exec="test_node" name="shallow_node" />
+            <pop-ros-namespace />
+        </group>
+        <node pkg="test_pkg" exec="test_node" name="root_node" />
+    </launch>"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(xml.as_bytes()).unwrap();
+    file.flush().unwrap();
+
+    let result = parse_launch_file(file.path(), HashMap::new());
+    assert!(result.is_ok(), "Should parse deeply nested namespaces");
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 4, "Should have 4 nodes");
+
+    // Check each node's namespace
+    let deep_node = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("deep_node"))
+        .unwrap();
+    assert_eq!(
+        deep_node["namespace"].as_str().unwrap(),
+        "/level1/level2/level3/level4"
+    );
+
+    let mid_node = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("mid_node"))
+        .unwrap();
+    assert_eq!(
+        mid_node["namespace"].as_str().unwrap(),
+        "/level1/level2/level3"
+    );
+
+    let shallow_node = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("shallow_node"))
+        .unwrap();
+    assert_eq!(
+        shallow_node["namespace"].as_str().unwrap(),
+        "/level1/level2"
+    );
+
+    let root_node = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("root_node"))
+        .unwrap();
+    assert_eq!(root_node["namespace"].as_str().unwrap(), "/");
+}
+
+#[test]
+fn test_performance_simple_launch() {
+    // Benchmark parsing performance on a simple launch file
+    use std::time::Instant;
+
+    let fixture = get_fixture_path("test_args.launch.xml");
+    let args = HashMap::new();
+
+    let start = Instant::now();
+    let iterations = 100;
+
+    for _ in 0..iterations {
+        let result = parse_launch_file(&fixture, args.clone());
+        assert!(result.is_ok());
+    }
+
+    let duration = start.elapsed();
+    let avg_ms = duration.as_millis() as f64 / iterations as f64;
+
+    println!("\nPerformance - Simple Launch File:");
+    println!("  Total time ({} iterations): {:?}", iterations, duration);
+    println!("  Average per parse: {:.2}ms", avg_ms);
+    println!("  Throughput: {:.0} parses/sec", 1000.0 / avg_ms);
+
+    // Assert reasonable performance (should be well under 100ms for simple files)
+    assert!(
+        avg_ms < 10.0,
+        "Simple parse should be < 10ms, got {:.2}ms",
+        avg_ms
+    );
+}
+
+#[test]
+fn test_performance_complex_nested() {
+    // Benchmark parsing performance on a complex nested launch file
+    use std::time::Instant;
+
+    let fixture = get_fixture_path("test_complex_nested.launch.xml");
+    let args = HashMap::new();
+
+    let start = Instant::now();
+    let iterations = 50;
+
+    for _ in 0..iterations {
+        let result = parse_launch_file(&fixture, args.clone());
+        assert!(result.is_ok());
+    }
+
+    let duration = start.elapsed();
+    let avg_ms = duration.as_millis() as f64 / iterations as f64;
+
+    println!("\nPerformance - Complex Nested Launch File:");
+    println!("  Total time ({} iterations): {:?}", iterations, duration);
+    println!("  Average per parse: {:.2}ms", avg_ms);
+    println!("  Throughput: {:.0} parses/sec", 1000.0 / avg_ms);
+
+    // Assert reasonable performance (complex files should still be fast)
+    assert!(
+        avg_ms < 50.0,
+        "Complex parse should be < 50ms, got {:.2}ms",
+        avg_ms
+    );
+}
+
+#[test]
+fn test_performance_with_includes() {
+    // Benchmark parsing performance with includes
+    use std::time::Instant;
+
+    let fixture = get_fixture_path("test_all_features.launch.xml");
+    let args = HashMap::new();
+
+    let start = Instant::now();
+    let iterations = 50;
+
+    for _ in 0..iterations {
+        let result = parse_launch_file(&fixture, args.clone());
+        assert!(result.is_ok());
+    }
+
+    let duration = start.elapsed();
+    let avg_ms = duration.as_millis() as f64 / iterations as f64;
+
+    println!("\nPerformance - Launch File with Includes:");
+    println!("  Total time ({} iterations): {:?}", iterations, duration);
+    println!("  Average per parse: {:.2}ms", avg_ms);
+    println!("  Throughput: {:.0} parses/sec", 1000.0 / avg_ms);
+
+    // Assert reasonable performance
+    assert!(
+        avg_ms < 50.0,
+        "Parse with includes should be < 50ms, got {:.2}ms",
+        avg_ms
+    );
 }
