@@ -508,3 +508,40 @@ impl SetLaunchConfiguration {
         "SetLaunchConfiguration(...)".to_string()
     }
 }
+
+/// Mock RegisterEventHandler action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import RegisterEventHandler
+/// from launch.event_handlers import OnProcessStart
+///
+/// RegisterEventHandler(
+///     OnProcessStart(
+///         target_action=some_node,
+///         on_start=[LogInfo(msg='Started!')]
+///     )
+/// )
+/// ```
+///
+/// Event handlers allow actions to be triggered in response to events
+#[pyclass]
+#[derive(Clone)]
+pub struct RegisterEventHandler {
+    #[allow(dead_code)] // Keep for API compatibility
+    event_handler: PyObject,
+}
+
+#[pymethods]
+impl RegisterEventHandler {
+    #[new]
+    #[pyo3(signature = (event_handler, **_kwargs))]
+    fn new(event_handler: PyObject, _kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!("Python Launch RegisterEventHandler created (limited support)");
+        Self { event_handler }
+    }
+
+    fn __repr__(&self) -> String {
+        "RegisterEventHandler(...)".to_string()
+    }
+}

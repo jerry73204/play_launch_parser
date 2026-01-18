@@ -629,3 +629,214 @@ impl SetParameter {
         format!("SetParameter(name='{}')", self.name)
     }
 }
+
+/// Mock LifecycleNode class
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import LifecycleNode
+///
+/// lifecycle_node = LifecycleNode(
+///     package='my_package',
+///     executable='my_lifecycle_node',
+///     name='my_node',
+///     namespace='/my_namespace',
+///     output='screen'
+/// )
+/// ```
+///
+/// LifecycleNode is similar to Node but adds lifecycle management support
+/// For now, we treat it the same as a regular Node
+#[pyclass]
+#[derive(Clone)]
+pub struct LifecycleNode {
+    package: String,
+    executable: String,
+    name: Option<String>,
+    namespace: Option<String>,
+    parameters: Vec<PyObject>,
+    remappings: Vec<PyObject>,
+    arguments: Vec<PyObject>,
+    #[allow(dead_code)] // Keep for API compatibility
+    output: String,
+}
+
+#[pymethods]
+impl LifecycleNode {
+    #[new]
+    #[pyo3(signature = (
+        *,
+        package,
+        executable,
+        name=None,
+        namespace=None,
+        parameters=None,
+        remappings=None,
+        arguments=None,
+        output=None,
+        **_kwargs
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        py: Python,
+        package: String,
+        executable: String,
+        name: Option<String>,
+        namespace: Option<String>,
+        parameters: Option<Vec<PyObject>>,
+        remappings: Option<Vec<PyObject>>,
+        arguments: Option<Vec<PyObject>>,
+        output: Option<String>,
+        _kwargs: Option<&PyDict>,
+    ) -> PyResult<Self> {
+        let node = Self {
+            package: package.clone(),
+            executable: executable.clone(),
+            name: name.clone(),
+            namespace: namespace.clone(),
+            parameters: parameters.unwrap_or_default(),
+            remappings: remappings.unwrap_or_default(),
+            arguments: arguments.unwrap_or_default(),
+            output: output.unwrap_or_else(|| "screen".to_string()),
+        };
+
+        // Capture as a regular node (lifecycle management not supported in static parsing)
+        Self::capture_node(&node, py)?;
+
+        Ok(node)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "LifecycleNode(package='{}', executable='{}', name='{}')",
+            self.package,
+            self.executable,
+            self.name.as_deref().unwrap_or(&self.executable)
+        )
+    }
+}
+
+impl LifecycleNode {
+    /// Capture the lifecycle node as a regular NodeCapture
+    fn capture_node(&self, py: Python) -> PyResult<()> {
+        use crate::python::bridge::{NodeCapture, CAPTURED_NODES};
+
+        // Parse parameters (same logic as regular Node)
+        let parsed_params = self.parse_parameters(py)?;
+
+        // Parse remappings
+        let parsed_remaps = self.parse_remappings(py)?;
+
+        // Parse arguments
+        let parsed_args = self.parse_arguments(py)?;
+
+        let capture = NodeCapture {
+            package: self.package.clone(),
+            executable: self.executable.clone(),
+            name: self.name.clone(),
+            namespace: self.namespace.clone(),
+            parameters: parsed_params,
+            remappings: parsed_remaps,
+            arguments: parsed_args,
+            env_vars: Vec::new(),
+        };
+
+        log::debug!(
+            "Captured Python lifecycle node: {} / {}",
+            capture.package,
+            capture.executable
+        );
+
+        CAPTURED_NODES.lock().unwrap().push(capture);
+        Ok(())
+    }
+
+    /// Parse Python parameters (similar to Node)
+    fn parse_parameters(&self, py: Python) -> PyResult<Vec<(String, String)>> {
+        let mut parsed_params = Vec::new();
+
+        for param_obj in &self.parameters {
+            let param_any = param_obj.as_ref(py);
+
+            // Try to extract as dict (most common case for parameters)
+            if let Ok(param_dict) = param_any.downcast::<pyo3::types::PyDict>() {
+                for (key, value) in param_dict.iter() {
+                    let key_str = key.extract::<String>()?;
+                    // Convert value to string
+                    let value_str = Self::pyobject_to_string(value)?;
+                    parsed_params.push((key_str, value_str));
+                }
+            }
+            // Try to extract as string (path to YAML parameter file)
+            else if let Ok(path_str) = param_any.extract::<String>() {
+                // This is a parameter file path
+                parsed_params.push(("__param_file".to_string(), path_str));
+            }
+        }
+
+        Ok(parsed_params)
+    }
+
+    /// Parse Python remappings (similar to Node)
+    fn parse_remappings(&self, py: Python) -> PyResult<Vec<(String, String)>> {
+        let mut parsed_remaps = Vec::new();
+
+        for remap_obj in &self.remappings {
+            if let Ok(remap_tuple) = remap_obj.downcast::<pyo3::types::PyTuple>(py) {
+                if remap_tuple.len() == 2 {
+                    let from = remap_tuple.get_item(0)?.extract::<String>()?;
+                    let to = remap_tuple.get_item(1)?.extract::<String>()?;
+                    parsed_remaps.push((from, to));
+                }
+            }
+        }
+
+        Ok(parsed_remaps)
+    }
+
+    /// Parse Python arguments (similar to Node)
+    fn parse_arguments(&self, py: Python) -> PyResult<Vec<String>> {
+        let mut parsed_args = Vec::new();
+
+        for arg_obj in &self.arguments {
+            if let Ok(arg_str) = arg_obj.extract::<String>(py) {
+                parsed_args.push(arg_str);
+            }
+        }
+
+        Ok(parsed_args)
+    }
+
+    /// Convert PyObject to string (handles substitutions)
+    fn pyobject_to_string(obj: &PyAny) -> PyResult<String> {
+        // Try direct string extraction
+        if let Ok(s) = obj.extract::<String>() {
+            return Ok(s);
+        }
+
+        // Try calling __str__ method (for substitutions)
+        if let Ok(str_result) = obj.call_method0("__str__") {
+            if let Ok(s) = str_result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+
+        // Try bool conversion
+        if let Ok(b) = obj.extract::<bool>() {
+            return Ok(if b { "true" } else { "false" }.to_string());
+        }
+
+        // Try integer
+        if let Ok(i) = obj.extract::<i64>() {
+            return Ok(i.to_string());
+        }
+
+        // Try float
+        if let Ok(f) = obj.extract::<f64>() {
+            return Ok(f.to_string());
+        }
+
+        // Fallback to repr
+        Ok(obj.to_string())
+    }
+}
