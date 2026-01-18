@@ -1,6 +1,6 @@
 # Claude Development Guidelines
 
-This document contains best practices and guidelines for Claude (AI assistant) when working on this project.
+This document contains essential practices and guidelines for Claude (AI assistant) when working on this project.
 
 ## Quality Assurance
 
@@ -8,28 +8,21 @@ This document contains best practices and guidelines for Claude (AI assistant) w
 
 **CRITICAL PRACTICE**: Before marking any task as complete, ALWAYS run quality checks and fix errors.
 
-**Required Steps**:
-1. Run clippy with strict settings: `cargo clippy --all-targets --all-features -- -D warnings`
-2. Fix ALL warnings and errors (no exceptions)
-3. Check formatting: `cargo fmt -- --check`
-4. Run all tests: `cargo test --all`
-5. Verify all tests pass (229/229 expected as of Session 6)
-
 **Quick Command**:
 ```bash
 just quality
 ```
 
-This command runs:
+This runs:
 1. `just check` - Linters and formatters (clippy, rustfmt)
 2. `just test-rust` - All Rust unit tests
 
-**Why This Matters**:
-- Prevents committing broken code
-- Catches unused imports, doc comment issues, type errors
-- Ensures consistent code style
-- Verifies no regressions
-- Maintains high code quality standards
+**Required Steps**:
+1. Run clippy: `cargo clippy --all-targets --all-features -- -D warnings`
+2. Fix ALL warnings and errors (no exceptions)
+3. Check formatting: `cargo fmt -- --check`
+4. Run all tests: `cargo test --all`
+5. Verify all tests pass (249 tests expected)
 
 **Never**:
 - Mark a task complete with failing tests
@@ -37,73 +30,48 @@ This command runs:
 - Skip quality checks "for later"
 - Commit code that doesn't compile
 
-Only mark a task as complete after ALL quality checks pass.
-
 ## Development Workflow
 
 ### When Making Changes
 
-1. **Read files first**: Always use the Read tool to examine files before modifying them
-2. **Run tests after changes**: After any code modification, run `cargo test` or `just test-rust`
+1. **Read files first**: Always use the Read tool before modifying
+2. **Run tests after changes**: After modifications, run `cargo test` or `just test-rust`
 3. **Fix all errors**: Never leave compilation errors or failing tests
 4. **Update tests**: When changing functionality, update relevant tests
 5. **Add tests for new features**: New functionality requires comprehensive test coverage
 
 ### Test-Driven Development
 
-- Write tests for new features before or during implementation
-- Ensure tests cover:
-  - Happy path (normal operation)
-  - Edge cases (boundary conditions)
-  - Error cases (invalid input, failures)
-  - Integration scenarios (features working together)
+Write tests covering:
+- Happy path (normal operation)
+- Edge cases (boundary conditions)
+- Error cases (invalid input, failures)
+- Integration scenarios (features working together)
 
 ### Code Quality Standards
 
-- **No warnings**: Fix all clippy warnings (`cargo clippy`)
+- **No warnings**: Fix all clippy warnings
 - **Formatted code**: Always format with `cargo fmt`
 - **No unused code**: Remove unused imports, variables, functions
-- **Clear naming**: Use descriptive names for variables, functions, types
+- **Clear naming**: Use descriptive names
 - **Documentation**: Add doc comments for public APIs
 
 ## Project-Specific Practices
 
 ### Temporary Files
 
-When creating temporary files for debugging or testing:
 - Use `$project/tmp/` directory instead of `/tmp/`
-- Create the directory if it doesn't exist: `mkdir -p tmp/`
-- Clean up temporary files when done if appropriate
+- Create if needed: `mkdir -p tmp/`
+- Clean up when done if appropriate
 - Example: `tmp/debug_output.json`, `tmp/test_results.txt`
 
 ### File Creation
 
-When creating files:
-- **Prefer**: Use `Write` tool for creating files
-- **Avoid**: Using `cat` with heredoc pattern (`cat > file << 'EOF'`)
-- **Reason**: Write tool is clearer and less error-prone
-- **Exception**: Small one-liners or when appending to existing files
+- **Always use**: `Write` tool for creating files
+- **Never use**: `cat` with heredoc pattern (`cat > file << 'EOF'`)
+- **No exceptions**: Even for long files or complex content
 
-### Substitution System
-
-When working on the substitution system:
-- All substitution types support nested substitutions via `Vec<Substitution>`
-- Parser uses character-by-character parsing with parenthesis depth counting
-- Resolution happens recursively from inside-out
-- Always test both parsing and resolution separately
-
-### Testing Strategy
-
-Current test count baseline: **194 tests**
-
-When adding features:
-- Add parser tests (verify AST structure)
-- Add resolution tests (verify runtime behavior)
-- Add integration tests (verify end-to-end functionality)
-- Test nested/complex scenarios
-- Test error cases
-
-#### Test Fixtures Organization
+### Test Fixtures
 
 Test launch files are organized in the `tests/` directory:
 
@@ -111,16 +79,11 @@ Test launch files are organized in the `tests/` directory:
 tests/
 ├── fixtures/
 │   ├── launch/         # Main test launch files
-│   └── includes/       # Launch files to be included by other files
+│   └── includes/       # Launch files to be included
 └── README.md
 ```
 
-When adding new test fixtures:
-- Place main test files in `tests/fixtures/launch/`
-- Place included files in `tests/fixtures/includes/`
-- Use relative paths for includes: `../includes/file.launch.xml`
-- Name test files descriptively: `test_<feature>.launch.xml`
-- Document new fixtures in `tests/README.md`
+See `tests/README.md` for test organization details.
 
 ## Common Commands
 
@@ -155,8 +118,55 @@ Checklist:
 - [ ] New functionality has tests
 - [ ] Documentation is updated if needed
 
-## Notes
+## Environment Setup
 
-- This is a ROS 2 launch file parser written in Rust
-- Goal: Replace slow Python `dump_launch` with fast Rust implementation
-- Focus: Parser correctness, performance, and ROS 2 feature parity
+### direnv Configuration
+
+The project uses `.envrc` to automatically source ROS 2 environment:
+
+```bash
+# .envrc sources:
+# - /opt/ros/humble/setup.bash (if exists)
+# - install/setup.bash (if exists, watched for changes)
+```
+
+After creating/modifying `.envrc`, run `direnv allow` to enable it.
+
+## Project Overview
+
+**Goal**: Fast Rust implementation of ROS 2 launch file parser to replace slow Python `dump_launch`
+
+**Current Status**: Phase 5.4 - Autoware Compatibility Testing
+- **Test Coverage**: 249 tests passing (~95% code coverage)
+- **Feature Completion**: 93% (Phase 5 in progress)
+- **Autoware Compatibility**: 95% XML files, 80-85% Python files
+
+### Current Capabilities
+
+- ✅ Complete XML launch file parsing
+- ✅ All core substitutions (`$(var)`, `$(env)`, `$(find-pkg-share)`, etc.)
+- ✅ Eval expressions (arithmetic & string comparisons)
+- ✅ Python launch file support (core API)
+- ✅ Container and composable node support
+- ✅ YAML launch file support
+- 🔄 Python API enhancements (in progress)
+
+### Detailed Documentation
+
+For detailed information, see:
+- **Feature tracking**: `docs/feature_list.md`
+- **Implementation status**: `docs/roadmap/implementation_status.md`
+- **Phase 5 roadmap**: `docs/roadmap/phase-5-python_support.md`
+- **Test organization**: `tests/README.md`
+
+### Quick Reference
+
+**Test Count Baseline**: 249 tests (208 unit + 18 edge + 23 integration)
+
+**Key Architectural Notes**:
+- Substitution system uses recursive `Vec<Substitution>` for nesting
+- Parser uses character-by-character parsing with depth counting
+- Include arguments use `Vec` (not `HashMap`) to preserve order
+- Python API uses capture-on-construction pattern
+
+See implementation docs for detailed architecture and design decisions.
