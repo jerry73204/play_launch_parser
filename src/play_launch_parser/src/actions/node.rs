@@ -16,8 +16,8 @@ pub struct NodeAction {
     pub remappings: Vec<Remapping>,
     pub environment: Vec<(String, String)>,
     pub output: Option<String>,
-    pub respawn: bool,
-    pub respawn_delay: Option<f64>,
+    pub respawn: Option<Vec<Substitution>>,
+    pub respawn_delay: Option<Vec<Substitution>>,
 }
 
 impl NodeAction {
@@ -94,8 +94,14 @@ impl NodeAction {
             remappings,
             environment,
             output: entity.get_attr("output", true)?,
-            respawn: entity.get_attr("respawn", true)?.unwrap_or(false),
-            respawn_delay: entity.get_attr("respawn_delay", true)?,
+            respawn: entity
+                .get_attr_str("respawn", true)?
+                .map(|s| parse_substitutions(&s))
+                .transpose()?,
+            respawn_delay: entity
+                .get_attr_str("respawn_delay", true)?
+                .map(|s| parse_substitutions(&s))
+                .transpose()?,
         })
     }
 }

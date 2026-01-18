@@ -117,8 +117,36 @@ impl CommandGenerator {
             args: None,
             cmd,
             env,
-            respawn: Some(node.respawn),
-            respawn_delay: node.respawn_delay,
+            respawn: node
+                .respawn
+                .as_ref()
+                .map(|subs| {
+                    let resolved = resolve_substitutions(subs, context)?;
+                    resolved.parse::<bool>().map_err(|_| {
+                        GenerationError::Substitution(
+                            crate::error::SubstitutionError::InvalidSubstitution(format!(
+                                "Failed to parse respawn value '{}' as boolean",
+                                resolved
+                            )),
+                        )
+                    })
+                })
+                .transpose()?,
+            respawn_delay: node
+                .respawn_delay
+                .as_ref()
+                .map(|subs| {
+                    let resolved = resolve_substitutions(subs, context)?;
+                    resolved.parse::<f64>().map_err(|_| {
+                        GenerationError::Substitution(
+                            crate::error::SubstitutionError::InvalidSubstitution(format!(
+                                "Failed to parse respawn_delay value '{}' as number",
+                                resolved
+                            )),
+                        )
+                    })
+                })
+                .transpose()?,
             global_params,
         })
     }
@@ -266,7 +294,7 @@ mod tests {
             remappings: vec![],
             environment: vec![],
             output: None,
-            respawn: false,
+            respawn: None,
             respawn_delay: None,
         };
 
@@ -295,7 +323,7 @@ mod tests {
             remappings: vec![],
             environment: vec![],
             output: None,
-            respawn: false,
+            respawn: None,
             respawn_delay: None,
         };
 
@@ -321,7 +349,7 @@ mod tests {
             }],
             environment: vec![],
             output: None,
-            respawn: false,
+            respawn: None,
             respawn_delay: None,
         };
 
