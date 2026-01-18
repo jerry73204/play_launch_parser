@@ -6,8 +6,16 @@ This document contains best practices and guidelines for Claude (AI assistant) w
 
 ### Always Run Quality Checks Before Finishing
 
-**IMPORTANT**: After completing any task that modifies code, always run:
+**CRITICAL PRACTICE**: Before marking any task as complete, ALWAYS run quality checks and fix errors.
 
+**Required Steps**:
+1. Run clippy with strict settings: `cargo clippy --all-targets --all-features -- -D warnings`
+2. Fix ALL warnings and errors (no exceptions)
+3. Check formatting: `cargo fmt -- --check`
+4. Run all tests: `cargo test --all`
+5. Verify all tests pass (229/229 expected as of Session 6)
+
+**Quick Command**:
 ```bash
 just quality
 ```
@@ -16,7 +24,20 @@ This command runs:
 1. `just check` - Linters and formatters (clippy, rustfmt)
 2. `just test-rust` - All Rust unit tests
 
-Only mark a task as complete after all quality checks pass.
+**Why This Matters**:
+- Prevents committing broken code
+- Catches unused imports, doc comment issues, type errors
+- Ensures consistent code style
+- Verifies no regressions
+- Maintains high code quality standards
+
+**Never**:
+- Mark a task complete with failing tests
+- Leave clippy warnings unfixed
+- Skip quality checks "for later"
+- Commit code that doesn't compile
+
+Only mark a task as complete after ALL quality checks pass.
 
 ## Development Workflow
 
