@@ -3,6 +3,7 @@
 pub mod actions;
 pub mod condition;
 pub mod error;
+pub mod params;
 pub mod record;
 pub mod substitution;
 pub mod xml;
@@ -280,5 +281,81 @@ mod tests {
         assert_eq!(record.node[1].package, None);
         assert_eq!(record.node[2].executable, "listener");
         assert_eq!(record.node[2].package, Some("demo_nodes_cpp".to_string()));
+    }
+
+    #[test]
+    fn test_parse_node_with_param_file() {
+        use std::io::Write;
+
+        // Create a parameter YAML file
+        let yaml_content = r#"
+test_node:
+  ros__parameters:
+    param1: "value1"
+    param2: 42
+    nested:
+      param3: "nested_value"
+"#;
+        let mut param_file = NamedTempFile::new().unwrap();
+        param_file.write_all(yaml_content.as_bytes()).unwrap();
+        param_file.flush().unwrap();
+
+        let param_file_path = param_file.path().to_str().unwrap();
+
+        // Create a launch file that references the parameter file
+        let xml = format!(
+            r#"<launch>
+            <node pkg="demo_nodes_cpp" exec="talker">
+                <param name="inline_param" value="inline_value" />
+                <param from="{}" />
+            </node>
+        </launch>"#,
+            param_file_path
+        );
+
+        let mut launch_file = NamedTempFile::new().unwrap();
+        launch_file.write_all(xml.as_bytes()).unwrap();
+        launch_file.flush().unwrap();
+
+        let record = parse_launch_file(launch_file.path(), HashMap::new()).unwrap();
+        assert_eq!(record.node.len(), 1);
+
+        // Check that both inline and file parameters are present
+        let node = &record.node[0];
+        assert!(node.params.len() >= 4); // inline_param + 3 from YAML
+
+        // Check inline parameter
+        let inline_param = node
+            .params
+            .iter()
+            .find(|(k, _)| k == "inline_param")
+            .expect("inline_param not found");
+        assert_eq!(inline_param.1, "inline_value");
+
+        // Check parameters from file
+        let param1 = node
+            .params
+            .iter()
+            .find(|(k, _)| k == "param1")
+            .expect("param1 not found");
+        assert_eq!(param1.1, "value1");
+
+        let param2 = node
+            .params
+            .iter()
+            .find(|(k, _)| k == "param2")
+            .expect("param2 not found");
+        assert_eq!(param2.1, "42");
+
+        let nested_param = node
+            .params
+            .iter()
+            .find(|(k, _)| k == "nested.param3")
+            .expect("nested.param3 not found");
+        assert_eq!(nested_param.1, "nested_value");
+
+        // Check that the param file path is recorded
+        assert_eq!(node.params_files.len(), 1);
+        assert_eq!(node.params_files[0], param_file_path);
     }
 }

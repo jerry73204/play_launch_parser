@@ -12,6 +12,7 @@ pub struct NodeAction {
     pub name: Option<Vec<Substitution>>,
     pub namespace: Option<Vec<Substitution>>,
     pub parameters: Vec<Parameter>,
+    pub param_files: Vec<Vec<Substitution>>,
     pub remappings: Vec<Remapping>,
     pub environment: Vec<(String, String)>,
     pub output: Option<String>,
@@ -51,12 +52,22 @@ impl NodeAction {
 
         // Parse children for params, remaps, env
         let mut parameters = Vec::new();
+        let mut param_files = Vec::new();
         let mut remappings = Vec::new();
         let mut environment = Vec::new();
 
         for child in entity.children() {
             match child.type_name() {
-                "param" => parameters.push(Parameter::from_entity(&child)?),
+                "param" => {
+                    // Check if this is a parameter file reference
+                    if let Some(from_attr) = child.get_attr_str("from", true)? {
+                        // This is a parameter file
+                        param_files.push(parse_substitutions(&from_attr)?);
+                    } else {
+                        // This is an inline parameter
+                        parameters.push(Parameter::from_entity(&child)?);
+                    }
+                }
                 "remap" => remappings.push(Remapping::from_entity(&child)?),
                 "env" => environment.push(parse_env(&child)?),
                 other => {
@@ -74,6 +85,7 @@ impl NodeAction {
             name,
             namespace,
             parameters,
+            param_files,
             remappings,
             environment,
             output: entity.get_attr("output", true)?,
@@ -242,5 +254,59 @@ mod tests {
         assert_eq!(node.environment.len(), 1);
         assert_eq!(node.environment[0].0, "MY_VAR");
         assert_eq!(node.environment[0].1, "my_value");
+    }
+
+    #[test]
+    fn test_parse_node_with_param_file() {
+        let xml = r#"<node pkg="demo" exec="node">
+            <param from="/path/to/params.yaml" />
+        </node>"#;
+        parse_xml_string(xml).unwrap();
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let entity = crate::xml::XmlEntity::new(doc.root_element());
+        let node = NodeAction::from_entity(&entity).unwrap();
+
+        assert_eq!(node.param_files.len(), 1);
+        assert_eq!(
+            node.param_files[0],
+            vec![Substitution::Text("/path/to/params.yaml".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_parse_node_with_mixed_params() {
+        let xml = r#"<node pkg="demo" exec="node">
+            <param name="inline_param" value="inline_value" />
+            <param from="/path/to/params.yaml" />
+            <param name="another_param" value="another_value" />
+        </node>"#;
+        parse_xml_string(xml).unwrap();
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let entity = crate::xml::XmlEntity::new(doc.root_element());
+        let node = NodeAction::from_entity(&entity).unwrap();
+
+        assert_eq!(node.parameters.len(), 2);
+        assert_eq!(node.param_files.len(), 1);
+        assert_eq!(node.parameters[0].name, "inline_param");
+        assert_eq!(node.parameters[1].name, "another_param");
+    }
+
+    #[test]
+    fn test_parse_node_with_param_file_substitution() {
+        let xml = r#"<node pkg="demo" exec="node">
+            <param from="$(dirname)/params.yaml" />
+        </node>"#;
+        parse_xml_string(xml).unwrap();
+        let doc = roxmltree::Document::parse(xml).unwrap();
+        let entity = crate::xml::XmlEntity::new(doc.root_element());
+        let node = NodeAction::from_entity(&entity).unwrap();
+
+        assert_eq!(node.param_files.len(), 1);
+        assert_eq!(node.param_files[0].len(), 2);
+        assert_eq!(node.param_files[0][0], Substitution::Dirname);
+        assert_eq!(
+            node.param_files[0][1],
+            Substitution::Text("/params.yaml".to_string())
+        );
     }
 }

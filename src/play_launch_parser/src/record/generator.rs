@@ -2,8 +2,10 @@
 
 use crate::actions::{ExecutableAction, NodeAction};
 use crate::error::GenerationError;
+use crate::params::load_param_file;
 use crate::record::types::NodeRecord;
 use crate::substitution::{resolve_substitutions, LaunchContext};
+use std::path::Path;
 
 pub struct CommandGenerator;
 
@@ -29,15 +31,32 @@ impl CommandGenerator {
             Some("/".to_string())
         };
 
-        let params: Result<Vec<_>, GenerationError> = node
+        // Process inline parameters
+        let mut params: Vec<(String, String)> = node
             .parameters
             .iter()
             .map(|p| {
                 let resolved_value = resolve_substitutions(&p.value, context)?;
                 Ok((p.name.clone(), resolved_value))
             })
-            .collect();
-        let params = params?;
+            .collect::<Result<Vec<_>, GenerationError>>()?;
+
+        // Process parameter files
+        let mut params_files = Vec::new();
+        for param_file_subs in &node.param_files {
+            let param_file_path = resolve_substitutions(param_file_subs, context)?;
+            params_files.push(param_file_path.clone());
+
+            // Load parameters from file and merge with inline params
+            match load_param_file(Path::new(&param_file_path)) {
+                Ok(file_params) => {
+                    params.extend(file_params);
+                }
+                Err(e) => {
+                    log::warn!("Failed to load parameter file {}: {}", param_file_path, e);
+                }
+            }
+        }
 
         let remaps: Result<Vec<_>, GenerationError> = node
             .remappings
@@ -63,7 +82,7 @@ impl CommandGenerator {
             namespace,
             exec_name: None, // TODO: Generate exec_name-1, exec_name-2, etc.
             params,
-            params_files: Vec::new(), // TODO: Phase 3
+            params_files,
             remaps,
             ros_args: None,
             args: None,
@@ -200,6 +219,7 @@ mod tests {
             name: None,
             namespace: None,
             parameters: vec![],
+            param_files: vec![],
             remappings: vec![],
             environment: vec![],
             output: None,
@@ -228,6 +248,7 @@ mod tests {
                 name: "rate".to_string(),
                 value: vec![Substitution::Text("10.0".to_string())],
             }],
+            param_files: vec![],
             remappings: vec![],
             environment: vec![],
             output: None,
@@ -250,6 +271,7 @@ mod tests {
             name: None,
             namespace: None,
             parameters: vec![],
+            param_files: vec![],
             remappings: vec![Remapping {
                 from: vec![Substitution::Text("chatter".to_string())],
                 to: vec![Substitution::Text("/chat".to_string())],
