@@ -14,7 +14,8 @@ use pyo3::prelude::*;
 #[pyclass]
 #[derive(Clone)]
 pub struct LaunchDescription {
-    actions: Vec<PyObject>,
+    #[pyo3(get)]
+    pub actions: Vec<PyObject>,
 }
 
 #[pymethods]

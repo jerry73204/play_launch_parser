@@ -43,6 +43,24 @@ impl LaunchConfiguration {
     fn __repr__(&self) -> String {
         format!("LaunchConfiguration('{}')", self.variable_name)
     }
+
+    /// Perform the substitution - extract the actual value from launch configurations
+    ///
+    /// In ROS 2, this method is called with a launch context to resolve the value.
+    /// We use our global LAUNCH_CONFIGURATIONS storage instead.
+    fn perform(&self, _context: &PyAny) -> PyResult<String> {
+        use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+
+        let configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+        if let Some(value) = configs.get(&self.variable_name) {
+            Ok(value.clone())
+        } else if let Some(ref default) = self.default {
+            Ok(default.clone())
+        } else {
+            // Return empty string if not found (ROS 2 behavior)
+            Ok(String::new())
+        }
+    }
 }
 
 /// Mock TextSubstitution

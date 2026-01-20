@@ -97,6 +97,52 @@ impl DeclareLaunchArgument {
     }
 }
 
+/// Mock OpaqueFunction action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import OpaqueFunction
+/// def my_function(context):
+///     return [Node(...), ...]
+/// opaque = OpaqueFunction(function=my_function)
+/// ```
+///
+/// This action executes a Python function and captures the returned actions.
+#[pyclass]
+#[derive(Clone)]
+pub struct OpaqueFunction {
+    function: Option<PyObject>,
+}
+
+#[pymethods]
+impl OpaqueFunction {
+    #[new]
+    #[pyo3(signature = (*, function=None, **_kwargs))]
+    fn new(function: Option<PyObject>, _kwargs: Option<&pyo3::types::PyDict>) -> PyResult<Self> {
+        Ok(Self { function })
+    }
+
+    fn __repr__(&self) -> String {
+        "OpaqueFunction(...)".to_string()
+    }
+
+    /// Execute the function and return the result
+    /// This is called by our executor
+    pub fn execute(&self, py: Python) -> PyResult<PyObject> {
+        if let Some(ref func) = self.function {
+            // Create a simple mock context object
+            // LaunchConfiguration and other substitutions have their own perform() methods
+            let context_code = "type('MockContext', (), {})()";
+            let context = py.eval(context_code, None, None)?;
+
+            // Call the function with the context
+            func.call1(py, (context,))
+        } else {
+            Ok(py.None())
+        }
+    }
+}
+
 /// Mock LogInfo action
 ///
 /// Python equivalent:
@@ -315,36 +361,6 @@ impl TimerAction {
             self.period,
             self.actions.len()
         )
-    }
-}
-
-/// Mock OpaqueFunction action
-///
-/// Python equivalent:
-/// ```python
-/// from launch.actions import OpaqueFunction
-/// opaque = OpaqueFunction(function=my_function)
-/// ```
-///
-/// Executes a Python function (limited support)
-#[pyclass]
-#[derive(Clone)]
-pub struct OpaqueFunction {
-    #[allow(dead_code)] // Keep for future use
-    function: PyObject,
-}
-
-#[pymethods]
-impl OpaqueFunction {
-    #[new]
-    #[pyo3(signature = (*, function, **_kwargs))]
-    fn new(function: PyObject, _kwargs: Option<&pyo3::types::PyDict>) -> Self {
-        log::debug!("Python Launch OpaqueFunction created (limited support)");
-        Self { function }
-    }
-
-    fn __repr__(&self) -> String {
-        "OpaqueFunction(...)".to_string()
     }
 }
 

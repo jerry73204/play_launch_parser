@@ -3,6 +3,7 @@
 use crate::error::{ParseError, Result};
 use crate::record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord};
 use pyo3::prelude::*;
+use pyo3::types::PyAny;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -22,6 +23,65 @@ impl PythonLaunchExecutor {
     /// Create a new Python executor
     pub fn new() -> PyResult<Self> {
         Ok(Self)
+    }
+
+    /// Process a LaunchDescription object, recursively handling actions like OpaqueFunction
+    fn process_launch_description(py: Python, launch_desc: &PyAny) -> PyResult<()> {
+        // Get the actions list from LaunchDescription
+        let actions = launch_desc.getattr("actions")?;
+
+        // Iterate through actions
+        if let Ok(actions_list) = actions.extract::<Vec<PyObject>>() {
+            for action in actions_list {
+                let action_ref = action.as_ref(py);
+                if action_ref.hasattr("execute")? {
+                    // This might be an OpaqueFunction - try to call execute
+                    if let Ok(execute_method) = action_ref.getattr("execute") {
+                        if let Ok(result) = execute_method.call1((py.None(),)) {
+                            // Process the result
+                            Self::process_action_result(py, result)?;
+                        }
+                    }
+                }
+                // Note: Node and ComposableNodeContainer are captured on construction
+                // So we don't need to explicitly process them here
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process the result of an action (handles lists of actions or single actions)
+    fn process_action_result(py: Python, result: &PyAny) -> PyResult<()> {
+        // Check if result is None
+        if result.is_none() {
+            return Ok(());
+        }
+
+        // Try to extract as a list of actions
+        if let Ok(actions) = result.extract::<Vec<PyObject>>() {
+            for action in actions {
+                let action_ref = action.as_ref(py);
+                if action_ref.hasattr("execute")? {
+                    if let Ok(execute_method) = action_ref.getattr("execute") {
+                        if let Ok(nested_result) = execute_method.call1((py.None(),)) {
+                            Self::process_action_result(py, nested_result)?;
+                        }
+                    }
+                }
+                // Note: Nodes/Containers are captured on construction
+            }
+        }
+        // If not a list, it might be a single action - try to process it
+        else if result.hasattr("execute")? {
+            if let Ok(execute_method) = result.getattr("execute") {
+                if let Ok(nested_result) = execute_method.call1((py.None(),)) {
+                    Self::process_action_result(py, nested_result)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Execute a Python launch file and return captured entities
@@ -91,7 +151,10 @@ impl PythonLaunchExecutor {
             };
 
             // Call the function
-            let _launch_description = generate_fn.call0()?;
+            let launch_description = generate_fn.call0()?;
+
+            // Process the LaunchDescription to handle OpaqueFunction actions
+            Self::process_launch_description(py, launch_description)?;
 
             // Convert captured entities to records
             let node_captures = CAPTURED_NODES.lock().unwrap().clone();
