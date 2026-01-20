@@ -155,7 +155,19 @@ impl Node {
             return Ok(s);
         }
 
-        // Try calling __str__ method (for substitutions like LaunchConfiguration)
+        // Try calling perform() method first (for LaunchConfiguration substitutions)
+        // This resolves the substitution to its actual value
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+
+        // Try calling __str__ method (for other substitutions)
         if let Ok(str_result) = obj_ref.call_method0("__str__") {
             if let Ok(s) = str_result.extract::<String>() {
                 return Ok(s);
@@ -497,9 +509,22 @@ impl ComposableNodeContainer {
 
     /// Convert PyObject to string (handles both strings and substitutions)
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+
         // Try direct string extraction
         if let Ok(s) = obj.extract::<String>(py) {
             return Ok(s);
+        }
+
+        // Try calling perform() method first (for LaunchConfiguration substitutions)
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
         }
 
         // Try calling __str__ method (for substitutions)
@@ -950,6 +975,17 @@ impl LifecycleNode {
             return Ok(s);
         }
 
+        // Try calling perform() method first (for LaunchConfiguration substitutions)
+        if obj.hasattr("perform")? {
+            if let Ok(context) = obj.py().eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+
         // Try calling __str__ method (for substitutions)
         if let Ok(str_result) = obj.call_method0("__str__") {
             if let Ok(s) = str_result.extract::<String>() {
@@ -1211,6 +1247,17 @@ impl LoadComposableNodes {
         // Try direct string extraction
         if let Ok(s) = obj.extract::<String>() {
             return Ok(s);
+        }
+
+        // Try calling perform() method first (for LaunchConfiguration substitutions)
+        if obj.hasattr("perform")? {
+            if let Ok(context) = obj.py().eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
         }
 
         // Try calling __str__ method (for substitutions)
