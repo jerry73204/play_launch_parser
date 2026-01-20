@@ -337,6 +337,9 @@ impl LaunchTraverser {
             "group" => {
                 let group = GroupAction::from_entity(entity)?;
 
+                // Save namespace depth to restore after group
+                let initial_depth = self.context.namespace_depth();
+
                 // Push namespace if specified
                 if let Some(ns_subs) = &group.namespace {
                     let namespace = resolve_substitutions(ns_subs, &self.context)
@@ -349,10 +352,8 @@ impl LaunchTraverser {
                     self.traverse_entity(&child)?;
                 }
 
-                // Pop namespace if we pushed one
-                if group.namespace.is_some() {
-                    self.context.pop_namespace();
-                }
+                // Restore namespace depth (pops all namespaces pushed within group)
+                self.context.restore_namespace_depth(initial_depth);
             }
             "let" => {
                 let let_action = LetAction::from_entity(entity)?;

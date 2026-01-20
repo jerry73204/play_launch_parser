@@ -236,6 +236,22 @@ impl LaunchContext {
         }
     }
 
+    /// Get the current namespace stack depth
+    /// Used to restore namespace state when exiting scopes
+    pub fn namespace_depth(&self) -> usize {
+        self.namespace_stack.len()
+    }
+
+    /// Restore namespace stack to a specific depth
+    /// Used to clean up all namespace pushes within a scope
+    pub fn restore_namespace_depth(&mut self, depth: usize) {
+        // Never shrink below 1 (root namespace must always exist)
+        let target_depth = depth.max(1);
+        while self.namespace_stack.len() > target_depth {
+            self.namespace_stack.pop();
+        }
+    }
+
     /// Get the current namespace
     pub fn current_namespace(&self) -> String {
         self.namespace_stack
