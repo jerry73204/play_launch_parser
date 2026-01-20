@@ -1043,7 +1043,7 @@ fn test_composable_node_in_container() {
     assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "talker");
     assert_eq!(
         load_nodes[0]["target_container_name"].as_str().unwrap(),
-        "my_container"
+        "/my_container"
     );
 
     // Check second composable node
@@ -1055,7 +1055,7 @@ fn test_composable_node_in_container() {
     assert_eq!(load_nodes[1]["node_name"].as_str().unwrap(), "listener");
     assert_eq!(
         load_nodes[1]["target_container_name"].as_str().unwrap(),
-        "my_container"
+        "/my_container"
     );
 }
 
@@ -1137,7 +1137,7 @@ fn test_parse_python_container() {
     assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "talker_node");
     assert_eq!(
         load_nodes[0]["target_container_name"].as_str().unwrap(),
-        "my_component_container"
+        "/test_ns/my_component_container"
     );
     assert_eq!(
         load_nodes[0]["namespace"].as_str().unwrap(),
@@ -1157,7 +1157,7 @@ fn test_parse_python_container() {
     );
     assert_eq!(
         load_nodes[1]["target_container_name"].as_str().unwrap(),
-        "my_component_container"
+        "/test_ns/my_component_container"
     );
     assert_eq!(
         load_nodes[1]["namespace"].as_str().unwrap(),

@@ -40,13 +40,30 @@ impl ContainerAction {
         let name = resolve_substitutions(&name_parsed, context)
             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
 
-        // Get namespace (default to "/")
+        // Get namespace, combining with accumulated namespace from context
         let namespace = if let Some(ns_str) = entity.get_attr_str("namespace", true)? {
             let ns_parsed = parse_substitutions(&ns_str)?;
-            resolve_substitutions(&ns_parsed, context)
-                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?
+            let ns_resolved = resolve_substitutions(&ns_parsed, context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+            // If namespace is absolute (starts with '/'), use it as-is
+            if ns_resolved.starts_with('/') {
+                ns_resolved
+            } else if ns_resolved.is_empty() {
+                // Empty namespace means use current namespace from context
+                context.current_namespace()
+            } else {
+                // Relative namespace: combine with current namespace from context
+                let current_ns = context.current_namespace();
+                if current_ns == "/" {
+                    format!("/{}", ns_resolved)
+                } else {
+                    format!("{}/{}", current_ns, ns_resolved)
+                }
+            }
         } else {
-            "/".to_string()
+            // No namespace attribute: use current namespace from context
+            context.current_namespace()
         };
 
         // Parse composable_node children
@@ -217,10 +234,20 @@ impl ComposableNodeAction {
         container_name: &str,
         container_namespace: &str,
     ) -> LoadNodeRecord {
+        // Build full target container name: namespace + name
+        // This matches the Python implementation's behavior
+        let target_container_name = if container_namespace == "/" {
+            format!("/{}", container_name)
+        } else if container_namespace.is_empty() {
+            container_name.to_string()
+        } else {
+            format!("{}/{}", container_namespace, container_name)
+        };
+
         LoadNodeRecord {
             package: self.package.clone(),
             plugin: self.plugin.clone(),
-            target_container_name: container_name.to_string(),
+            target_container_name,
             node_name: self.name.clone(),
             namespace: self
                 .namespace

@@ -458,12 +458,24 @@ impl ComposableNodeContainer {
 
 impl ComposableNodeContainer {
     fn capture_container(container: &ComposableNodeContainer) {
+        // Normalize namespace to have leading slash
+        let namespace = container
+            .namespace
+            .as_ref()
+            .map(|ns| {
+                if ns.is_empty() {
+                    "/".to_string()
+                } else if ns.starts_with('/') {
+                    ns.clone()
+                } else {
+                    format!("/{}", ns)
+                }
+            })
+            .unwrap_or_else(|| "/".to_string());
+
         let capture = ContainerCapture {
             name: container.name.clone(),
-            namespace: container
-                .namespace
-                .clone()
-                .unwrap_or_else(|| "/".to_string()),
+            namespace,
         };
 
         log::debug!(
@@ -574,10 +586,22 @@ impl ComposableNode {
         let parameters = Python::with_gil(|py| self.parse_parameters(py).unwrap_or_default());
         let remappings = Python::with_gil(|py| self.parse_remappings(py).unwrap_or_default());
 
+        // Build full target container name: namespace + name
+        // This matches the Python implementation's behavior
+        let target_container_name = if let Some(ns) = container_namespace {
+            if ns == "/" {
+                format!("/{}", container_name)
+            } else {
+                format!("{}/{}", ns, container_name)
+            }
+        } else {
+            container_name.to_string()
+        };
+
         let capture = LoadNodeCapture {
             package: self.package.clone(),
             plugin: self.plugin.clone(),
-            target_container_name: container_name.to_string(),
+            target_container_name,
             node_name: self.name.clone(),
             namespace: self
                 .namespace
