@@ -46,26 +46,25 @@ tests/autoware_test/
 ### Quick Test
 
 ```bash
-# Run the basic parsing test
-just test-autoware
+# Run comparison with default Autoware launch file
+cd tests/autoware_test/scripts
+./compare_rust_python.py
 ```
 
-This will:
-1. Parse Autoware's `planning_simulator.launch.xml` with Rust parser
-2. Parse the same file with Python dump_launch
+This will automatically:
+1. Use `planning_simulator.launch.xml` as the default test file
+2. Run both Rust and Python parsers
 3. Compare outputs and report differences
+4. Save results to `rust_output.json` and `python_output.json`
 
-### Manual Testing
+### Custom Launch File
 
 ```bash
-# Parse with Rust parser
-./scripts/test_parse.sh
+# Test with a specific launch file
+./compare_rust_python.py /path/to/test.launch.xml
 
-# Compare outputs
-./scripts/compare_outputs.py
-
-# Run performance benchmark
-./scripts/benchmark.sh
+# Test with a different Autoware launch file
+./compare_rust_python.py autoware/src/launcher/autoware_launch/autoware_launch/launch/autoware.launch.xml
 ```
 
 ## Test Files

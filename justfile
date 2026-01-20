@@ -51,6 +51,13 @@ test-rust:
 
     echo "All Rust tests passed!"
 
+# Run comparison tests (Rust vs Python parser)
+test-compare:
+    #!/usr/bin/env bash
+    set -e
+    cd tests/comparison_tests
+    ./run_tests.sh
+
 # Run linters and formatters
 check:
     #!/usr/bin/env bash
@@ -137,21 +144,19 @@ compare-output PACKAGE LAUNCH_FILE:
 test-autoware:
     #!/usr/bin/env bash
     set -e
-    cd tests/autoware_test
+    cd tests/autoware_test/scripts
 
-    if [ ! -L "autoware" ]; then
+    if [ ! -L "../autoware" ]; then
         echo "ERROR: Autoware symlink not found"
         echo "Create symlink: cd tests/autoware_test && ln -s /path/to/autoware autoware"
         exit 1
     fi
 
-    ./scripts/test_parse.sh
+    # Run comparison with default launch file (no args needed)
+    ./compare_rust_python.py
 
-# Compare Rust and Python parser outputs for Autoware
-compare-autoware:
-    #!/usr/bin/env bash
-    cd tests/autoware_test
-    ./scripts/compare_outputs.py
+# Compare Rust and Python parser outputs for Autoware (alias for test-autoware)
+compare-autoware: test-autoware
 
 # Benchmark Rust parser performance with Autoware
 benchmark-autoware:
