@@ -105,18 +105,18 @@ impl CommandGenerator {
         };
 
         Ok(NodeRecord {
-            executable,
-            package: Some(package),
-            name,
-            namespace,
-            exec_name: None, // TODO: Generate exec_name-1, exec_name-2, etc.
-            params,
-            params_files,
-            remaps,
-            ros_args: None,
             args: None,
             cmd,
             env,
+            exec_name: None, // TODO: Generate exec_name-1, exec_name-2, etc.
+            executable,
+            global_params,
+            name,
+            namespace,
+            package: Some(package),
+            params,
+            params_files,
+            remaps,
             respawn: node
                 .respawn
                 .as_ref()
@@ -147,7 +147,7 @@ impl CommandGenerator {
                     })
                 })
                 .transpose()?,
-            global_params,
+            ros_args: None,
         })
     }
 
@@ -248,15 +248,6 @@ impl CommandGenerator {
         };
 
         Ok(NodeRecord {
-            executable: cmd_str,
-            package: None, // Executables don't have packages
-            name,
-            namespace: Some("/".to_string()),
-            exec_name: None,
-            params: Vec::new(),
-            params_files: Vec::new(),
-            remaps: Vec::new(),
-            ros_args: None,
             args: if exec.arguments.is_empty() {
                 None
             } else {
@@ -269,9 +260,18 @@ impl CommandGenerator {
             },
             cmd,
             env,
+            exec_name: None,
+            executable: cmd_str,
+            global_params: None,
+            name,
+            namespace: Some("/".to_string()),
+            package: None, // Executables don't have packages
+            params: Vec::new(),
+            params_files: Vec::new(),
+            remaps: Vec::new(),
             respawn: None,
             respawn_delay: None,
-            global_params: None,
+            ros_args: None,
         })
     }
 }

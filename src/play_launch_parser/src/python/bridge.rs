@@ -28,15 +28,6 @@ impl NodeCapture {
     /// Convert to NodeRecord
     pub fn to_record(&self) -> Result<NodeRecord> {
         Ok(NodeRecord {
-            executable: self.executable.clone(),
-            package: Some(self.package.clone()),
-            name: self.name.clone(),
-            namespace: self.namespace.clone(),
-            exec_name: None,
-            params: self.parameters.clone(),
-            params_files: Vec::new(),
-            remaps: self.remappings.clone(),
-            ros_args: None,
             args: if self.arguments.is_empty() {
                 None
             } else {
@@ -48,9 +39,18 @@ impl NodeCapture {
             } else {
                 Some(self.env_vars.clone())
             },
+            exec_name: None,
+            executable: self.executable.clone(),
+            global_params: None,
+            name: self.name.clone(),
+            namespace: self.namespace.clone(),
+            package: Some(self.package.clone()),
+            params: self.parameters.clone(),
+            params_files: Vec::new(),
+            remaps: self.remappings.clone(),
             respawn: None,
             respawn_delay: None,
-            global_params: None,
+            ros_args: None,
         })
     }
 }
