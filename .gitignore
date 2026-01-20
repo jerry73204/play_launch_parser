@@ -27,3 +27,8 @@ wheels/
 # Node.js dependencies for Web UI linting
 node_modules/
 package-lock.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
