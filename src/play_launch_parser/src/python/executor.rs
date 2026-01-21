@@ -33,21 +33,36 @@ impl PythonLaunchExecutor {
         // Iterate through actions
         if let Ok(actions_list) = actions.extract::<Vec<PyObject>>() {
             for action in actions_list {
-                let action_ref = action.as_ref(py);
-                if action_ref.hasattr("execute")? {
-                    // This might be an OpaqueFunction - try to call execute
-                    if let Ok(execute_method) = action_ref.getattr("execute") {
-                        if let Ok(result) = execute_method.call1((py.None(),)) {
-                            // Process the result
-                            Self::process_action_result(py, result)?;
-                        }
-                    }
-                }
-                // Note: Node and ComposableNodeContainer are captured on construction
-                // So we don't need to explicitly process them here
+                Self::process_action(py, action.as_ref(py))?;
             }
         }
 
+        Ok(())
+    }
+
+    /// Process a single action, handling OpaqueFunction, GroupAction, etc.
+    fn process_action(py: Python, action: &PyAny) -> PyResult<()> {
+        // Check if this is a GroupAction (has nested actions)
+        if let Ok(nested_actions) = action.getattr("actions") {
+            if let Ok(actions_list) = nested_actions.extract::<Vec<PyObject>>() {
+                for nested_action in actions_list {
+                    Self::process_action(py, nested_action.as_ref(py))?;
+                }
+            }
+        }
+
+        // Check if this action has an execute method (OpaqueFunction, etc.)
+        if action.hasattr("execute")? {
+            if let Ok(execute_method) = action.getattr("execute") {
+                if let Ok(result) = execute_method.call1((py.None(),)) {
+                    // Process the result
+                    Self::process_action_result(py, result)?;
+                }
+            }
+        }
+
+        // Note: Node and ComposableNodeContainer are captured on construction
+        // So we don't need to explicitly process them here
         Ok(())
     }
 
@@ -61,24 +76,12 @@ impl PythonLaunchExecutor {
         // Try to extract as a list of actions
         if let Ok(actions) = result.extract::<Vec<PyObject>>() {
             for action in actions {
-                let action_ref = action.as_ref(py);
-                if action_ref.hasattr("execute")? {
-                    if let Ok(execute_method) = action_ref.getattr("execute") {
-                        if let Ok(nested_result) = execute_method.call1((py.None(),)) {
-                            Self::process_action_result(py, nested_result)?;
-                        }
-                    }
-                }
-                // Note: Nodes/Containers are captured on construction
+                Self::process_action(py, action.as_ref(py))?;
             }
         }
-        // If not a list, it might be a single action - try to process it
-        else if result.hasattr("execute")? {
-            if let Ok(execute_method) = result.getattr("execute") {
-                if let Ok(nested_result) = execute_method.call1((py.None(),)) {
-                    Self::process_action_result(py, nested_result)?;
-                }
-            }
+        // If not a list, it might be a single action - process it
+        else {
+            Self::process_action(py, result)?;
         }
 
         Ok(())

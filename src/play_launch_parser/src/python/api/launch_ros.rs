@@ -612,15 +612,16 @@ impl ComposableNode {
         let remappings = Python::with_gil(|py| self.parse_remappings(py).unwrap_or_default());
 
         // Build full target container name: namespace + name
-        // This matches the Python implementation's behavior
+        // Normalize to ensure consistent path format with leading slash
         let target_container_name = if let Some(ns) = container_namespace {
-            if ns == "/" {
-                format!("/{}", container_name)
-            } else {
-                format!("{}/{}", ns, container_name)
-            }
+            Self::normalize_namespace_path(ns, container_name)
         } else {
-            container_name.to_string()
+            // If no namespace, assume root and add leading slash
+            if container_name.starts_with('/') {
+                container_name.to_string()
+            } else {
+                format!("/{}", container_name)
+            }
         };
 
         let capture = LoadNodeCapture {
@@ -645,6 +646,19 @@ impl ComposableNode {
         );
 
         CAPTURED_LOAD_NODES.lock().unwrap().push(capture);
+    }
+
+    /// Normalize namespace + name into a proper path
+    fn normalize_namespace_path(namespace: &str, name: &str) -> String {
+        let ns = if namespace == "/" {
+            ""
+        } else if namespace.starts_with('/') {
+            namespace
+        } else {
+            return format!("/{}/{}", namespace, name);
+        };
+
+        format!("{}/{}", ns, name)
     }
 
     /// Parse Python parameters to string tuples (same logic as Node)
@@ -1107,7 +1121,7 @@ impl LoadComposableNodes {
         _kwargs: Option<&pyo3::types::PyDict>,
     ) -> PyResult<Self> {
         // Capture the composable nodes
-        Self::capture_composable_nodes(py, &composable_node_descriptions)?;
+        Self::capture_composable_nodes(py, &target_container, &composable_node_descriptions)?;
 
         log::debug!(
             "Python Launch LoadComposableNodes created with {} nodes",
@@ -1130,8 +1144,16 @@ impl LoadComposableNodes {
 
 impl LoadComposableNodes {
     /// Capture composable nodes from the descriptions list
-    fn capture_composable_nodes(py: Python, descriptions: &[PyObject]) -> PyResult<()> {
+    fn capture_composable_nodes(
+        py: Python,
+        target_container: &PyObject,
+        descriptions: &[PyObject],
+    ) -> PyResult<()> {
         use crate::python::bridge::{LoadNodeCapture, CAPTURED_LOAD_NODES};
+
+        // Extract target container name and namespace
+        let (container_name, container_namespace) =
+            Self::extract_target_container(py, target_container)?;
 
         for desc_obj in descriptions {
             // Try to get the ComposableNode attributes
@@ -1158,11 +1180,12 @@ impl LoadComposableNodes {
                 continue; // Skip if no name
             };
 
-            // Extract namespace (optional, defaults to "/")
+            // Extract namespace (optional, defaults to container namespace or "/")
             let namespace = desc
                 .getattr("namespace")
                 .ok()
                 .and_then(|ns| Self::pyobject_to_string(ns).ok())
+                .or_else(|| container_namespace.clone())
                 .unwrap_or_else(|| "/".to_string());
 
             // Extract parameters (optional)
@@ -1182,7 +1205,7 @@ impl LoadComposableNodes {
             let capture = LoadNodeCapture {
                 package,
                 plugin,
-                target_container_name: "__dynamic__".to_string(), // Will be resolved at runtime
+                target_container_name: container_name.clone(),
                 node_name,
                 namespace,
                 parameters,
@@ -1190,15 +1213,71 @@ impl LoadComposableNodes {
             };
 
             log::debug!(
-                "Captured Python composable node from LoadComposableNodes: {} / {}",
+                "Captured Python composable node from LoadComposableNodes: {} / {} (container: {})",
                 capture.package,
-                capture.plugin
+                capture.plugin,
+                capture.target_container_name
             );
 
             CAPTURED_LOAD_NODES.lock().unwrap().push(capture);
         }
 
         Ok(())
+    }
+
+    /// Extract target container name and namespace from a PyObject
+    ///
+    /// The target_container can be:
+    /// - A ComposableNodeContainer instance
+    /// - A string with the container name
+    /// - A LaunchConfiguration or other substitution
+    fn extract_target_container(
+        py: Python,
+        target: &PyObject,
+    ) -> PyResult<(String, Option<String>)> {
+        let target_ref = target.as_ref(py);
+
+        // Try to extract as ComposableNodeContainer
+        if let Ok(name_attr) = target_ref.getattr("name") {
+            let name = Self::pyobject_to_string(name_attr)?;
+            let namespace = target_ref
+                .getattr("namespace")
+                .ok()
+                .and_then(|ns| Self::pyobject_to_string(ns).ok());
+
+            // Build full target container name: namespace + name
+            let full_name = if let Some(ref ns) = namespace {
+                Self::normalize_namespace_path(ns, &name)
+            } else {
+                format!("/{}", name)
+            };
+
+            return Ok((full_name, namespace));
+        }
+
+        // Try as string or substitution
+        let mut name = Self::pyobject_to_string(target_ref)?;
+
+        // Normalize: ensure leading slash
+        // Container names like "pointcloud_container" should become "/pointcloud_container"
+        if !name.starts_with('/') {
+            name = format!("/{}", name);
+        }
+
+        Ok((name, None))
+    }
+
+    /// Normalize namespace + name into a proper path
+    fn normalize_namespace_path(namespace: &str, name: &str) -> String {
+        let ns = if namespace == "/" {
+            ""
+        } else if namespace.starts_with('/') {
+            namespace
+        } else {
+            return format!("/{}/{}", namespace, name);
+        };
+
+        format!("{}/{}", ns, name)
     }
 
     /// Extract parameters from Python object

@@ -14,7 +14,8 @@ pub mod xml;
 
 use actions::{
     ArgAction, ContainerAction, DeclareArgumentAction, ExecutableAction, GroupAction,
-    IncludeAction, LetAction, NodeAction, SetEnvAction, SetParameterAction, UnsetEnvAction,
+    IncludeAction, LetAction, NodeAction, SetEnvAction, SetParameterAction, SetRemapAction,
+    UnsetEnvAction,
 };
 use condition::should_process_entity;
 use error::{ParseError, Result};
@@ -337,8 +338,9 @@ impl LaunchTraverser {
             "group" => {
                 let group = GroupAction::from_entity(entity)?;
 
-                // Save namespace depth to restore after group
+                // Save namespace depth and remapping count to restore after group
                 let initial_depth = self.context.namespace_depth();
+                let initial_remap_count = self.context.remapping_count();
 
                 // Push namespace if specified
                 if let Some(ns_subs) = &group.namespace {
@@ -347,13 +349,14 @@ impl LaunchTraverser {
                     self.context.push_namespace(namespace);
                 }
 
-                // Traverse children with scoped namespace
+                // Traverse children with scoped namespace and remappings
                 for child in entity.children() {
                     self.traverse_entity(&child)?;
                 }
 
-                // Restore namespace depth (pops all namespaces pushed within group)
+                // Restore namespace depth and remappings (scoped to this group)
                 self.context.restore_namespace_depth(initial_depth);
+                self.context.restore_remapping_count(initial_remap_count);
             }
             "let" => {
                 let let_action = LetAction::from_entity(entity)?;
@@ -376,6 +379,14 @@ impl LaunchTraverser {
                 let value = resolve_substitutions(&set_param.value, &self.context)
                     .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
                 self.context.set_global_parameter(set_param.name, value);
+            }
+            "set_remap" | "set-remap" => {
+                let set_remap = SetRemapAction::from_entity(entity)?;
+                let from = resolve_substitutions(&set_remap.from, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                let to = resolve_substitutions(&set_remap.to, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.add_remapping(from, to);
             }
             "push-ros-namespace" => {
                 // Try "namespace" attribute first (Autoware/ROS 2 standard),

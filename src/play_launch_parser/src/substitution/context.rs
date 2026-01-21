@@ -33,6 +33,8 @@ pub struct LaunchContext {
     environment: HashMap<String, String>,
     declared_arguments: HashMap<String, ArgumentMetadata>,
     global_parameters: HashMap<String, String>,
+    /// Global topic remappings (from -> to)
+    remappings: Vec<(String, String)>,
 }
 
 impl LaunchContext {
@@ -44,6 +46,7 @@ impl LaunchContext {
             environment: HashMap::new(),
             declared_arguments: HashMap::new(),
             global_parameters: HashMap::new(),
+            remappings: Vec::new(),
         }
     }
 
@@ -163,6 +166,27 @@ impl LaunchContext {
 
     pub fn environment(&self) -> &HashMap<String, String> {
         &self.environment
+    }
+
+    /// Add a global topic remapping
+    pub fn add_remapping(&mut self, from: String, to: String) {
+        self.remappings.push((from, to));
+    }
+
+    /// Get all global remappings
+    pub fn remappings(&self) -> &[(String, String)] {
+        &self.remappings
+    }
+
+    /// Get current count of remappings (for scope restoration)
+    pub fn remapping_count(&self) -> usize {
+        self.remappings.len()
+    }
+
+    /// Restore remappings to a specific count
+    /// Used to clean up all remappings added within a scope (e.g., group)
+    pub fn restore_remapping_count(&mut self, count: usize) {
+        self.remappings.truncate(count);
     }
 
     pub fn declare_argument(&mut self, metadata: ArgumentMetadata) {

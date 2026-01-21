@@ -60,7 +60,8 @@ impl CommandGenerator {
             }
         }
 
-        let remaps: Result<Vec<_>, GenerationError> = node
+        // Collect node-specific remappings
+        let node_remaps: Result<Vec<_>, GenerationError> = node
             .remappings
             .iter()
             .map(|r| {
@@ -69,7 +70,16 @@ impl CommandGenerator {
                 Ok((from, to))
             })
             .collect();
-        let remaps = remaps?;
+        let mut remaps = node_remaps?;
+
+        // Prepend global remappings from context (set_remap actions)
+        // Global remappings are added first so node-specific remappings can override them
+        let global_remaps: Vec<(String, String)> = context
+            .remappings()
+            .iter()
+            .map(|(from, to)| (from.clone(), to.clone()))
+            .collect();
+        remaps.splice(0..0, global_remaps);
 
         // Merge context environment with node-specific environment
         // Node-specific environment takes precedence

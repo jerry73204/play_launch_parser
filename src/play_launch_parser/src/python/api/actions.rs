@@ -130,10 +130,39 @@ impl OpaqueFunction {
     /// This is called by our executor
     pub fn execute(&self, py: Python) -> PyResult<PyObject> {
         if let Some(ref func) = self.function {
-            // Create a simple mock context object
-            // LaunchConfiguration and other substitutions have their own perform() methods
-            let context_code = "type('MockContext', (), {})()";
-            let context = py.eval(context_code, None, None)?;
+            // Create a mock LaunchContext that provides access to launch configurations
+            // This allows OpaqueFunction code to call LaunchConfiguration().perform(context)
+            use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+            let configs = LAUNCH_CONFIGURATIONS.lock().unwrap().clone();
+
+            // Create a context dict with launch_configurations
+            let context_code = r#"
+class MockLaunchContext:
+    def __init__(self, launch_configurations):
+        self.launch_configurations = launch_configurations
+
+    def perform_substitution(self, sub):
+        # Support LaunchConfiguration.perform(context)
+        if hasattr(sub, 'variable_name'):
+            return self.launch_configurations.get(sub.variable_name, '')
+        return str(sub)
+
+context = MockLaunchContext({})
+"#;
+
+            let main_module = py.import("__main__")?;
+            let namespace = main_module.dict();
+
+            // Add launch configurations to namespace
+            let configs_dict = pyo3::types::PyDict::new(py);
+            for (key, value) in configs {
+                configs_dict.set_item(key, value)?;
+            }
+            namespace.set_item("launch_configurations", configs_dict)?;
+
+            // Create the context using the code above
+            py.run(context_code, Some(namespace), Some(namespace))?;
+            let context = namespace.get_item("context")?.unwrap();
 
             // Call the function with the context
             func.call1(py, (context,))
