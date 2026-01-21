@@ -147,7 +147,7 @@ class MockLaunchContext:
             return self.launch_configurations.get(sub.variable_name, '')
         return str(sub)
 
-context = MockLaunchContext({})
+context = MockLaunchContext(launch_configurations)
 "#;
 
             let main_module = py.import("__main__")?;
@@ -159,6 +159,12 @@ context = MockLaunchContext({})
                 configs_dict.set_item(key, value)?;
             }
             namespace.set_item("launch_configurations", configs_dict)?;
+
+            // Add Python builtins that OpaqueFunction might need
+            // Import Path for file operations
+            py.run("from pathlib import Path", Some(namespace), Some(namespace))?;
+            // Import yaml for YAML loading
+            py.run("import yaml", Some(namespace), Some(namespace)).ok(); // Ignore if yaml not available
 
             // Create the context using the code above
             py.run(context_code, Some(namespace), Some(namespace))?;

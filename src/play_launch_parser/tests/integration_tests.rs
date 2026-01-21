@@ -1925,3 +1925,54 @@ fn test_python_load_composable_nodes() {
     assert_eq!(string_node["namespace"].as_str().unwrap(), "/test");
     assert_eq!(string_node["package"].as_str().unwrap(), "string_pkg");
 }
+
+#[test]
+#[cfg(feature = "python")]
+fn test_opaque_function() {
+    let fixture = get_fixture_path("test_opaque_function.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let mut args = HashMap::new();
+    args.insert("node_count".to_string(), "5".to_string());
+
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file with OpaqueFunction should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Check nodes - should have 5 dynamically generated nodes
+    let nodes = json["node"].as_array().unwrap();
+    eprintln!("Found {} nodes:", nodes.len());
+    for node in nodes {
+        eprintln!(
+            "  - {} (package: {}, namespace: {})",
+            node["name"].as_str().unwrap_or("no name"),
+            node["package"].as_str().unwrap_or("no package"),
+            node["namespace"].as_str().unwrap_or("no namespace")
+        );
+    }
+
+    assert_eq!(nodes.len(), 5, "Should have 5 dynamically generated nodes");
+
+    // Check that all nodes were created correctly
+    for i in 0..5 {
+        let node_name = format!("dynamic_node_{}", i);
+        let pkg_name = format!("pkg_{}", i);
+
+        let node = nodes
+            .iter()
+            .find(|n| n["name"].as_str() == Some(&node_name));
+        assert!(node.is_some(), "Should have node {}", node_name);
+
+        let node = node.unwrap();
+        assert_eq!(node["package"].as_str().unwrap(), pkg_name);
+        assert_eq!(node["executable"].as_str().unwrap(), "exec");
+        assert_eq!(node["namespace"].as_str().unwrap(), "/dynamic");
+    }
+}

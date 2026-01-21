@@ -42,21 +42,23 @@ impl PythonLaunchExecutor {
 
     /// Process a single action, handling OpaqueFunction, GroupAction, etc.
     fn process_action(py: Python, action: &PyAny) -> PyResult<()> {
+        use crate::python::api::actions::OpaqueFunction;
+
+        // Check if this is an OpaqueFunction - extract and execute it
+        if let Ok(opaque_func) = action.extract::<OpaqueFunction>() {
+            log::debug!("Executing OpaqueFunction");
+            if let Ok(result) = opaque_func.execute(py) {
+                // Process the result (list of actions returned from function)
+                Self::process_action_result(py, result.as_ref(py))?;
+            }
+            return Ok(());
+        }
+
         // Check if this is a GroupAction (has nested actions)
         if let Ok(nested_actions) = action.getattr("actions") {
             if let Ok(actions_list) = nested_actions.extract::<Vec<PyObject>>() {
                 for nested_action in actions_list {
                     Self::process_action(py, nested_action.as_ref(py))?;
-                }
-            }
-        }
-
-        // Check if this action has an execute method (OpaqueFunction, etc.)
-        if action.hasattr("execute")? {
-            if let Ok(execute_method) = action.getattr("execute") {
-                if let Ok(result) = execute_method.call1((py.None(),)) {
-                    // Process the result
-                    Self::process_action_result(py, result)?;
                 }
             }
         }
@@ -133,7 +135,18 @@ impl PythonLaunchExecutor {
             // Use __main__ module's dict as both globals and locals for proper Python environment
             // This ensures imports work correctly and functions are defined in the right scope
             let main_module = py.import("__main__")?;
-            let namespace = main_module.dict().copy()?;
+            // Clear the main module's namespace except for builtins to avoid test contamination
+            let main_dict = main_module.dict();
+            let builtins = main_dict.get_item("__builtins__")?.unwrap();
+            let name = main_dict.get_item("__name__")?.unwrap();
+            let doc = main_dict.get_item("__doc__")?;
+            main_dict.clear();
+            main_dict.set_item("__builtins__", builtins)?;
+            main_dict.set_item("__name__", name)?;
+            if let Some(doc_val) = doc {
+                main_dict.set_item("__doc__", doc_val)?;
+            }
+            let namespace = main_dict.copy()?;
 
             // Set launch arguments in namespace
             for (key, value) in args {
