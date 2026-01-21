@@ -51,6 +51,11 @@ impl LaunchTraverser {
 
     /// Apply namespace prefix to a path (handles both absolute and relative namespaces)
     fn apply_namespace_prefix(prefix: &str, path: &str) -> String {
+        // If path is empty, return the prefix
+        if path.is_empty() {
+            return prefix.to_string();
+        }
+
         // If path is already absolute and starts with prefix, don't duplicate
         if path.starts_with(prefix) {
             return path.to_string();
