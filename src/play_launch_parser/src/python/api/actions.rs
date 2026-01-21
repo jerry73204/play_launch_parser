@@ -40,10 +40,33 @@ impl DeclareLaunchArgument {
         description: Option<String>,
         _kwargs: Option<&pyo3::types::PyDict>,
     ) -> PyResult<Self> {
+        use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+
         // Convert default_value PyObject to string (may be string, substitution, or list)
         let default_str = default_value
             .map(|dv| Self::pyobject_to_string(py, &dv))
             .transpose()?;
+
+        // Register the default value in LAUNCH_CONFIGURATIONS if not already set
+        if let Some(ref default_val) = default_str {
+            let mut configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+            // Only set if not already present (CLI args and include args take precedence)
+            if !configs.contains_key(&name) {
+                configs.insert(name.clone(), default_val.clone());
+                log::debug!(
+                    "Registered launch configuration '{}' with default value '{}'",
+                    name,
+                    default_val
+                );
+            } else {
+                log::debug!(
+                    "Launch configuration '{}' already set to '{}', not overriding with default '{}'",
+                    name,
+                    configs.get(&name).unwrap(),
+                    default_val
+                );
+            }
+        }
 
         Ok(Self {
             name,

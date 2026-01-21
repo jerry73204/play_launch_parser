@@ -52,14 +52,22 @@ impl LaunchConfiguration {
         use crate::python::bridge::LAUNCH_CONFIGURATIONS;
 
         let configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
-        if let Some(value) = configs.get(&self.variable_name) {
-            Ok(value.clone())
+        let result = if let Some(value) = configs.get(&self.variable_name) {
+            value.clone()
         } else if let Some(ref default) = self.default {
-            Ok(default.clone())
+            default.clone()
         } else {
             // Return empty string if not found (ROS 2 behavior)
-            Ok(String::new())
-        }
+            String::new()
+        };
+
+        log::debug!(
+            "LaunchConfiguration('{}').perform() -> '{}'",
+            self.variable_name,
+            result
+        );
+
+        Ok(result)
     }
 }
 

@@ -122,6 +122,11 @@ impl PythonLaunchExecutor {
                 let mut configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
                 configs.clear();
                 for (key, value) in args {
+                    log::debug!(
+                        "Setting launch configuration from args: '{}' = '{}'",
+                        key,
+                        value
+                    );
                     configs.insert(key.clone(), value.clone());
                 }
             }
