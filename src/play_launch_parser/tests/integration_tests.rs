@@ -1669,3 +1669,259 @@ fn test_parse_python_include() {
         "Included node should have included_param with substitution"
     );
 }
+
+#[test]
+fn test_load_composable_node() {
+    let fixture = get_fixture_path("test_load_composable_node.launch.xml");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing launch file with load_composable_node should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Check containers
+    let containers = json["container"].as_array().unwrap();
+    eprintln!("Found {} containers:", containers.len());
+    for container in containers {
+        eprintln!(
+            "  - {} (namespace: {})",
+            container["name"].as_str().unwrap_or("no name"),
+            container["namespace"].as_str().unwrap_or("no namespace")
+        );
+    }
+    assert_eq!(containers.len(), 2, "Should have 2 containers");
+
+    // Check first container (with substitution)
+    let test_container = containers
+        .iter()
+        .find(|c| c["namespace"].as_str() == Some("/test"));
+    assert!(test_container.is_some(), "Should have /test container");
+    let test_container = test_container.unwrap();
+    assert_eq!(test_container["name"].as_str().unwrap(), "my_container");
+
+    // Check second container (planning)
+    let planning_container = containers
+        .iter()
+        .find(|c| c["namespace"].as_str() == Some("/planning"));
+    assert!(
+        planning_container.is_some(),
+        "Should have /planning container"
+    );
+    let planning_container = planning_container.unwrap();
+    assert_eq!(
+        planning_container["name"].as_str().unwrap(),
+        "planning_container"
+    );
+
+    // Check load_nodes
+    let load_nodes = json["load_node"].as_array().unwrap();
+    eprintln!("Found {} load_nodes:", load_nodes.len());
+    for node in load_nodes {
+        eprintln!(
+            "  - {} (container: {}, namespace: {})",
+            node["node_name"].as_str().unwrap_or("no name"),
+            node["target_container_name"]
+                .as_str()
+                .unwrap_or("no container"),
+            node["namespace"].as_str().unwrap_or("no namespace")
+        );
+    }
+
+    // Should have 4 load_nodes:
+    // 1. initial_node (in test container, from node_container)
+    // 2. dynamic_node_1 (loaded via load_composable_node)
+    // 3. dynamic_node_2 (loaded via load_composable_node, custom namespace)
+    // 4. planner (in planning container, from node_container)
+    // 5. validator (loaded via load_composable_node into planning container)
+    assert_eq!(load_nodes.len(), 5, "Should have 5 load_nodes total");
+
+    // Check initial_node (from node_container)
+    let initial_node = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("initial_node"));
+    assert!(initial_node.is_some(), "Should have initial_node");
+    let initial_node = initial_node.unwrap();
+    assert_eq!(
+        initial_node["target_container_name"].as_str().unwrap(),
+        "/test/my_container"
+    );
+    assert_eq!(initial_node["namespace"].as_str().unwrap(), "/test");
+    assert_eq!(initial_node["package"].as_str().unwrap(), "initial_pkg");
+
+    // Check dynamic_node_1 (loaded via load_composable_node)
+    let dynamic_node_1 = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("dynamic_node_1"));
+    assert!(dynamic_node_1.is_some(), "Should have dynamic_node_1");
+    let dynamic_node_1 = dynamic_node_1.unwrap();
+    assert_eq!(
+        dynamic_node_1["target_container_name"].as_str().unwrap(),
+        "/test/my_container"
+    );
+    assert_eq!(dynamic_node_1["namespace"].as_str().unwrap(), "/test");
+    assert_eq!(dynamic_node_1["package"].as_str().unwrap(), "dynamic_pkg1");
+    assert_eq!(dynamic_node_1["plugin"].as_str().unwrap(), "DynamicPlugin1");
+
+    // Check params
+    let params = dynamic_node_1["params"].as_array().unwrap();
+    assert_eq!(params.len(), 1, "dynamic_node_1 should have 1 param");
+    let param = params[0].as_array().unwrap();
+    assert_eq!(param[0].as_str().unwrap(), "param1");
+    assert_eq!(param[1].as_str().unwrap(), "value1");
+
+    // Check remaps
+    let remaps = dynamic_node_1["remaps"].as_array().unwrap();
+    assert_eq!(remaps.len(), 1, "dynamic_node_1 should have 1 remap");
+    let remap = remaps[0].as_array().unwrap();
+    assert_eq!(remap[0].as_str().unwrap(), "input");
+    assert_eq!(remap[1].as_str().unwrap(), "/test/input");
+
+    // Check dynamic_node_2 (with custom namespace)
+    let dynamic_node_2 = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("dynamic_node_2"));
+    assert!(dynamic_node_2.is_some(), "Should have dynamic_node_2");
+    let dynamic_node_2 = dynamic_node_2.unwrap();
+    assert_eq!(
+        dynamic_node_2["target_container_name"].as_str().unwrap(),
+        "/test/my_container"
+    );
+    // This node has custom namespace, not inherited from container
+    assert_eq!(dynamic_node_2["namespace"].as_str().unwrap(), "/custom_ns");
+    assert_eq!(dynamic_node_2["package"].as_str().unwrap(), "dynamic_pkg2");
+
+    // Check validator (loaded into planning container)
+    let validator = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("validator"));
+    assert!(validator.is_some(), "Should have validator node");
+    let validator = validator.unwrap();
+    assert_eq!(
+        validator["target_container_name"].as_str().unwrap(),
+        "/planning/planning_container"
+    );
+    assert_eq!(validator["namespace"].as_str().unwrap(), "/planning");
+    assert_eq!(validator["package"].as_str().unwrap(), "validator_pkg");
+}
+
+#[test]
+#[cfg(feature = "python")]
+fn test_python_load_composable_nodes() {
+    let fixture = get_fixture_path("test_python_load_composable_nodes.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let mut args = HashMap::new();
+    args.insert("container_name".to_string(), "test_container".to_string());
+    args.insert(
+        "full_container_path".to_string(),
+        "/test/test_container".to_string(),
+    );
+
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file with LoadComposableNodes should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Check containers
+    let containers = json["container"].as_array().unwrap();
+    eprintln!("Found {} containers:", containers.len());
+    for container in containers {
+        eprintln!(
+            "  - {} (namespace: {})",
+            container["name"].as_str().unwrap_or("no name"),
+            container["namespace"].as_str().unwrap_or("no namespace")
+        );
+    }
+    assert_eq!(containers.len(), 1, "Should have 1 container");
+
+    let container = &containers[0];
+    assert_eq!(container["name"].as_str().unwrap(), "test_container");
+    assert_eq!(container["namespace"].as_str().unwrap(), "/test");
+
+    // Check load_nodes
+    let load_nodes = json["load_node"].as_array().unwrap();
+    eprintln!("Found {} load_nodes:", load_nodes.len());
+    for node in load_nodes {
+        eprintln!(
+            "  - {} (container: {}, namespace: {})",
+            node["node_name"].as_str().unwrap_or("no name"),
+            node["target_container_name"]
+                .as_str()
+                .unwrap_or("no container"),
+            node["namespace"].as_str().unwrap_or("no namespace")
+        );
+    }
+
+    // Should have 4 load_nodes:
+    // 1. initial_node (from container)
+    // 2. dynamic_node_1 (from LoadComposableNodes with LaunchConfiguration)
+    // 3. dynamic_node_2 (from LoadComposableNodes with LaunchConfiguration, custom namespace)
+    // 4. string_node (from LoadComposableNodes with string reference)
+    assert_eq!(load_nodes.len(), 4, "Should have 4 load_nodes total");
+
+    // Check initial_node
+    let initial_node = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("initial_node"));
+    assert!(initial_node.is_some(), "Should have initial_node");
+    let initial_node = initial_node.unwrap();
+    assert_eq!(
+        initial_node["target_container_name"].as_str().unwrap(),
+        "/test/test_container"
+    );
+    assert_eq!(initial_node["namespace"].as_str().unwrap(), "/test");
+
+    // Check dynamic_node_1 (LaunchConfiguration target with full path)
+    let dynamic_node_1 = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("dynamic_node_1"));
+    assert!(dynamic_node_1.is_some(), "Should have dynamic_node_1");
+    let dynamic_node_1 = dynamic_node_1.unwrap();
+    // Target should be resolved from LaunchConfiguration with full path
+    assert_eq!(
+        dynamic_node_1["target_container_name"].as_str().unwrap(),
+        "/test/test_container"
+    );
+    assert_eq!(dynamic_node_1["namespace"].as_str().unwrap(), "/test");
+    assert_eq!(dynamic_node_1["package"].as_str().unwrap(), "dynamic_pkg1");
+
+    // Check dynamic_node_2 (custom namespace)
+    let dynamic_node_2 = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("dynamic_node_2"));
+    assert!(dynamic_node_2.is_some(), "Should have dynamic_node_2");
+    let dynamic_node_2 = dynamic_node_2.unwrap();
+    assert_eq!(
+        dynamic_node_2["target_container_name"].as_str().unwrap(),
+        "/test/test_container"
+    );
+    assert_eq!(dynamic_node_2["namespace"].as_str().unwrap(), "/custom_ns");
+
+    // Check string_node (string target with absolute path)
+    let string_node = load_nodes
+        .iter()
+        .find(|n| n["node_name"].as_str() == Some("string_node"));
+    assert!(string_node.is_some(), "Should have string_node");
+    let string_node = string_node.unwrap();
+    assert_eq!(
+        string_node["target_container_name"].as_str().unwrap(),
+        "/test/my_container"
+    );
+    // Namespace should be inherited from container ("/test")
+    assert_eq!(string_node["namespace"].as_str().unwrap(), "/test");
+    assert_eq!(string_node["package"].as_str().unwrap(), "string_pkg");
+}

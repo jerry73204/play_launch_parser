@@ -603,6 +603,37 @@ impl ComposableNode {
             self.package, self.plugin, self.name
         )
     }
+
+    // Getter methods for LoadComposableNodes to access attributes
+    #[getter]
+    fn package(&self) -> &str {
+        &self.package
+    }
+
+    #[getter]
+    fn plugin(&self) -> &str {
+        &self.plugin
+    }
+
+    #[getter]
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[getter]
+    fn namespace(&self) -> Option<&str> {
+        self.namespace.as_deref()
+    }
+
+    #[getter]
+    fn parameters(&self) -> Vec<PyObject> {
+        self.parameters.clone()
+    }
+
+    #[getter]
+    fn remappings(&self) -> Vec<PyObject> {
+        self.remappings.clone()
+    }
 }
 
 impl ComposableNode {
@@ -1184,7 +1215,14 @@ impl LoadComposableNodes {
             let namespace = desc
                 .getattr("namespace")
                 .ok()
-                .and_then(|ns| Self::pyobject_to_string(ns).ok())
+                .and_then(|ns| {
+                    // Check if it's None
+                    if ns.is_none() {
+                        None
+                    } else {
+                        Self::pyobject_to_string(ns).ok()
+                    }
+                })
                 .or_else(|| container_namespace.clone())
                 .unwrap_or_else(|| "/".to_string());
 
@@ -1237,7 +1275,7 @@ impl LoadComposableNodes {
     ) -> PyResult<(String, Option<String>)> {
         let target_ref = target.as_ref(py);
 
-        // Try to extract as ComposableNodeContainer
+        // Try to extract as ComposableNodeContainer instance
         if let Ok(name_attr) = target_ref.getattr("name") {
             let name = Self::pyobject_to_string(name_attr)?;
             let namespace = target_ref
@@ -1252,19 +1290,54 @@ impl LoadComposableNodes {
                 format!("/{}", name)
             };
 
+            log::debug!(
+                "Extracted target container from ComposableNodeContainer instance: {}",
+                full_name
+            );
             return Ok((full_name, namespace));
         }
 
-        // Try as string or substitution
-        let mut name = Self::pyobject_to_string(target_ref)?;
+        // Try as string, LaunchConfiguration, or other substitution
+        // Use pyobject_to_string which handles perform() for LaunchConfiguration
+        let name = Self::pyobject_to_string(target_ref)?;
 
-        // Normalize: ensure leading slash
-        // Container names like "pointcloud_container" should become "/pointcloud_container"
-        if !name.starts_with('/') {
-            name = format!("/{}", name);
-        }
+        log::debug!(
+            "Extracted target container from string/substitution: '{}'",
+            name
+        );
 
-        Ok((name, None))
+        // If the name is already absolute (starts with '/'), use it as-is
+        // Otherwise, normalize it to have a leading slash
+        let normalized_name = if name.starts_with('/') {
+            name
+        } else if name.is_empty() {
+            // Empty string means root namespace
+            "/".to_string()
+        } else {
+            // Relative name: prepend slash
+            format!("/{}", name)
+        };
+
+        // Extract namespace from the full path (everything except the last segment)
+        let namespace = if let Some(last_slash_idx) = normalized_name.rfind('/') {
+            if last_slash_idx == 0 {
+                // Container is directly in root namespace
+                Some("/".to_string())
+            } else {
+                // Extract namespace path
+                Some(normalized_name[..last_slash_idx].to_string())
+            }
+        } else {
+            None
+        };
+
+        log::debug!(
+            "Normalized target container: '{}', namespace: {:?}",
+            normalized_name,
+            namespace
+        );
+
+        Ok((normalized_name, namespace))
     }
 
     /// Normalize namespace + name into a proper path

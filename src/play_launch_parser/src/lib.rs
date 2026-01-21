@@ -14,8 +14,8 @@ pub mod xml;
 
 use actions::{
     ArgAction, ContainerAction, DeclareArgumentAction, ExecutableAction, GroupAction,
-    IncludeAction, LetAction, NodeAction, SetEnvAction, SetParameterAction, SetRemapAction,
-    UnsetEnvAction,
+    IncludeAction, LetAction, LoadComposableNodeAction, NodeAction, SetEnvAction,
+    SetParameterAction, SetRemapAction, UnsetEnvAction,
 };
 use condition::should_process_entity;
 use error::{ParseError, Result};
@@ -432,9 +432,17 @@ impl LaunchTraverser {
                 log::info!("Skipping standalone composable_node (should be in node_container)");
             }
             "load_composable_node" | "load-composable-node" => {
-                // Action to dynamically load composable nodes
-                // For now, we log and skip
-                log::info!("Skipping load_composable_node action (not yet supported)");
+                // Parse load_composable_node action and convert to LoadNodeRecords
+                let action = LoadComposableNodeAction::from_entity(entity, &self.context)?;
+                let load_records = action.to_load_node_records(&self.context)?;
+
+                log::info!(
+                    "Loaded {} composable node(s) into container via load_composable_node",
+                    load_records.len()
+                );
+
+                // Add to load_nodes
+                self.load_nodes.extend(load_records);
             }
             other => {
                 log::warn!("Unsupported action type: {}", other);
