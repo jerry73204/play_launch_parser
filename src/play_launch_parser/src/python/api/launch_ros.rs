@@ -424,8 +424,10 @@ impl ComposableNodeContainer {
         package,
         executable,
         composable_node_descriptions=None,
+        condition=None,
         **_kwargs
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python,
         name: PyObject,
@@ -433,6 +435,7 @@ impl ComposableNodeContainer {
         package: PyObject,
         executable: PyObject,
         composable_node_descriptions: Option<Vec<Py<ComposableNode>>>,
+        condition: Option<PyObject>,
         _kwargs: Option<&PyDict>,
     ) -> PyResult<Self> {
         let composable_nodes = composable_node_descriptions.unwrap_or_default();
@@ -446,15 +449,30 @@ impl ComposableNodeContainer {
         let executable_str = Self::pyobject_to_string(py, &executable)?;
 
         let container = Self {
-            name: name_str,
-            namespace: namespace_str,
+            name: name_str.clone(),
+            namespace: namespace_str.clone(),
             package: package_str,
             executable: executable_str,
             composable_nodes: composable_nodes.clone(),
         };
 
-        // Capture the container
-        Self::capture_container(&container);
+        // Evaluate condition (if present) and only capture if true
+        let should_capture = if let Some(cond_obj) = &condition {
+            Self::evaluate_condition(py, cond_obj).unwrap_or(true)
+        } else {
+            true // No condition means always capture
+        };
+
+        if should_capture {
+            // Capture the container
+            Self::capture_container(&container);
+        } else {
+            log::debug!(
+                "Skipping container capture due to condition: {} (namespace: {:?})",
+                name_str,
+                namespace_str
+            );
+        }
 
         Ok(container)
     }
@@ -505,6 +523,23 @@ impl ComposableNodeContainer {
                 node.capture_as_load_node(&container.name, &container.namespace);
             }
         });
+    }
+
+    /// Evaluate a condition object (same logic as Node)
+    fn evaluate_condition(py: Python, condition: &PyObject) -> PyResult<bool> {
+        let cond_ref = condition.as_ref(py);
+
+        // Try calling evaluate() method on the condition object
+        if let Ok(result) = cond_ref.call_method0("evaluate") {
+            if let Ok(bool_val) = result.extract::<bool>() {
+                log::debug!("Container condition evaluated to: {}", bool_val);
+                return Ok(bool_val);
+            }
+        }
+
+        // Fallback: treat as truthy if we can't evaluate
+        log::warn!("Failed to evaluate container condition, defaulting to true");
+        Ok(true)
     }
 
     /// Convert PyObject to string (handles both strings and substitutions)
@@ -681,6 +716,26 @@ impl ComposableNode {
 
     /// Normalize namespace + name into a proper path
     fn normalize_namespace_path(namespace: &str, name: &str) -> String {
+        // Handle empty name - just return namespace
+        if name.is_empty() {
+            return if namespace.is_empty() || namespace == "/" {
+                "/".to_string()
+            } else if namespace.starts_with('/') {
+                namespace.to_string()
+            } else {
+                format!("/{}", namespace)
+            };
+        }
+
+        // Handle empty namespace
+        if namespace.is_empty() {
+            return if name.starts_with('/') {
+                name.to_string()
+            } else {
+                format!("/{}", name)
+            };
+        }
+
         let ns = if namespace == "/" {
             ""
         } else if namespace.starts_with('/') {
@@ -1144,20 +1199,35 @@ pub struct LoadComposableNodes {
 #[pymethods]
 impl LoadComposableNodes {
     #[new]
-    #[pyo3(signature = (*, target_container, composable_node_descriptions, **_kwargs))]
+    #[pyo3(signature = (*, target_container, composable_node_descriptions, condition=None, **_kwargs))]
     fn new(
         py: Python,
         target_container: PyObject,
         composable_node_descriptions: Vec<PyObject>,
+        condition: Option<PyObject>,
         _kwargs: Option<&pyo3::types::PyDict>,
     ) -> PyResult<Self> {
-        // Capture the composable nodes
-        Self::capture_composable_nodes(py, &target_container, &composable_node_descriptions)?;
+        // Evaluate condition (if present) and only capture if true
+        let should_capture = if let Some(cond_obj) = &condition {
+            Self::evaluate_condition(py, cond_obj).unwrap_or(true)
+        } else {
+            true // No condition means always capture
+        };
 
-        log::debug!(
-            "Python Launch LoadComposableNodes created with {} nodes",
-            composable_node_descriptions.len()
-        );
+        if should_capture {
+            // Capture the composable nodes
+            Self::capture_composable_nodes(py, &target_container, &composable_node_descriptions)?;
+
+            log::debug!(
+                "Python Launch LoadComposableNodes created with {} nodes",
+                composable_node_descriptions.len()
+            );
+        } else {
+            log::debug!(
+                "Skipping LoadComposableNodes capture due to condition ({} nodes)",
+                composable_node_descriptions.len()
+            );
+        }
 
         Ok(Self {
             target_container,
@@ -1263,6 +1333,23 @@ impl LoadComposableNodes {
         Ok(())
     }
 
+    /// Evaluate a condition object (same logic as Node)
+    fn evaluate_condition(py: Python, condition: &PyObject) -> PyResult<bool> {
+        let cond_ref = condition.as_ref(py);
+
+        // Try calling evaluate() method on the condition object
+        if let Ok(result) = cond_ref.call_method0("evaluate") {
+            if let Ok(bool_val) = result.extract::<bool>() {
+                log::debug!("LoadComposableNodes condition evaluated to: {}", bool_val);
+                return Ok(bool_val);
+            }
+        }
+
+        // Fallback: treat as truthy if we can't evaluate
+        log::warn!("Failed to evaluate LoadComposableNodes condition, defaulting to true");
+        Ok(true)
+    }
+
     /// Extract target container name and namespace from a PyObject
     ///
     /// The target_container can be:
@@ -1342,6 +1429,26 @@ impl LoadComposableNodes {
 
     /// Normalize namespace + name into a proper path
     fn normalize_namespace_path(namespace: &str, name: &str) -> String {
+        // Handle empty name - just return namespace
+        if name.is_empty() {
+            return if namespace.is_empty() || namespace == "/" {
+                "/".to_string()
+            } else if namespace.starts_with('/') {
+                namespace.to_string()
+            } else {
+                format!("/{}", namespace)
+            };
+        }
+
+        // Handle empty namespace
+        if namespace.is_empty() {
+            return if name.starts_with('/') {
+                name.to_string()
+            } else {
+                format!("/{}", name)
+            };
+        }
+
         let ns = if namespace == "/" {
             ""
         } else if namespace.starts_with('/') {
