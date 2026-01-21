@@ -49,6 +49,35 @@ impl LaunchTraverser {
         }
     }
 
+    /// Apply namespace prefix to a path (handles both absolute and relative namespaces)
+    fn apply_namespace_prefix(prefix: &str, path: &str) -> String {
+        // If path is already absolute and starts with prefix, don't duplicate
+        if path.starts_with(prefix) {
+            return path.to_string();
+        }
+
+        // If path is absolute (starts with /), join properly
+        if path.starts_with('/') {
+            // If prefix ends with / or path is just /, handle carefully
+            if prefix == "/" {
+                return path.to_string();
+            }
+            // Remove leading / from path and join with prefix
+            let path_without_slash = path.strip_prefix('/').unwrap_or(path);
+            if path_without_slash.is_empty() {
+                return prefix.to_string();
+            }
+            return format!("{}/{}", prefix, path_without_slash);
+        }
+
+        // Path is relative - join with /
+        if prefix.ends_with('/') {
+            format!("{}{}", prefix, path)
+        } else {
+            format!("{}/{}", prefix, path)
+        }
+    }
+
     pub fn traverse_file(&mut self, path: &Path) -> Result<()> {
         // Check file extension and handle non-XML files
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
@@ -105,9 +134,59 @@ impl LaunchTraverser {
             includes.len()
         );
 
-        self.records.extend(nodes);
-        self.containers.extend(containers);
-        self.load_nodes.extend(load_nodes);
+        // Apply the current namespace context to all entities from Python
+        // (Python launch files don't know about the XML namespace context they're included in)
+        let current_ns = self.context.current_namespace();
+        if current_ns != "/" {
+            log::debug!(
+                "Applying namespace '{}' to Python-generated entities",
+                current_ns
+            );
+
+            // Apply namespace to nodes
+            let namespaced_nodes: Vec<_> = nodes
+                .into_iter()
+                .map(|mut node| {
+                    if let Some(ref ns) = node.namespace {
+                        node.namespace = Some(Self::apply_namespace_prefix(&current_ns, ns));
+                    } else {
+                        node.namespace = Some(current_ns.clone());
+                    }
+                    node
+                })
+                .collect();
+
+            // Apply namespace to containers
+            let namespaced_containers: Vec<_> = containers
+                .into_iter()
+                .map(|mut container| {
+                    container.namespace =
+                        Self::apply_namespace_prefix(&current_ns, &container.namespace);
+                    container
+                })
+                .collect();
+
+            // Apply namespace to load_nodes
+            let namespaced_load_nodes: Vec<_> = load_nodes
+                .into_iter()
+                .map(|mut load_node| {
+                    load_node.namespace =
+                        Self::apply_namespace_prefix(&current_ns, &load_node.namespace);
+                    // Also update target_container_name to include the namespace
+                    load_node.target_container_name =
+                        Self::apply_namespace_prefix(&current_ns, &load_node.target_container_name);
+                    load_node
+                })
+                .collect();
+
+            self.records.extend(namespaced_nodes);
+            self.containers.extend(namespaced_containers);
+            self.load_nodes.extend(namespaced_load_nodes);
+        } else {
+            self.records.extend(nodes);
+            self.containers.extend(containers);
+            self.load_nodes.extend(load_nodes);
+        }
 
         // Process includes recursively
         for include in includes {
