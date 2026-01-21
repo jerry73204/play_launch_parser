@@ -474,15 +474,35 @@ impl IncludeLaunchDescription {
         }
 
         // Extract file path from launch_description_source
-        let file_path = if let Ok(path_str) =
-            launch_description_source.call_method0(py, "get_launch_file_path")
-        {
-            path_str.extract::<String>(py)?
+        // Get the context from __main__ namespace if available (created by OpaqueFunction)
+        let context = py
+            .import("__main__")
+            .ok()
+            .and_then(|m| m.dict().get_item("context").ok().flatten());
+
+        let file_path = if let Ok(path_str) = launch_description_source.extract::<String>(py) {
+            // Direct string path
+            path_str
         } else {
-            // Fallback - try direct string extraction
-            launch_description_source
-                .extract::<String>(py)
-                .unwrap_or_else(|_| "unknown".to_string())
+            // Try get_launch_file_path which will now use the context from __main__
+            if let Ok(path_str) = launch_description_source.call_method0(py, "get_launch_file_path")
+            {
+                path_str
+                    .extract::<String>(py)
+                    .unwrap_or_else(|_| "unknown".to_string())
+            } else if let Some(ctx) = context {
+                // Fallback: try calling perform with context
+                if let Ok(performed) = launch_description_source.call_method1(py, "perform", (ctx,))
+                {
+                    performed
+                        .extract::<String>(py)
+                        .unwrap_or_else(|_| "unknown".to_string())
+                } else {
+                    "unknown".to_string()
+                }
+            } else {
+                "unknown".to_string()
+            }
         };
 
         // Capture the include request
@@ -494,8 +514,8 @@ impl IncludeLaunchDescription {
             });
         }
 
-        log::debug!(
-            "Python Launch IncludeLaunchDescription: {} with {} args",
+        log::info!(
+            "Python Launch IncludeLaunchDescription: file_path='{}' with {} args",
             file_path,
             args.len()
         );

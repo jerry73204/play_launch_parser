@@ -119,8 +119,25 @@ impl LaunchTraverser {
                 include_args.insert(key, value);
             }
 
-            // Resolve the include file path (handle relative paths)
-            let include_path = Path::new(&include.file_path);
+            // Parse and resolve substitutions in the file path
+            // (Python includes may contain substitutions like $(find-pkg-share pkg)/launch/file.xml)
+            let file_path_subs = parse_substitutions(&include.file_path)?;
+            let file_path_str =
+                resolve_substitutions(&file_path_subs, &self.context).map_err(|e| {
+                    ParseError::InvalidSubstitution(format!(
+                        "Failed to resolve Python include path '{}': {}",
+                        include.file_path, e
+                    ))
+                })?;
+
+            log::debug!(
+                "Resolved Python include path: {} -> {}",
+                include.file_path,
+                file_path_str
+            );
+
+            // Resolve relative paths relative to the current Python file
+            let include_path = Path::new(&file_path_str);
             let resolved_include_path = if include_path.is_relative() {
                 // Resolve relative to the current Python file
                 if let Some(parent_dir) = path.parent() {
@@ -132,9 +149,78 @@ impl LaunchTraverser {
                 include_path.to_path_buf()
             };
 
-            // Recursively execute the included Python file
-            self.execute_python_file(&resolved_include_path, &include_args)?;
+            // Recursively process the included file (determine type by extension)
+            if let Some(ext) = resolved_include_path.extension().and_then(|s| s.to_str()) {
+                match ext {
+                    "py" => {
+                        self.execute_python_file(&resolved_include_path, &include_args)?;
+                    }
+                    "xml" => {
+                        // Process as XML include
+                        self.process_xml_include(&resolved_include_path, &include_args)?;
+                    }
+                    "yaml" | "yml" => {
+                        // Process as YAML launch file
+                        self.process_yaml_launch_file(&resolved_include_path)?;
+                    }
+                    _ => {
+                        log::warn!(
+                            "Unknown file type for Python include: {}",
+                            resolved_include_path.display()
+                        );
+                    }
+                }
+            } else {
+                log::warn!(
+                    "No file extension for Python include: {}",
+                    resolved_include_path.display()
+                );
+            }
         }
+
+        Ok(())
+    }
+
+    /// Helper to process an XML include with given arguments
+    fn process_xml_include(
+        &mut self,
+        resolved_path: &Path,
+        include_args: &HashMap<String, String>,
+    ) -> Result<()> {
+        log::info!("Including XML launch file: {}", resolved_path.display());
+
+        // Create a new context for the included file
+        let mut include_context = self.context.clone();
+        include_context.set_current_file(resolved_path.to_path_buf());
+
+        // Apply include arguments
+        for (key, value) in include_args {
+            log::debug!(
+                "[RUST] Setting include arg from Python: {} = {}",
+                key,
+                value
+            );
+            include_context.set_configuration(key.clone(), value.clone());
+        }
+
+        // Parse and traverse the included file
+        let content = std::fs::read_to_string(resolved_path)?;
+        let doc = roxmltree::Document::parse(&content)?;
+        let root = xml::XmlEntity::new(doc.root_element());
+
+        // Create temporary traverser for included file
+        let mut included_traverser = LaunchTraverser {
+            context: include_context,
+            records: Vec::new(),
+            containers: Vec::new(),
+            load_nodes: Vec::new(),
+        };
+        included_traverser.traverse_entity(&root)?;
+
+        // Merge records from included file into current records
+        self.records.extend(included_traverser.records);
+        self.containers.extend(included_traverser.containers);
+        self.load_nodes.extend(included_traverser.load_nodes);
 
         Ok(())
     }
