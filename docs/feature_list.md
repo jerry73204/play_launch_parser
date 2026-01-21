@@ -2,9 +2,9 @@
 
 Comprehensive feature list for the play_launch_parser project.
 
-**Last Updated**: 2026-01-19 (Session 10 - Continued)
-**Current Phase**: Phase 5.4 🔄 Autoware Compatibility Testing
-**Next Phase**: Python API Enhancements
+**Last Updated**: 2026-01-21 (Session 11)
+**Current Phase**: Phase 5.5 ✅ Core Python Support Complete
+**Next Phase**: Phase 6 - Full Autoware Compatibility
 
 ---
 
@@ -22,11 +22,11 @@ Comprehensive feature list for the play_launch_parser project.
 ### Overall Progress
 - **Test Coverage**: 249 tests passing (208 unit + 18 edge + 23 integration)
   - Includes Python support and eval string comparison tests
-- **Autoware Compatibility**: 95% (XML files), 80-85% (Python files)
-  - Successfully processes 33+ nested includes
-  - Parses 7 containers with composable nodes
-  - Fixed include argument ordering and YAML extraction
-  - Eval parser supports string comparisons
+- **Autoware Compatibility**:
+  - Nodes: 32/61 captured (52%)
+  - Containers: 12/15 captured (80%)
+  - Composable Nodes: 38/54 captured (70%)
+  - **Overall**: ~67% complete
 - **Performance**: <0.1ms parse time for simple files
 - **Code Quality**: 0 clippy warnings, properly formatted
 
@@ -38,7 +38,8 @@ Comprehensive feature list for the play_launch_parser project.
 | Phase 3: Advanced XML | ✅ | Complete |
 | Phase 4: Integration & Polish | ✅ | Complete (4.4 docs pending) |
 | **Phase 5.1: Quick Wins** | ✅ | **Complete** |
-| **Phase 5.2: Python Support** | 🔄 | **Core + Advanced Features Complete** |
+| **Phase 5.2: Python Support** | ✅ | **Core + Advanced Features Complete** |
+| **Phase 6: Full Autoware Support** | 📝 | **Planned** |
 
 ---
 
@@ -100,6 +101,8 @@ Comprehensive feature list for the play_launch_parser project.
 | `<pop-ros-namespace>` | ✅ | ✅ | Namespace stack |
 | `<node_container>` | ✅ | ✅ | **Phase 5.1** |
 | `<composable_node>` | ✅ | ✅ | **Phase 5.1** (graceful) |
+| `<set_remap>` / `<set-remap>` | ✅ | ✅ | **Session 11** |
+| `<load_composable_node>` | ❌ | ❌ | **Phase 6** Critical |
 
 ### 2.4 Node Sub-Elements ✅
 | Feature | Status | Tests | Notes |
@@ -451,6 +454,81 @@ Comprehensive feature list for the play_launch_parser project.
 
 ---
 
+## 13. Missing Features for Full Autoware Support (Phase 6) 📝
+
+**Current Autoware Coverage**: ~67% (32/61 nodes, 12/15 containers, 38/54 composable nodes)
+**Target**: 95%+ coverage
+
+### 13.1 Critical Features (Blocking ~30% of entities) 🔴
+
+| Feature | Impact | Status | Priority | Notes |
+|---------|--------|--------|----------|-------|
+| XML `<load_composable_node>` | 9-12 composable nodes | ❌ | Critical | Dynamically loads nodes into containers |
+| Python `LoadComposableNodes` target resolution | 2 composable nodes | 🚧 | High | Container name resolution |
+| Python OpaqueFunction file I/O | 2-3 containers | ❌ | High | Runtime YAML file reading |
+
+**Expected Impact**: Implementing these → 85-90% Autoware coverage
+
+### 13.2 High Priority Features (Node Generation) 🟡
+
+| Feature | Impact | Status | Priority | Notes |
+|---------|--------|--------|----------|-------|
+| Topic State Monitor nodes | 10+ nodes | ❌ | High | Dynamic generation pattern |
+| Simple Planning Simulator | 1 node | ❌ | Medium | Complex Python launch |
+
+### 13.3 Medium Priority (Additional APIs) 🟢
+
+#### Python Substitutions
+| Substitution | Status | Priority | Notes |
+|--------------|--------|----------|-------|
+| `Command` | ❌ | Medium | Shell command execution |
+| `PythonExpression` | ✅ | Medium | Python eval (have it) |
+| `NotSubstitution` | ❌ | Low | Boolean NOT |
+| `AndSubstitution` / `OrSubstitution` | ❌ | Low | Boolean logic |
+
+#### Python Actions
+| Action | Status | Priority | Notes |
+|--------|--------|----------|-------|
+| `EmitEvent` | ❌ | Low | Custom events |
+| `ResetLaunchConfigurations` | ❌ | Low | Clear configs |
+| `Shutdown` | ❌ | Low | Shutdown launch |
+
+### 13.4 Low Priority (Edge Cases) 🔵
+
+| Feature | Impact | Status | Priority | Notes |
+|---------|--------|--------|----------|-------|
+| Event handler execution | OnProcessStart/Exit | ❌ | Low | Static analysis limitation |
+| Lifecycle state management | State transitions | ❌ | Low | Parsed as regular nodes |
+| Complex conditional chains | Nested conditions | 🚧 | Low | Basic support exists |
+
+### 13.5 Implementation Plan
+
+**Phase 6.1: Critical XML Features** (Estimated: 2-3 days)
+- [ ] Implement `<load_composable_node>` XML action
+- [ ] Add composable node loading to context
+- [ ] Test with Autoware control/planning containers
+- [ ] Expected: +12 composable nodes (→80% coverage)
+
+**Phase 6.2: Python LoadComposableNodes** (Estimated: 1 day)
+- [ ] Improve target container resolution
+- [ ] Handle string container references
+- [ ] Test with occupancy_grid_map nodes
+- [ ] Expected: +2 composable nodes (→82% coverage)
+
+**Phase 6.3: Dynamic Node Patterns** (Estimated: 2-3 days)
+- [ ] Investigate topic_state_monitor generation
+- [ ] Add support for monitor node patterns
+- [ ] Test with component_state_monitor
+- [ ] Expected: +10 nodes (→90% coverage)
+
+**Phase 6.4: OpaqueFunction Enhancement** (Optional, 1-2 days)
+- [ ] Limited file I/O support in OpaqueFunction
+- [ ] YAML config file reading
+- [ ] Test with MRM operators
+- [ ] Expected: +2-3 containers (→95% coverage)
+
+---
+
 ## Summary Statistics
 
 ### Feature Completion
@@ -458,16 +536,17 @@ Comprehensive feature list for the play_launch_parser project.
 | Category | Features | Complete | Planned | Not Started |
 |----------|----------|----------|---------|-------------|
 | Core Infrastructure | 12 | 12 (100%) | 0 | 0 |
-| XML Parser | 45 | 45 (100%) | 0 | 0 |
+| XML Parser | 46 | 45 (98%) | 1 (2%) | 0 |
 | Substitution Engine | 20 | 20 (100%) | 0 | 0 |
 | Node Metadata | 28 | 28 (100%) | 0 | 0 |
 | record.json | 8 | 8 (100%) | 0 | 0 |
 | Error Handling | 12 | 12 (100%) | 0 | 0 |
 | Testing | 6 | 6 (100%) | 0 | 0 |
 | CLI | 4 | 4 (100%) | 0 | 0 |
-| **Python Support** | **50** | **46 (92%)** | **4 (8%)** | **0** |
+| **Python Support** | **50** | **47 (94%)** | **3 (6%)** | **0** |
+| **Autoware Features (Phase 6)** | **20** | **1 (5%)** | **19 (95%)** | **0** |
 | Documentation | 12 | 8 (67%) | 4 (33%) | 0 |
-| **Total** | **197** | **189 (96%)** | **8 (4%)** | **0** |
+| **Total** | **218** | **191 (88%)** | **27 (12%)** | **0** |
 
 ### Test Coverage
 
@@ -478,11 +557,14 @@ Comprehensive feature list for the play_launch_parser project.
 
 ### Next Milestone
 
-**Phase 5.2: Python Launch File Support (Advanced Features + Autoware Fixes Complete)**
-- **Status**: Core + Advanced Features + Autoware Fixes Complete (Session 10)
-- **Completed Features**: 46 of 50 features (92%)
-- **Current Coverage**: 80-85% Autoware Python files, 90%+ XML files
-- **Test Count**: 249 tests (all passing)
-- **Autoware Progress**: Successfully processes 20+ Python launch files
-- **Remaining Work**: Event handlers, lifecycle, advanced actions (4 features)
+**Phase 6: Full Autoware Compatibility**
+- **Status**: Planned (Session 11)
+- **Current Autoware Coverage**: ~67% (32/61 nodes, 12/15 containers, 38/54 composable nodes)
+- **Target Coverage**: 95%+
+- **Critical Features**:
+  - `<load_composable_node>` XML action (→+12 composable nodes)
+  - Python LoadComposableNodes target resolution (→+2 composable nodes)
+  - Topic state monitor pattern (→+10 nodes)
+- **Estimated Time**: 1-2 weeks
+- **Expected Impact**: 67% → 95% Autoware coverage
 
