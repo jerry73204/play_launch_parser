@@ -1976,3 +1976,93 @@ fn test_opaque_function() {
         assert_eq!(node["namespace"].as_str().unwrap(), "/dynamic");
     }
 }
+
+#[test]
+#[cfg(feature = "python")]
+fn test_opaque_function_file_io() {
+    let fixture = get_fixture_path("test_opaque_file_io.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing Python launch file with OpaqueFunction file I/O should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Check nodes - should have 1 node with parameters read from YAML file
+    let nodes = json["node"].as_array().unwrap();
+    eprintln!("Found {} nodes:", nodes.len());
+    for node in nodes {
+        eprintln!(
+            "  - {} (package: {}, namespace: {})",
+            node["name"].as_str().unwrap_or("no name"),
+            node["package"].as_str().unwrap_or("no package"),
+            node["namespace"].as_str().unwrap_or("no namespace")
+        );
+    }
+
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    let node = &nodes[0];
+    assert_eq!(node["name"].as_str().unwrap(), "test_node_with_file_params");
+    assert_eq!(node["package"].as_str().unwrap(), "test_pkg");
+    assert_eq!(node["executable"].as_str().unwrap(), "test_exec");
+    assert_eq!(node["namespace"].as_str().unwrap(), "/test");
+
+    // Check that parameters were read from the YAML file
+    let params = node["params"].as_array().unwrap();
+    eprintln!("Found {} params:", params.len());
+    for param in params {
+        if let Some(arr) = param.as_array() {
+            eprintln!(
+                "  - {}: {}",
+                arr[0].as_str().unwrap_or("no key"),
+                arr[1].as_str().unwrap_or("no value")
+            );
+        }
+    }
+
+    assert!(!params.is_empty(), "Should have parameters from YAML file");
+
+    // Check test_param (should be 42)
+    let test_param = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("test_param")
+    });
+    assert!(test_param.is_some(), "Should have test_param from YAML");
+    let test_param_value = test_param
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .get(1)
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(test_param_value, "42", "test_param should be 42");
+
+    // Check test_string (should be "hello")
+    let test_string = params.iter().find(|p| {
+        p.as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|v| v.as_str())
+            == Some("test_string")
+    });
+    assert!(test_string.is_some(), "Should have test_string from YAML");
+    let test_string_value = test_string
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .get(1)
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert_eq!(test_string_value, "hello", "test_string should be 'hello'");
+}

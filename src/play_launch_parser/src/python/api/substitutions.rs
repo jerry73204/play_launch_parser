@@ -133,6 +133,26 @@ impl PathJoinSubstitution {
     fn __repr__(&self) -> String {
         format!("PathJoinSubstitution({} parts)", self.substitutions.len())
     }
+
+    /// Perform the substitution - resolve all parts and join with '/'
+    ///
+    /// This method calls perform() on each substitution if available, or falls back to __str__
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let mut parts = Vec::new();
+        for obj in &self.substitutions {
+            // Try to call perform() if available (for FindPackageShare, LaunchConfiguration, etc.)
+            let part = if let Ok(result) = obj.call_method1(py, "perform", (context,)) {
+                result.extract::<String>(py)?
+            } else if let Ok(s) = obj.extract::<String>(py) {
+                s
+            } else {
+                // Fallback to __str__
+                obj.call_method0(py, "__str__")?.extract::<String>(py)?
+            };
+            parts.push(part);
+        }
+        Ok(parts.join("/"))
+    }
 }
 
 /// Mock FindPackageShare substitution
@@ -174,6 +194,69 @@ impl FindPackageShare {
 
     fn __repr__(&self) -> String {
         "FindPackageShare(...)".to_string()
+    }
+
+    /// Perform the substitution - resolve to actual package path
+    ///
+    /// In ROS 2, this method is called with a launch context to resolve the package path.
+    /// We implement the same package finding logic as the Rust substitution system.
+    fn perform(&self, py: Python, _context: &PyAny) -> PyResult<String> {
+        // Extract package name (could be string or LaunchConfiguration)
+        let pkg_name = if let Ok(s) = self.package_name.extract::<String>(py) {
+            s
+        } else {
+            // Try calling perform() on the object if it has it (for LaunchConfiguration)
+            if let Ok(result) = self.package_name.call_method1(py, "perform", (_context,)) {
+                result.extract::<String>(py)?
+            } else {
+                // Fallback to __str__
+                self.package_name
+                    .call_method0(py, "__str__")?
+                    .extract::<String>(py)?
+            }
+        };
+
+        // Resolve package path using ROS package finding logic
+        Self::find_package_share(&pkg_name).ok_or_else(|| {
+            pyo3::exceptions::PyFileNotFoundError::new_err(format!(
+                "Package '{}' not found. Ensure the package is installed and sourced.",
+                pkg_name
+            ))
+        })
+    }
+}
+
+impl FindPackageShare {
+    /// Find ROS 2 package share directory
+    /// Same logic as the Rust substitution system
+    fn find_package_share(package_name: &str) -> Option<String> {
+        // Try ROS_DISTRO environment variable first
+        if let Ok(distro) = std::env::var("ROS_DISTRO") {
+            let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);
+            if std::path::Path::new(&share_path).exists() {
+                return Some(share_path);
+            }
+        }
+
+        // Fallback: Try common ROS 2 distributions
+        for distro in &["jazzy", "iron", "humble", "galactic", "foxy"] {
+            let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);
+            if std::path::Path::new(&share_path).exists() {
+                return Some(share_path);
+            }
+        }
+
+        // Try AMENT_PREFIX_PATH
+        if let Ok(prefix_path) = std::env::var("AMENT_PREFIX_PATH") {
+            for prefix in prefix_path.split(':') {
+                let share_path = format!("{}/share/{}", prefix, package_name);
+                if std::path::Path::new(&share_path).exists() {
+                    return Some(share_path);
+                }
+            }
+        }
+
+        None
     }
 }
 
