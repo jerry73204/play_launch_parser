@@ -219,8 +219,12 @@ def run_python_dump(launch_file: Path, paths: Dict, extra_args: Dict[str, str] =
         print(f"{Colors.RED}Error running Python dump_launch: {e}{Colors.END}")
         return None
 
-def compare_counts(rust_data: Dict, python_data: Dict) -> None:
-    """Compare counts of different entity types."""
+def compare_counts(rust_data: Dict, python_data: Dict) -> bool:
+    """Compare counts of different entity types.
+
+    Note: Python includes containers as nodes, so we adjust the comparison
+    to account for this implementation detail.
+    """
     print(f"\n{Colors.BOLD}{'=' * 80}{Colors.END}")
     print(f"{Colors.BOLD}COUNT COMPARISON{Colors.END}")
     print(f"{Colors.BOLD}{'=' * 80}{Colors.END}\n")
@@ -234,7 +238,14 @@ def compare_counts(rust_data: Dict, python_data: Dict) -> None:
     for metric in metrics:
         rust_count = len(rust_data.get(metric, []))
         python_count = len(python_data.get(metric, []))
-        diff = rust_count - python_count
+
+        # For nodes: Python includes containers as nodes, so subtract them for fair comparison
+        if metric == 'node':
+            python_container_count = len(python_data.get('container', []))
+            python_count_adjusted = python_count - python_container_count
+            diff = rust_count - python_count_adjusted
+        else:
+            diff = rust_count - python_count
 
         if diff == 0:
             status = f"{Colors.GREEN}✓{Colors.END}"
@@ -498,7 +509,7 @@ def main():
     print(f"{Colors.BOLD}SUMMARY{Colors.END}")
     print(f"{Colors.BOLD}{'=' * 80}{Colors.END}\n")
 
-    all_match = containers_match and load_nodes_match and nodes_match
+    all_match = counts_match and containers_match and load_nodes_match and nodes_match
 
     if all_match:
         print(f"{Colors.GREEN}{Colors.BOLD}✓ ALL CHECKS PASSED{Colors.END}")
@@ -517,6 +528,7 @@ def main():
     else:
         print(f"{Colors.YELLOW}{Colors.BOLD}⚠ SOME DIFFERENCES FOUND{Colors.END}")
         print(f"\nResults:")
+        print(f"  Counts: {Colors.GREEN if counts_match else Colors.YELLOW}{'✓' if counts_match else '✗'}{Colors.END}")
         print(f"  Containers: {Colors.GREEN if containers_match else Colors.YELLOW}{'✓' if containers_match else '✗'}{Colors.END}")
         print(f"  Composable nodes: {Colors.GREEN if load_nodes_match else Colors.YELLOW}{'✓' if load_nodes_match else '✗'}{Colors.END}")
         print(f"  Regular nodes: {Colors.GREEN if nodes_match else Colors.YELLOW}{'✓' if nodes_match else '✗'}{Colors.END}")
