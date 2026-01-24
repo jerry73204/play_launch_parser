@@ -188,9 +188,27 @@ impl FindPackageShare {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        // Extract package name (could be string or substitution)
+        use pyo3::types::PyList;
+
+        // Extract package name (could be string, substitution, or list)
         let pkg = if let Ok(s) = self.package_name.extract::<String>(py) {
             s
+        } else if let Ok(list) = self.package_name.downcast::<PyList>(py) {
+            // Handle list case: concatenate all elements using __str__()
+            let mut result = String::new();
+            for item in list.iter() {
+                // Try to extract as string
+                if let Ok(s) = item.extract::<String>() {
+                    result.push_str(&s);
+                }
+                // Try calling __str__
+                else if let Ok(str_result) = item.call_method0("__str__") {
+                    if let Ok(s) = str_result.extract::<String>() {
+                        result.push_str(&s);
+                    }
+                }
+            }
+            result
         } else {
             // Try calling __str__ on the object (for LaunchConfiguration, etc.)
             self.package_name
@@ -209,18 +227,55 @@ impl FindPackageShare {
     /// In ROS 2, this method is called with a launch context to resolve the package path.
     /// We implement the same package finding logic as the Rust substitution system.
     fn perform(&self, py: Python, _context: &PyAny) -> PyResult<String> {
-        // Extract package name (could be string or LaunchConfiguration)
+        use pyo3::types::PyList;
+
+        // Extract package name (could be string, LaunchConfiguration, or list)
         let pkg_name = if let Ok(s) = self.package_name.extract::<String>(py) {
             s
+        } else if let Ok(list) = self.package_name.downcast::<PyList>(py) {
+            // Handle list case: concatenate all elements after performing them
+            let mut result = String::new();
+            for item in list.iter() {
+                // Try to extract as string
+                if let Ok(s) = item.extract::<String>() {
+                    result.push_str(&s);
+                }
+                // Try calling perform() if it exists (for LaunchConfiguration, etc.)
+                else if item.hasattr("perform")? {
+                    if let Ok(performed) = item.call_method1("perform", (_context,)) {
+                        if let Ok(s) = performed.extract::<String>() {
+                            result.push_str(&s);
+                            continue;
+                        }
+                    }
+                    // Fallback to __str__ if perform fails
+                    if let Ok(str_result) = item.call_method0("__str__") {
+                        if let Ok(s) = str_result.extract::<String>() {
+                            result.push_str(&s);
+                        }
+                    }
+                }
+                // Try calling __str__
+                else if let Ok(str_result) = item.call_method0("__str__") {
+                    if let Ok(s) = str_result.extract::<String>() {
+                        result.push_str(&s);
+                    }
+                }
+            }
+            result
         } else {
             // Try calling perform() on the object if it has it (for LaunchConfiguration)
-            if let Ok(result) = self.package_name.call_method1(py, "perform", (_context,)) {
-                result.extract::<String>(py)?
+            let obj_ref = self.package_name.as_ref(py);
+            if obj_ref.hasattr("perform")? {
+                if let Ok(result) = obj_ref.call_method1("perform", (_context,)) {
+                    result.extract::<String>()?
+                } else {
+                    // Fallback to __str__
+                    obj_ref.call_method0("__str__")?.extract::<String>()?
+                }
             } else {
                 // Fallback to __str__
-                self.package_name
-                    .call_method0(py, "__str__")?
-                    .extract::<String>(py)?
+                obj_ref.call_method0("__str__")?.extract::<String>()?
             }
         };
 
