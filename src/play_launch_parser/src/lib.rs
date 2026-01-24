@@ -18,12 +18,55 @@ use actions::{
     SetParameterAction, SetRemapAction, UnsetEnvAction,
 };
 use condition::should_process_entity;
+use dashmap::DashMap;
 use error::{ParseError, Result};
+use once_cell::sync::Lazy;
 use record::{CommandGenerator, RecordJson};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use substitution::{parse_substitutions, resolve_substitutions, ArgumentMetadata, LaunchContext};
 use xml::{Entity, XmlEntity};
+
+/// Cached file content with modification time
+struct CachedFile {
+    content: String,
+    modified: SystemTime,
+}
+
+/// Global file content cache
+///
+/// Thread-safe, lock-free reads. Bounded by actual files in workspace.
+/// Expected size for Autoware: ~50-100 files × ~50KB/file = ~5-10MB total.
+static FILE_CACHE: Lazy<DashMap<PathBuf, CachedFile>> = Lazy::new(DashMap::new);
+
+/// Read file with caching and modification time validation
+fn read_file_cached(path: &Path) -> Result<String> {
+    let metadata = std::fs::metadata(path)?;
+    let modified = metadata.modified()?;
+
+    // Check cache with modification time validation
+    if let Some(entry) = FILE_CACHE.get(path) {
+        if entry.modified == modified {
+            log::trace!("File cache hit: {}", path.display());
+            return Ok(entry.content.clone());
+        }
+    }
+
+    log::debug!("File cache miss: {}", path.display());
+
+    // Read and cache
+    let content = std::fs::read_to_string(path)?;
+    FILE_CACHE.insert(
+        path.to_path_buf(),
+        CachedFile {
+            content: content.clone(),
+            modified,
+        },
+    );
+
+    Ok(content)
+}
 
 /// Launch tree traverser for parsing launch files
 pub struct LaunchTraverser {
@@ -116,7 +159,7 @@ impl LaunchTraverser {
         // Set current file in context
         self.context.set_current_file(path.to_path_buf());
 
-        let content = std::fs::read_to_string(path)?;
+        let content = read_file_cached(path)?;
         let doc = roxmltree::Document::parse(&content)?;
         let root = xml::XmlEntity::new(doc.root_element());
         self.traverse_entity(&root)?;
@@ -345,7 +388,7 @@ impl LaunchTraverser {
         }
 
         // Parse and traverse the included file
-        let content = std::fs::read_to_string(resolved_path)?;
+        let content = read_file_cached(resolved_path)?;
         let doc = roxmltree::Document::parse(&content)?;
         let root = xml::XmlEntity::new(doc.root_element());
 
@@ -461,7 +504,7 @@ impl LaunchTraverser {
         );
 
         // Parse and traverse the included file
-        let content = std::fs::read_to_string(&resolved_path)?;
+        let content = read_file_cached(&resolved_path)?;
         let doc = roxmltree::Document::parse(&content)?;
         let root = xml::XmlEntity::new(doc.root_element());
 
@@ -690,7 +733,7 @@ impl LaunchTraverser {
     fn process_yaml_launch_file(&mut self, path: &Path) -> Result<()> {
         use serde_yaml::Value;
 
-        let content = std::fs::read_to_string(path)?;
+        let content = read_file_cached(path)?;
         let yaml: Value = serde_yaml::from_str(&content)
             .map_err(|e| ParseError::InvalidSubstitution(format!("Invalid YAML: {}", e)))?;
 

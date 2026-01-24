@@ -51,7 +51,7 @@ impl LaunchConfiguration {
     fn perform(&self, _context: &PyAny) -> PyResult<String> {
         use crate::python::bridge::LAUNCH_CONFIGURATIONS;
 
-        let configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+        let configs = LAUNCH_CONFIGURATIONS.lock();
         let result = if let Some(value) = configs.get(&self.variable_name) {
             value.clone()
         } else if let Some(ref default) = self.default {

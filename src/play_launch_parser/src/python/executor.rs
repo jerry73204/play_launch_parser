@@ -120,14 +120,14 @@ impl PythonLaunchExecutor {
     )> {
         let result = Python::with_gil(|py| {
             // Clear previous captures
-            CAPTURED_NODES.lock().unwrap().clear();
-            CAPTURED_CONTAINERS.lock().unwrap().clear();
-            CAPTURED_LOAD_NODES.lock().unwrap().clear();
-            CAPTURED_INCLUDES.lock().unwrap().clear();
+            CAPTURED_NODES.lock().clear();
+            CAPTURED_CONTAINERS.lock().clear();
+            CAPTURED_LOAD_NODES.lock().clear();
+            CAPTURED_INCLUDES.lock().clear();
 
             // Store launch configurations for condition evaluation
             {
-                let mut configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+                let mut configs = LAUNCH_CONFIGURATIONS.lock();
                 configs.clear();
                 for (key, value) in args {
                     log::trace!(
@@ -186,28 +186,28 @@ impl PythonLaunchExecutor {
             Self::process_launch_description(py, launch_description)?;
 
             // Convert captured entities to records
-            let node_captures = CAPTURED_NODES.lock().unwrap().clone();
+            let node_captures = CAPTURED_NODES.lock().clone();
             let nodes = node_captures
                 .into_iter()
                 .map(|capture| capture.to_record())
                 .collect::<Result<Vec<_>>>()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-            let container_captures = CAPTURED_CONTAINERS.lock().unwrap().clone();
+            let container_captures = CAPTURED_CONTAINERS.lock().clone();
             let containers = container_captures
                 .into_iter()
                 .map(|capture| capture.to_record())
                 .collect::<Result<Vec<_>>>()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-            let load_node_captures = CAPTURED_LOAD_NODES.lock().unwrap().clone();
+            let load_node_captures = CAPTURED_LOAD_NODES.lock().clone();
             let load_nodes = load_node_captures
                 .into_iter()
                 .map(|capture| capture.to_record())
                 .collect::<Result<Vec<_>>>()
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-            let includes = CAPTURED_INCLUDES.lock().unwrap().clone();
+            let includes = CAPTURED_INCLUDES.lock().clone();
 
             Ok((nodes, containers, load_nodes, includes))
         });

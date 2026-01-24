@@ -91,19 +91,15 @@ impl IfCondition {
             let var_name = &value[6..value.len() - 1]; // Skip "$(var " and ")"
 
             // Look up in global launch configurations
-            if let Ok(configs) = LAUNCH_CONFIGURATIONS.lock() {
-                if let Some(resolved) = configs.get(var_name) {
-                    resolved.clone()
-                } else {
-                    // Variable not found - treat as empty/falsy
-                    log::warn!(
-                        "LaunchConfiguration '{}' not found in launch args",
-                        var_name
-                    );
-                    return false;
-                }
+            let configs = LAUNCH_CONFIGURATIONS.lock();
+            if let Some(resolved) = configs.get(var_name) {
+                resolved.clone()
             } else {
-                log::warn!("Failed to lock LAUNCH_CONFIGURATIONS");
+                // Variable not found - treat as empty/falsy
+                log::warn!(
+                    "LaunchConfiguration '{}' not found in launch args",
+                    var_name
+                );
                 return false;
             }
         } else {

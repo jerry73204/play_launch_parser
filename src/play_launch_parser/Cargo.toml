@@ -24,6 +24,10 @@ rand = "0.8"
 pyo3 = { version = "0.20", features = ["auto-initialize"], optional = true }
 once_cell = "1.19"
 
+# Performance optimizations (Phase 7.1)
+dashmap = "5.5"           # Concurrent HashMap for caching
+parking_lot = "0.12"      # Faster mutexes
+
 [dev-dependencies]
 tempfile = "3.8"
 

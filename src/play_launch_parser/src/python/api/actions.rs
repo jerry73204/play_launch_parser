@@ -49,7 +49,7 @@ impl DeclareLaunchArgument {
 
         // Register the default value in LAUNCH_CONFIGURATIONS if not already set
         if let Some(ref default_val) = default_str {
-            let mut configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+            let mut configs = LAUNCH_CONFIGURATIONS.lock();
             // Only set if not already present (CLI args and include args take precedence)
             if !configs.contains_key(&name) {
                 configs.insert(name.clone(), default_val.clone());
@@ -198,7 +198,7 @@ impl OpaqueFunction {
             // Create a mock LaunchContext that provides access to launch configurations
             // This allows OpaqueFunction code to call LaunchConfiguration().perform(context)
             use crate::python::bridge::LAUNCH_CONFIGURATIONS;
-            let configs = LAUNCH_CONFIGURATIONS.lock().unwrap().clone();
+            let configs = LAUNCH_CONFIGURATIONS.lock().clone();
 
             // Create a context dict with launch_configurations
             let context_code = r#"
@@ -598,7 +598,7 @@ impl IncludeLaunchDescription {
 
         // Capture the include request
         {
-            let mut includes = CAPTURED_INCLUDES.lock().unwrap();
+            let mut includes = CAPTURED_INCLUDES.lock();
             includes.push(crate::python::bridge::IncludeCapture {
                 file_path: file_path.clone(),
                 args: args.clone(),

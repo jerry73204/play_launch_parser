@@ -3,8 +3,9 @@
 use crate::error::Result;
 use crate::record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord};
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Global storage for launch configurations (arguments passed to the launch file)
 /// This allows conditions to access and resolve LaunchConfiguration substitutions
@@ -133,8 +134,8 @@ pub static CAPTURED_INCLUDES: Lazy<Arc<Mutex<Vec<IncludeCapture>>>> =
 /// not be cleared here.
 #[cfg(feature = "python")]
 pub fn clear_all_captured() {
-    CAPTURED_NODES.lock().unwrap().clear();
-    CAPTURED_CONTAINERS.lock().unwrap().clear();
-    CAPTURED_LOAD_NODES.lock().unwrap().clear();
-    CAPTURED_INCLUDES.lock().unwrap().clear();
+    CAPTURED_NODES.lock().clear();
+    CAPTURED_CONTAINERS.lock().clear();
+    CAPTURED_LOAD_NODES.lock().clear();
+    CAPTURED_INCLUDES.lock().clear();
 }

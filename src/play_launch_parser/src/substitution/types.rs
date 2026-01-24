@@ -2,6 +2,8 @@
 
 use crate::error::SubstitutionError;
 use crate::substitution::context::LaunchContext;
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 
 /// Error handling mode for command substitutions
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -134,8 +136,32 @@ impl Substitution {
     }
 }
 
-/// Find ROS 2 package share directory
+/// Global package resolution cache
+///
+/// Thread-safe, lock-free reads, bounded by actual ROS packages.
+/// Expected size: ~50 packages × ~200 bytes/entry = ~10KB total.
+static PACKAGE_CACHE: Lazy<DashMap<String, String>> = Lazy::new(DashMap::new);
+
+/// Find ROS 2 package share directory with caching
 fn find_package_share(package_name: &str) -> Option<String> {
+    // Fast path: Check cache (lock-free read)
+    if let Some(entry) = PACKAGE_CACHE.get(package_name) {
+        log::trace!("Package cache hit: {}", package_name);
+        return Some(entry.value().clone());
+    }
+
+    log::debug!("Package cache miss: {}", package_name);
+
+    // Slow path: Expensive filesystem lookup
+    let result = find_package_share_uncached(package_name)?;
+
+    // Cache result
+    PACKAGE_CACHE.insert(package_name.to_string(), result.clone());
+    Some(result)
+}
+
+/// Find ROS 2 package share directory (uncached implementation)
+fn find_package_share_uncached(package_name: &str) -> Option<String> {
     // Try ROS_DISTRO environment variable first
     if let Ok(distro) = std::env::var("ROS_DISTRO") {
         let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);

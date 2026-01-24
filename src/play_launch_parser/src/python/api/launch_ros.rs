@@ -201,7 +201,7 @@ impl Node {
             capture.executable
         );
 
-        CAPTURED_NODES.lock().unwrap().push(capture);
+        CAPTURED_NODES.lock().push(capture);
     }
 
     /// Parse Python parameters to string tuples
@@ -446,7 +446,7 @@ impl ComposableNodeContainer {
         // Debug: Log if name is empty
         if name_str.is_empty() {
             use crate::python::bridge::LAUNCH_CONFIGURATIONS;
-            let configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+            let configs = LAUNCH_CONFIGURATIONS.lock();
             log::warn!(
                 "ComposableNodeContainer has empty name! Available configs: {:?}",
                 configs.keys().collect::<Vec<_>>()
@@ -538,7 +538,7 @@ impl ComposableNodeContainer {
             capture.namespace
         );
 
-        CAPTURED_CONTAINERS.lock().unwrap().push(capture);
+        CAPTURED_CONTAINERS.lock().push(capture);
 
         // Capture each composable node as a load_node entry
         Python::with_gil(|py| {
@@ -740,7 +740,7 @@ impl ComposableNode {
             capture.target_container_name
         );
 
-        CAPTURED_LOAD_NODES.lock().unwrap().push(capture);
+        CAPTURED_LOAD_NODES.lock().push(capture);
     }
 
     /// Normalize namespace + name into a proper path
@@ -1017,7 +1017,7 @@ impl LifecycleNode {
             capture.executable
         );
 
-        CAPTURED_NODES.lock().unwrap().push(capture);
+        CAPTURED_NODES.lock().push(capture);
         Ok(())
     }
 
@@ -1370,7 +1370,7 @@ impl LoadComposableNodes {
                 capture.target_container_name
             );
 
-            CAPTURED_LOAD_NODES.lock().unwrap().push(capture);
+            CAPTURED_LOAD_NODES.lock().push(capture);
         }
 
         Ok(())
