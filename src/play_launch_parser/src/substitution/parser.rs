@@ -2,11 +2,53 @@
 
 use crate::error::{ParseError, Result};
 use crate::substitution::types::{CommandErrorMode, Substitution};
+use lru::LruCache;
+use std::cell::RefCell;
+use std::num::NonZeroUsize;
+
+// Thread-local LRU cache for substitution parsing (Phase 7.4.1)
+//
+// Caches parsed AST structures, NOT resolved values.
+// This is safe because parsing is context-independent - same input always produces same AST.
+// Resolution happens separately with the current context.
+//
+// Cache size: 1024 entries (typical usage: ~200-500 unique substitution strings)
+// Expected hit rate: >80% for launch files with repeated patterns
+thread_local! {
+    static PARSE_CACHE: RefCell<LruCache<String, Vec<Substitution>>> =
+        RefCell::new(LruCache::new(NonZeroUsize::new(1024).unwrap()));
+}
 
 /// Parse substitution string like "$(var x)" or "text $(env Y) more"
 /// Supports nested substitutions like "$(var $(env NAME)_config)"
+///
+/// Uses thread-local LRU cache to avoid re-parsing identical strings.
+/// Safe because parsing is context-independent - we cache AST structure, not resolved values.
 pub fn parse_substitutions(input: &str) -> Result<Vec<Substitution>> {
-    parse_substitutions_recursive(input)
+    // Fast path: Check cache (thread-local, no locking needed)
+    PARSE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+
+        // Check if we have a cached result
+        if let Some(cached) = cache.get(input) {
+            log::trace!("Substitution parse cache hit: {}", input);
+            return Ok(cached.clone());
+        }
+
+        // Slow path: Parse and cache
+        log::trace!("Substitution parse cache miss: {}", input);
+        drop(cache); // Release borrow before recursive call
+
+        let result = parse_substitutions_recursive(input)?;
+
+        // Cache the result
+        PARSE_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            cache.put(input.to_string(), result.clone());
+        });
+
+        Ok(result)
+    })
 }
 
 /// Internal recursive parser that handles nested substitutions

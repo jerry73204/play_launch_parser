@@ -1,19 +1,19 @@
 # Phase 7: Performance Optimization
 
-**Status**: 🚀 **Mostly Complete** (7.1, 7.2, 7.3, 7.4.3, 7.4.4 done)
+**Status**: ✅ **COMPLETE** (7.1, 7.2, 7.3, 7.4.1, 7.4.3, 7.4.4 done)
 **Priority**: HIGH (for production deployment)
 **Dependencies**: Phase 6 Complete ✅
 
-**Completed** (Session 12):
+**Completed** (Session 12-13):
 - ✅ Phase 7.1: DashMap Caching (package + file + mutex)
 - ✅ Phase 7.2: Hybrid Arc + Local Context
 - ✅ Phase 7.3: Parallel Processing with rayon
+- ✅ Phase 7.4.1: Substitution Parsing Cache (Session 13)
 - ✅ Phase 7.4.3: Record Generation Clone Elimination
 - ✅ Phase 7.4.4: XML Iterator Returns
 
-**Remaining** (Optional):
-- Phase 7.4.1: Substitution parsing cache
-- Phase 7.4.2: Command execution cache
+**Not Recommended**:
+- ~~Phase 7.4.2: Command execution cache~~ ⛔ NOT RECOMMENDED (unsafe for stateful commands)
 
 ---
 
@@ -534,78 +534,147 @@ rayon = "1.8"             # Parallel processing (✅ added)
 **Time**: 1 week
 **Priority**: P2 (nice to have)
 **Risk**: Low-Medium
+**Note**:
+- 7.4.1 (substitution parsing cache) is **SAFE** - caches AST structure, not resolved values
+- 7.4.2 (command execution cache) is **NOT RECOMMENDED** - unsafe for stateful commands
 
-### 7.4.1: Substitution Parsing Cache (1 day)
+### 7.4.1: Substitution Parsing Cache (1 day) ✅ COMPLETE
+
+**Status**: ✅ **COMPLETE** (Session 13 - 2026-01-24)
 
 **Problem**: Repeated parsing of identical substitution strings.
 
 **Solution**: thread_local LRU cache (bounded, eviction policy).
 
+**Why This is Safe** (unlike 7.4.2 command cache):
+
+The substitution system has a two-phase architecture:
+
+1. **Parsing** (context-independent): `parse_substitutions(input: &str) -> Vec<Substitution>`
+   - Converts string `"$(var foo)/bar"` into AST `[LaunchConfiguration("foo"), Text("/bar")]`
+   - **No context parameter** - purely syntactic analysis
+   - **Safe to cache** - same input always produces same AST
+
+2. **Resolution** (context-dependent): `resolve_substitutions(subs: &[Substitution], context: &LaunchContext) -> String`
+   - Evaluates AST with current context to get actual values
+   - **NOT cached** - happens fresh each time with current context
+   - Handles scope shadowing correctly
+
+**Example showing safety**:
+```xml
+<arg name="foo" default="1"/>
+<node name="$(var foo)"/>  <!-- Resolves to "1" -->
+<arg name="foo" default="2"/>
+<node name="$(var foo)"/>  <!-- Resolves to "2" -->
+```
+
+With parsing cache:
+1. Parse `"$(var foo)"` → Cache AST: `[LaunchConfiguration("foo")]` (just structure)
+2. Resolve with `{foo=1}` → `"1"` ✅
+3. Context updated: `{foo=2}`
+4. Parse `"$(var foo)"` → **Return cached AST** `[LaunchConfiguration("foo")]`
+5. Resolve with `{foo=2}` → `"2"` ✅
+
+The cache stores **only the parsed structure**, never resolved values. All substitution types store structure only:
+- `LaunchConfiguration(name)` - variable name, not value
+- `EnvironmentVariable` - name and default structure, not resolved value
+- `Dirname`/`Filename` - marker only, looks up from context during resolution
+- `Anon` - name structure, generates unique value **on each resolution**
+- `FindPackageShare` - package name, not resolved path
+- `Command` - command structure, not output
+
 **Implementation**:
 ```rust
 use lru::LruCache;
 use std::cell::RefCell;
+use std::num::NonZeroUsize;
 
+// Thread-local LRU cache for substitution parsing (Phase 7.4.1)
+// Cache size: 1024 entries (typical usage: ~200-500 unique substitution strings)
 thread_local! {
     static PARSE_CACHE: RefCell<LruCache<String, Vec<Substitution>>> =
-        RefCell::new(LruCache::new(1024));
+        RefCell::new(LruCache::new(NonZeroUsize::new(1024).unwrap()));
 }
 
-pub fn parse_substitutions_cached(text: &str) -> Result<Vec<Substitution>> {
+pub fn parse_substitutions(input: &str) -> Result<Vec<Substitution>> {
+    // Fast path: Check cache (thread-local, no locking needed)
     PARSE_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(result) = cache.get(text) {
-            return Ok(result.clone());
+
+        if let Some(cached) = cache.get(input) {
+            log::trace!("Substitution parse cache hit: {}", input);
+            return Ok(cached.clone());
         }
-        let result = parse_substitutions(text)?;
-        cache.put(text.to_string(), result.clone());
+
+        log::trace!("Substitution parse cache miss: {}", input);
+        drop(cache); // Release borrow before recursive call
+
+        let result = parse_substitutions_recursive(input)?;
+
+        // Cache the result
+        PARSE_CACHE.with(|cache| {
+            cache.borrow_mut().put(input.to_string(), result.clone());
+        });
+
         Ok(result)
     })
 }
 ```
 
-**Expected Impact**: 40-60% for repeated substitution patterns
+**Files Modified**:
+- ✅ `src/play_launch_parser/Cargo.toml`: Added `lru = "0.12"` dependency
+- ✅ `src/play_launch_parser/src/substitution/parser.rs:1-45`: Added cache implementation
+
+**Results**:
+- ✅ All 274 tests pass (218 lib + 18 edge + 3 perf + 15 Python + 20 XML)
+- ✅ Zero clippy warnings
+- ✅ Thread-local cache avoids synchronization overhead
+- ✅ LRU eviction policy prevents unbounded memory growth
+- ✅ Cache hits logged at trace level for performance analysis
+
+**Expected Impact**: 40-60% for repeated substitution patterns (benchmarking pending)
 
 ---
 
-### 7.4.2: Command Execution Cache (0.5 days)
+### 7.4.2: Command Execution Cache (0.5 days) ⚠️ NOT RECOMMENDED
+
+**Status**: ⛔ **NOT RECOMMENDED** - Unsafe due to stateful commands
 
 **Problem**: `$(command ...)` executes repeatedly for same commands.
 
-**Solution**: DashMap cache with TTL (time-to-live).
+**Why Caching is Unsafe**:
 
-**Implementation**:
+Caching command execution is fundamentally unsafe because many commands are **stateful** and produce different results on each invocation:
+
+- `$(date)` - Returns current time (changes every second)
+- `$(git rev-parse HEAD)` - Returns current commit (changes when commits are made)
+- `$(uuidgen)` - Generates unique IDs (must be different each call)
+- `$(whoami)` - Could change if user context switches
+- Custom scripts reading files, incrementing counters, accessing external state
+- Commands with side effects that should execute each time
+
+**Why TTL Doesn't Solve It**:
+
+Even with a short TTL (e.g., 5 seconds):
+- State can change within the TTL window
+- Behavior becomes non-deterministic and time-dependent
+- Creates subtle, hard-to-reproduce bugs
+- Launch files expect fresh execution on each parse
+- Violates principle of least surprise
+
+**Potential Safe Alternative** (NOT IMPLEMENTED):
+
+Only cache if explicitly opted-in per command with a whitelist of known-safe, pure commands:
 ```rust
-use std::time::{Instant, Duration};
-
-struct CachedCommand {
-    output: String,
-    timestamp: Instant,
-}
-
-static COMMAND_CACHE: Lazy<DashMap<String, CachedCommand>> =
-    Lazy::new(DashMap::new);
-
-const COMMAND_TTL: Duration = Duration::from_secs(5);
-
-fn execute_command_cached(cmd: &str) -> Result<String> {
-    if let Some(entry) = COMMAND_CACHE.get(cmd) {
-        if entry.timestamp.elapsed() < COMMAND_TTL {
-            return Ok(entry.output.clone());
-        }
-    }
-
-    let output = execute_command_uncached(cmd)?;
-    COMMAND_CACHE.insert(
-        cmd.to_string(),
-        CachedCommand { output: output.clone(), timestamp: Instant::now() }
-    );
-
-    Ok(output)
-}
+const CACHEABLE_COMMANDS: &[&str] = &[
+    // Only pure, deterministic commands
+    // Even this is risky - better to not cache at all
+];
 ```
 
-**Expected Impact**: 50-70% for command-heavy files
+**Recommendation**: **Do not implement.** Correctness is more important than performance for command execution.
+
+**Expected Impact**: ~~50-70% for command-heavy files~~ (Not worth the risk)
 
 ---
 
@@ -685,29 +754,30 @@ pub fn children(&self) -> impl Iterator<Item = XmlEntity<'a, 'input>> {
 
 ### Phase 7.4 Deliverables
 
-**Status**: Partially complete (7.4.3 and 7.4.4 done)
+**Status**: ✅ **COMPLETE** (7.4.1, 7.4.3, 7.4.4 done; 7.4.2 not recommended)
 
-**Results** (7.4.3 and 7.4.4):
+**Results** (7.4.1, 7.4.3, 7.4.4):
+- ✅ 7.4.1: Substitution parsing cache with thread-local LRU (1024 entries)
 - ✅ 7.4.3: Eliminated 6 unnecessary clones in record generation
 - ✅ 7.4.4: XML children() returns iterator instead of Vec
 - ✅ Reduced string allocations by 15-25% (estimated)
 - ✅ Reduced Vec allocations for large XML traversals by 20-30% (estimated)
+- ✅ Reduced substitution parsing overhead by 40-60% for repeated patterns (estimated)
 - ✅ All 274 tests pass
 - ✅ Zero clippy warnings
 - ✅ 100% Autoware compatibility maintained
 
-**Remaining** (7.4.1, 7.4.2):
-- [ ] Substitution parsing cache (7.4.1)
-- [ ] Command execution cache (7.4.2)
+**Not Implemented** (unsafe):
+- [x] ~~Command execution cache (7.4.2)~~ - ⛔ NOT RECOMMENDED (unsafe for stateful commands)
 
-**Expected Full Results** (all of 7.4):
-- Autoware parse time: ~0.7-0.8s (from ~1s) = additional 20-30%
+**Expected Full Results** (7.4.1, 7.4.3, 7.4.4 only - excluding unsafe 7.4.2):
+- Autoware parse time: ~0.7-0.9s (from ~1s) = additional 10-30%
 - **Combined total**: 5-7x improvement (~5s → ~0.7-1s)
 
-**Dependencies Needed** (for 7.4.1):
+**Dependencies Added**:
 ```toml
 [dependencies]
-lru = "0.12"              # LRU cache (not yet added)
+lru = "0.12"              # LRU cache (✅ added in Phase 7.4.1)
 ```
 
 ---
@@ -793,11 +863,11 @@ Each phase is independent:
 
 ```toml
 [dependencies]
-dashmap = "5.5"           # Phase 7.1: Concurrent HashMap
-parking_lot = "0.12"      # Phase 7.1: Faster mutexes
-once_cell = "1.19"        # Phase 7.1: Lazy static (already present)
-rayon = "1.8"             # Phase 7.3: Parallel processing
-lru = "0.12"              # Phase 7.4: LRU cache (optional)
+dashmap = "5.5"           # Phase 7.1: Concurrent HashMap ✅
+parking_lot = "0.12"      # Phase 7.1: Faster mutexes ✅
+once_cell = "1.19"        # Phase 7.1: Lazy static (already present) ✅
+rayon = "1.8"             # Phase 7.3: Parallel processing ✅
+lru = "0.12"              # Phase 7.4.1: LRU cache ✅
 ```
 
 ---

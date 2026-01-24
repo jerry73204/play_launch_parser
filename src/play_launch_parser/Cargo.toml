@@ -31,6 +31,9 @@ parking_lot = "0.12"      # Faster mutexes
 # Performance optimizations (Phase 7.3)
 rayon = "1.8"             # Parallel processing
 
+# Performance optimizations (Phase 7.4)
+lru = "0.12"              # LRU cache for substitution parsing
+
 [dev-dependencies]
 tempfile = "3.8"
 
