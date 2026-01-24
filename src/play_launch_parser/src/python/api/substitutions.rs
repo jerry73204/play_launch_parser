@@ -679,6 +679,18 @@ impl EqualsSubstitution {
     fn __repr__(&self) -> String {
         "EqualsSubstitution(...)".to_string()
     }
+
+    /// Perform the substitution - evaluate both sides and compare
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let left_str = Self::perform_obj(&self.left, py, context)?;
+        let right_str = Self::perform_obj(&self.right, py, context)?;
+        Ok(if left_str == right_str {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string())
+    }
 }
 
 impl EqualsSubstitution {
@@ -694,6 +706,20 @@ impl EqualsSubstitution {
         }
 
         Ok(obj.to_string())
+    }
+
+    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+
+        // Try to call perform() if available
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+
+        // Fallback to __str__
+        Self::to_string(obj, py)
     }
 }
 
@@ -749,6 +775,18 @@ impl IfElseSubstitution {
     fn __repr__(&self) -> String {
         "IfElseSubstitution(...)".to_string()
     }
+
+    /// Perform the substitution - evaluate condition and return appropriate value
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let cond_val = Self::perform_bool(&self.condition, py, context)?;
+        let obj = if cond_val {
+            &self.if_value
+        } else {
+            &self.else_value
+        };
+
+        Self::perform_str(obj, py, context)
+    }
 }
 
 impl IfElseSubstitution {
@@ -768,6 +806,224 @@ impl IfElseSubstitution {
         }
 
         Ok(false)
+    }
+
+    fn perform_bool(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<bool> {
+        let obj_ref = obj.as_ref(py);
+
+        // Try to call perform() if available
+        let val_str = if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                result.extract::<String>()?
+            } else {
+                Self::to_string_fallback(obj, py)?
+            }
+        } else {
+            Self::to_string_fallback(obj, py)?
+        };
+
+        // Convert string to boolean
+        Ok(matches!(
+            val_str.to_lowercase().as_str(),
+            "true" | "1" | "yes"
+        ))
+    }
+
+    fn perform_str(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+
+        // Try to call perform() if available
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+
+        // Fallback to extract or __str__
+        Self::to_string_fallback(obj, py)
+    }
+
+    fn to_string_fallback(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+
+        Ok(obj.to_string())
+    }
+}
+
+/// Mock NotEqualsSubstitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import NotEqualsSubstitution
+/// not_equals_sub = NotEqualsSubstitution(left, right)
+/// ```
+///
+/// Returns true if two values are NOT equal
+#[pyclass]
+#[derive(Clone)]
+pub struct NotEqualsSubstitution {
+    left: PyObject,
+    right: PyObject,
+}
+
+#[pymethods]
+impl NotEqualsSubstitution {
+    #[new]
+    fn new(left: PyObject, right: PyObject) -> Self {
+        Self { left, right }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let left_str = Self::to_string(&self.left, py)?;
+        let right_str = Self::to_string(&self.right, py)?;
+        Ok(if left_str != right_str {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string())
+    }
+
+    fn __repr__(&self) -> String {
+        "NotEqualsSubstitution(...)".to_string()
+    }
+
+    /// Perform the substitution - evaluate both sides and compare
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let left_str = Self::perform_obj(&self.left, py, context)?;
+        let right_str = Self::perform_obj(&self.right, py, context)?;
+        Ok(if left_str != right_str {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string())
+    }
+}
+
+impl NotEqualsSubstitution {
+    fn to_string(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+
+        Ok(obj.to_string())
+    }
+
+    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+
+        // Try to call perform() if available
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+
+        // Fallback to __str__
+        Self::to_string(obj, py)
+    }
+}
+
+/// Mock FileContent substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import FileContent
+/// content = FileContent(PathJoinSubstitution([...]))
+/// ```
+///
+/// Reads file contents and returns as string
+#[pyclass]
+#[derive(Clone)]
+pub struct FileContent {
+    path: PyObject,
+}
+
+#[pymethods]
+impl FileContent {
+    #[new]
+    fn new(path: PyObject) -> Self {
+        Self { path }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        // Try to get the path as string
+        let path_str = if let Ok(s) = self.path.extract::<String>(py) {
+            s
+        } else if let Ok(str_result) = self.path.call_method0(py, "__str__") {
+            str_result.extract::<String>(py)?
+        } else {
+            return Ok(String::new());
+        };
+
+        // Read file contents
+        match std::fs::read_to_string(&path_str) {
+            Ok(content) => Ok(content),
+            Err(e) => {
+                log::warn!("FileContent: Failed to read file '{}': {}", path_str, e);
+                // Return empty string on error (graceful degradation)
+                Ok(String::new())
+            }
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        "FileContent(...)".to_string()
+    }
+
+    /// Perform the substitution - resolve path and read file contents
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let path_obj_ref = self.path.as_ref(py);
+
+        // Try to call perform() on the path if it has it (for substitutions)
+        let path_str = if path_obj_ref.hasattr("perform")? {
+            if let Ok(result) = path_obj_ref.call_method1("perform", (context,)) {
+                result.extract::<String>()?
+            } else {
+                // Fallback to __str__
+                path_obj_ref.call_method0("__str__")?.extract::<String>()?
+            }
+        } else if let Ok(s) = self.path.extract::<String>(py) {
+            s
+        } else {
+            // Fallback to __str__
+            path_obj_ref.call_method0("__str__")?.extract::<String>()?
+        };
+
+        log::debug!("FileContent: Reading file '{}'", path_str);
+
+        // Read file contents
+        match std::fs::read_to_string(&path_str) {
+            Ok(content) => {
+                log::debug!(
+                    "FileContent: Successfully read {} bytes from '{}'",
+                    content.len(),
+                    path_str
+                );
+                Ok(content)
+            }
+            Err(e) => {
+                log::warn!("FileContent: Failed to read file '{}': {}", path_str, e);
+                // Return empty string on error for graceful degradation
+                // This matches ROS 2 behavior where missing files don't crash the parser
+                Ok(String::new())
+            }
+        }
     }
 }
 

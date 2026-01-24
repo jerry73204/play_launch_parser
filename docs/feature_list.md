@@ -20,7 +20,7 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 279 tests passing (218 unit + 23 edge + 33 integration without Python, +5 with Python)
+- **Test Coverage**: 280 tests passing (218 unit + 23 edge + 33 integration without Python, +5 with Python)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
@@ -260,8 +260,8 @@ Comprehensive feature list for the play_launch_parser project.
 | Unit tests           | 218     | ✅     | 95%             |
 | Edge cases           | 23      | ✅     | Critical paths  |
 | Integration (XML)    | 28      | ✅     | End-to-end      |
-| Integration (Python) | 10      | ✅     | Python features |
-| **Total**            | **279** | **✅** | **95%**         |
+| Integration (Python) | 11      | ✅     | Python features |
+| **Total**            | **280** | **✅** | **95%**         |
 
 ### 8.2 Quality Checks ✅
 | Check           | Status | Notes      |
@@ -536,12 +536,12 @@ Comprehensive feature list for the play_launch_parser project.
 6. ✅ Container nodes NOT duplicated in regular node list
 
 ### 9.9 Current Outcomes ✅
-| Metric             | Session 10 | Session 12 | Session 14 | Notes                            |
-|--------------------|------------|------------|------------|----------------------------------|
-| Autoware coverage  | ~88%       | **100%**   | **100%**   | **planning_simulator complete**  |
-| Test count         | 249        | 260        | **279**    | **+5 namespace edge case tests** |
-| Python classes     | 30         | 30         | 30         | Complete for Autoware            |
-| Edge case fixtures | 0          | 4          | **9**      | **+5 namespace/utilities tests** |
+| Metric             | Session 10 | Session 12 | Session 14 | Notes                                 |
+|--------------------|------------|------------|------------|---------------------------------------|
+| Autoware coverage  | ~88%       | **100%**   | **100%**   | **planning_simulator complete**       |
+| Test count         | 249        | 260        | **280**    | **+1 conditional substitution test**  |
+| Python classes     | 30         | 30         | 30         | Complete for Autoware                 |
+| Edge case fixtures | 0          | 4          | **10**     | **+6 namespace/utilities/conditionals** |
 
 ---
 
@@ -733,16 +733,16 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `Command`                | ✅     | Medium   | XML $(command) implementation          |
 | `AnonName`               | ✅     | Medium   | XML $(anon) implementation             |
 | `BooleanSubstitution`    | ❌     | Low      | Boolean value substitution             |
-| `EqualsSubstitution`     | ❌     | Medium   | Equality comparison                    |
-| `FileContent`            | ❌     | Low      | Read file contents as substitution     |
+| `EqualsSubstitution`     | ✅     | Medium   | **Equality comparison (Session 14)**   |
+| `FileContent`            | ✅     | Low      | **Read file contents (Session 14)**    |
 | `FindExecutable`         | ❌     | Low      | Find executable in PATH                |
-| `IfElseSubstitution`     | ❌     | Medium   | Ternary conditional                    |
+| `IfElseSubstitution`     | ✅     | Medium   | **Ternary conditional (Session 14)**   |
 | `LaunchLogDir`           | ❌     | Low      | Launch log directory path              |
 | `LocalSubstitution`      | ❌     | Low      | Local variable scoping                 |
-| `NotEqualsSubstitution`  | ❌     | Low      | Inequality comparison                  |
+| `NotEqualsSubstitution`  | ✅     | Low      | **Inequality comparison (Session 14)** |
 | `ThisLaunchFile`         | ❌     | Low      | Full path to current launch file       |
 
-**Summary**: 8/17 implemented (47%)
+**Summary**: 12/17 implemented (71%)
 
 ### 14.3 launch_ros.actions
 
@@ -778,10 +778,10 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | Category                  | Implemented | Total | Percentage |
 |---------------------------|-------------|-------|------------|
 | launch.actions            | 10          | 24    | 42%        |
-| launch.substitutions      | 8           | 17    | 47%        |
+| launch.substitutions      | 12          | 17    | 71%        |
 | launch_ros.actions        | 5           | 11    | 45%        |
 | launch_ros.substitutions  | 1           | 4     | 25%        |
-| **Total**                 | **24**      | **56**| **43%**    |
+| **Total**                 | **28**      | **56**| **50%**    |
 
 **Note**: While only 43% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
 
@@ -827,9 +827,9 @@ This section documents ALL features from the official ROS 2 launch repositories,
 
 ### Test Coverage
 
-- **Total Tests**: 279 (100% passing)
+- **Total Tests**: 280 (100% passing)
   - Without Python: 218 lib tests, 23 edge cases, 28 integration tests (269 total)
-  - With Python: +10 integration tests (279 total)
+  - With Python: +11 integration tests (280 total)
 - **Code Coverage**: 95%
 
 ### Autoware Compatibility ✅

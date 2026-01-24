@@ -69,7 +69,9 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_subs.add_class::<substitutions::AndSubstitution>()?;
     launch_subs.add_class::<substitutions::OrSubstitution>()?;
     launch_subs.add_class::<substitutions::EqualsSubstitution>()?;
+    launch_subs.add_class::<substitutions::NotEqualsSubstitution>()?;
     launch_subs.add_class::<substitutions::IfElseSubstitution>()?;
+    launch_subs.add_class::<substitutions::FileContent>()?;
     launch_subs.add_class::<substitutions::AnonName>()?;
 
     // Create launch.conditions submodule

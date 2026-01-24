@@ -1269,3 +1269,124 @@ fn test_autoware_patterns_combined() {
         "Should have container in /system namespace from OpaqueFunction test"
     );
 }
+
+#[test]
+fn test_conditional_substitutions() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_conditional_substitutions.launch.py");
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse conditional substitutions test: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Get nodes
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 9, "Should have 9 nodes");
+
+    // Test EqualsSubstitution - mode == 'debug' -> true
+    let node_equals_true = nodes
+        .iter()
+        .find(|n| n["name"] == "node_equals_true")
+        .unwrap();
+    assert_eq!(
+        node_equals_true["namespace"].as_str().unwrap(),
+        "/true",
+        "EqualsSubstitution should return 'true' for matching values"
+    );
+
+    // Test EqualsSubstitution - mode == 'release' -> false
+    let node_equals_false = nodes
+        .iter()
+        .find(|n| n["name"] == "node_equals_false")
+        .unwrap();
+    assert_eq!(
+        node_equals_false["namespace"].as_str().unwrap(),
+        "/false",
+        "EqualsSubstitution should return 'false' for non-matching values"
+    );
+
+    // Test NotEqualsSubstitution - mode != 'release' -> true
+    let node_not_equals_true = nodes
+        .iter()
+        .find(|n| n["name"] == "node_not_equals_true")
+        .unwrap();
+    assert_eq!(
+        node_not_equals_true["namespace"].as_str().unwrap(),
+        "/true",
+        "NotEqualsSubstitution should return 'true' for non-matching values"
+    );
+
+    // Test NotEqualsSubstitution - mode != 'debug' -> false
+    let node_not_equals_false = nodes
+        .iter()
+        .find(|n| n["name"] == "node_not_equals_false")
+        .unwrap();
+    assert_eq!(
+        node_not_equals_false["namespace"].as_str().unwrap(),
+        "/false",
+        "NotEqualsSubstitution should return 'false' for matching values"
+    );
+
+    // Test IfElseSubstitution - if mode == 'debug' then '/debug_ns' else '/release_ns'
+    let node_ifelse_true = nodes
+        .iter()
+        .find(|n| n["name"] == "node_ifelse_true")
+        .unwrap();
+    assert_eq!(
+        node_ifelse_true["namespace"].as_str().unwrap(),
+        "/debug_ns",
+        "IfElseSubstitution should return if_value when condition is true"
+    );
+
+    // Test IfElseSubstitution with enable_feature
+    let node_ifelse_with_config = nodes
+        .iter()
+        .find(|n| n["name"] == "node_ifelse_with_config")
+        .unwrap();
+    assert_eq!(
+        node_ifelse_with_config["namespace"].as_str().unwrap(),
+        "/enabled",
+        "IfElseSubstitution should evaluate LaunchConfiguration in condition"
+    );
+
+    // Test nested IfElseSubstitution
+    let node_nested_ifelse = nodes
+        .iter()
+        .find(|n| n["name"] == "node_nested_ifelse")
+        .unwrap();
+    assert_eq!(
+        node_nested_ifelse["namespace"].as_str().unwrap(),
+        "/debug_enabled",
+        "Nested IfElseSubstitution should work correctly (mode==debug and enable_feature==true)"
+    );
+
+    // Test FileContent with simple path
+    let node_file_content_simple = nodes
+        .iter()
+        .find(|n| n["name"] == "node_file_content_simple")
+        .unwrap();
+    assert_eq!(
+        node_file_content_simple["namespace"].as_str().unwrap(),
+        "/file_content_namespace",
+        "FileContent should read file contents"
+    );
+
+    // Test FileContent with PathJoinSubstitution
+    let node_file_content_path_join = nodes
+        .iter()
+        .find(|n| n["name"] == "node_file_content_path_join")
+        .unwrap();
+    assert_eq!(
+        node_file_content_path_join["namespace"].as_str().unwrap(),
+        "/config_namespace",
+        "FileContent should work with PathJoinSubstitution"
+    );
+}
