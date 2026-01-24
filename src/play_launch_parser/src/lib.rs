@@ -373,8 +373,8 @@ impl LaunchTraverser {
     ) -> Result<()> {
         log::info!("Including XML launch file: {}", resolved_path.display());
 
-        // Create a new context for the included file
-        let mut include_context = self.context.clone();
+        // Create a new context for the included file (O(1) with Arc, not O(n) clone!)
+        let mut include_context = self.context.child();
         include_context.set_current_file(resolved_path.to_path_buf());
 
         // Apply include arguments
@@ -482,9 +482,9 @@ impl LaunchTraverser {
             }
         }
 
-        // Create a new context for the included file
+        // Create a new context for the included file (O(1) with Arc, not O(n) clone!)
         // Start with current context and apply include args
-        let mut include_context = self.context.clone();
+        let mut include_context = self.context.child();
         include_context.set_current_file(resolved_path.clone());
         for (key, value) in &include.args {
             // IMPORTANT: Resolve substitutions in the argument value using the include_context

@@ -5,6 +5,7 @@ use crate::substitution::types::{resolve_substitutions, Substitution};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Maximum recursion depth for variable resolution to prevent stack overflow
 const MAX_RESOLUTION_DEPTH: usize = 20;
@@ -23,30 +24,78 @@ pub struct ArgumentMetadata {
     pub choices: Option<Vec<String>>,
 }
 
-/// Launch context holding configurations and state
+/// Frozen parent scope - immutable, shared via Arc
+/// Used to create a scope chain without expensive cloning
 #[derive(Debug, Clone)]
-pub struct LaunchContext {
-    /// Store configurations as parsed substitutions for lazy evaluation
+struct ParentScope {
     configurations: HashMap<String, Vec<Substitution>>,
-    current_file: Option<PathBuf>,
-    namespace_stack: Vec<String>,
     environment: HashMap<String, String>,
     declared_arguments: HashMap<String, ArgumentMetadata>,
     global_parameters: HashMap<String, String>,
-    /// Global topic remappings (from -> to)
     remappings: Vec<(String, String)>,
+    /// Chain to grandparent scope
+    parent: Option<Arc<ParentScope>>,
+}
+
+/// Launch context holding configurations and state
+/// Uses hybrid Arc + Local pattern: parent scope is shared (Arc), local scope is owned
+/// This makes child context creation O(1) instead of O(n)
+#[derive(Debug, Clone)]
+pub struct LaunchContext {
+    /// Parent scope (shared, immutable via Arc)
+    parent: Option<Arc<ParentScope>>,
+
+    /// Local scope (owned, mutable, initially empty for children)
+    /// Store configurations as parsed substitutions for lazy evaluation
+    local_configurations: HashMap<String, Vec<Substitution>>,
+    local_environment: HashMap<String, String>,
+    local_declared_arguments: HashMap<String, ArgumentMetadata>,
+    local_global_parameters: HashMap<String, String>,
+    /// Local topic remappings (from -> to)
+    local_remappings: Vec<(String, String)>,
+
+    /// Always local (not inherited)
+    current_file: Option<PathBuf>,
+    namespace_stack: Vec<String>,
 }
 
 impl LaunchContext {
     pub fn new() -> Self {
         Self {
-            configurations: HashMap::new(),
+            parent: None,
+            local_configurations: HashMap::new(),
+            local_environment: HashMap::new(),
+            local_declared_arguments: HashMap::new(),
+            local_global_parameters: HashMap::new(),
+            local_remappings: Vec::new(),
             current_file: None,
             namespace_stack: vec!["/".to_string()], // Start with root namespace
-            environment: HashMap::new(),
-            declared_arguments: HashMap::new(),
-            global_parameters: HashMap::new(),
-            remappings: Vec::new(),
+        }
+    }
+
+    /// Create a child context with current scope frozen as parent
+    /// This is O(1) for Arc clone vs O(n) for full HashMap clone
+    /// Enables efficient scope chaining for includes
+    pub fn child(&self) -> Self {
+        // Freeze current local scope and make it the parent
+        let parent = ParentScope {
+            configurations: self.local_configurations.clone(),
+            environment: self.local_environment.clone(),
+            declared_arguments: self.local_declared_arguments.clone(),
+            global_parameters: self.local_global_parameters.clone(),
+            remappings: self.local_remappings.clone(),
+            parent: self.parent.clone(), // Arc clone - cheap!
+        };
+
+        Self {
+            parent: Some(Arc::new(parent)),
+            local_configurations: HashMap::new(), // Empty local scope
+            local_environment: HashMap::new(),
+            local_declared_arguments: HashMap::new(),
+            local_global_parameters: HashMap::new(),
+            local_remappings: Vec::new(),
+            current_file: None,
+            namespace_stack: self.namespace_stack.clone(), // Small vec, acceptable to clone
         }
     }
 
@@ -74,15 +123,16 @@ impl LaunchContext {
 
     /// Set a configuration value by parsing it as substitutions
     /// This allows variables to contain nested substitutions that are resolved lazily
+    /// Always modifies local scope only (doesn't affect parent)
     pub fn set_configuration(&mut self, name: String, value: String) {
         // Parse the value as substitutions
         match parse_substitutions(&value) {
             Ok(subs) => {
-                self.configurations.insert(name, subs);
+                self.local_configurations.insert(name, subs);
             }
             Err(_) => {
                 // If parsing fails, store as literal text
-                self.configurations
+                self.local_configurations
                     .insert(name, vec![Substitution::Text(value)]);
             }
         }
@@ -91,13 +141,23 @@ impl LaunchContext {
     /// Get a configuration value by resolving its stored substitutions
     /// This resolves any nested substitutions at reference time
     /// If resolution fails, returns None (variable exists but can't be resolved)
+    /// Walks parent chain: local first, then parent, then grandparent, etc.
     pub fn get_configuration(&self, name: &str) -> Option<String> {
-        self.configurations.get(name).and_then(|subs| {
-            // Try to resolve the substitutions in the context of the current state
-            // If resolution fails (e.g., package not found), return None
-            // This allows the caller to handle the error appropriately
-            resolve_substitutions(subs, self).ok()
-        })
+        // 1. Check local scope first (fast path - O(1))
+        if let Some(subs) = self.local_configurations.get(name) {
+            return resolve_substitutions(subs, self).ok();
+        }
+
+        // 2. Walk parent chain (depth ~5-10 for Autoware)
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            if let Some(subs) = parent.configurations.get(name) {
+                return resolve_substitutions(subs, self).ok();
+            }
+            current = &parent.parent;
+        }
+
+        None
     }
 
     /// Get a configuration value by resolving its substitutions, with fallback
@@ -107,111 +167,312 @@ impl LaunchContext {
     ///
     /// To prevent infinite recursion from circular references, this uses a
     /// resolution depth tracker stored in thread-local storage
+    /// Walks parent chain: local first, then parent, then grandparent, etc.
     pub fn get_configuration_lenient(&self, name: &str) -> Option<String> {
-        self.configurations.get(name).map(|subs| {
-            // Check recursion depth to prevent stack overflow from circular references
-            RESOLUTION_DEPTH.with(|depth| {
+        // 1. Check local scope first
+        if let Some(subs) = self.local_configurations.get(name) {
+            return Some(RESOLUTION_DEPTH.with(|depth| {
                 let current = depth.get();
                 if current >= MAX_RESOLUTION_DEPTH {
-                    // Circular reference detected or too deep nesting
-                    // Return the unresolved string
                     return reconstruct_substitution_string(subs);
                 }
-
-                // Increment depth
                 depth.set(current + 1);
-
-                // Try to resolve substitutions
-                let result = resolve_substitutions(subs, self).unwrap_or_else(|_| {
-                    // If resolution fails, reconstruct the original string
-                    // This preserves unresolved substitutions like $(find-pkg-share pkg)
-                    reconstruct_substitution_string(subs)
-                });
-
-                // Decrement depth
+                let result = resolve_substitutions(subs, self)
+                    .unwrap_or_else(|_| reconstruct_substitution_string(subs));
                 depth.set(current);
-
                 result
-            })
-        })
+            }));
+        }
+
+        // 2. Walk parent chain
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            if let Some(subs) = parent.configurations.get(name) {
+                return Some(RESOLUTION_DEPTH.with(|depth| {
+                    let current_depth = depth.get();
+                    if current_depth >= MAX_RESOLUTION_DEPTH {
+                        return reconstruct_substitution_string(subs);
+                    }
+                    depth.set(current_depth + 1);
+                    let result = resolve_substitutions(subs, self)
+                        .unwrap_or_else(|_| reconstruct_substitution_string(subs));
+                    depth.set(current_depth);
+                    result
+                }));
+            }
+            current = &parent.parent;
+        }
+
+        None
     }
 
     /// Get the raw substitutions for a configuration (for debugging/testing)
+    /// Walks parent chain: local first, then parent, then grandparent, etc.
     pub fn get_configuration_raw(&self, name: &str) -> Option<&Vec<Substitution>> {
-        self.configurations.get(name)
+        // 1. Check local scope first
+        if let Some(subs) = self.local_configurations.get(name) {
+            return Some(subs);
+        }
+
+        // 2. Walk parent chain
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            if let Some(subs) = parent.configurations.get(name) {
+                return Some(subs);
+            }
+            current = &parent.parent;
+        }
+
+        None
     }
 
     pub fn configurations(&self) -> HashMap<String, String> {
-        // Return resolved configurations
+        // Return resolved configurations from entire scope chain
+        // Walk from root to local, so local values override parent values
         let mut resolved = HashMap::new();
-        for (key, subs) in &self.configurations {
+
+        // 1. Collect all parent scopes into a vec (to iterate from root to child)
+        let mut scopes = Vec::new();
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            scopes.push(parent);
+            current = &parent.parent;
+        }
+
+        // 2. Apply parent scopes from root to immediate parent
+        for parent in scopes.iter().rev() {
+            for (key, subs) in &parent.configurations {
+                if let Ok(value) = resolve_substitutions(subs, self) {
+                    resolved.insert(key.clone(), value);
+                }
+            }
+        }
+
+        // 3. Apply local scope (overrides parent)
+        for (key, subs) in &self.local_configurations {
             if let Ok(value) = resolve_substitutions(subs, self) {
                 resolved.insert(key.clone(), value);
             }
         }
+
         resolved
     }
 
+    /// Set environment variable in local scope only
     pub fn set_environment_variable(&mut self, name: String, value: String) {
-        self.environment.insert(name, value);
+        self.local_environment.insert(name, value);
     }
 
+    /// Unset environment variable in local scope only
     pub fn unset_environment_variable(&mut self, name: &str) {
-        self.environment.remove(name);
+        self.local_environment.remove(name);
     }
 
+    /// Get environment variable, walking parent chain
     pub fn get_environment_variable(&self, name: &str) -> Option<String> {
-        self.environment.get(name).cloned()
+        // 1. Check local scope first
+        if let Some(value) = self.local_environment.get(name) {
+            return Some(value.clone());
+        }
+
+        // 2. Walk parent chain
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            if let Some(value) = parent.environment.get(name) {
+                return Some(value.clone());
+            }
+            current = &parent.parent;
+        }
+
+        None
     }
 
-    pub fn environment(&self) -> &HashMap<String, String> {
-        &self.environment
+    /// Get all environment variables from entire scope chain
+    pub fn environment(&self) -> HashMap<String, String> {
+        // Walk from root to local, so local values override parent values
+        let mut result = HashMap::new();
+
+        // 1. Collect all parent scopes
+        let mut scopes = Vec::new();
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            scopes.push(parent);
+            current = &parent.parent;
+        }
+
+        // 2. Apply parent scopes from root to immediate parent
+        for parent in scopes.iter().rev() {
+            result.extend(
+                parent
+                    .environment
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
+        }
+
+        // 3. Apply local scope (overrides parent)
+        result.extend(
+            self.local_environment
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+
+        result
     }
 
-    /// Add a global topic remapping
+    /// Add a global topic remapping to local scope
     pub fn add_remapping(&mut self, from: String, to: String) {
-        self.remappings.push((from, to));
+        self.local_remappings.push((from, to));
     }
 
-    /// Get all global remappings
-    pub fn remappings(&self) -> &[(String, String)] {
-        &self.remappings
+    /// Get all global remappings from entire scope chain
+    pub fn remappings(&self) -> Vec<(String, String)> {
+        // Collect remappings from parent chain, then local
+        let mut result = Vec::new();
+
+        // 1. Collect all parent scopes
+        let mut scopes = Vec::new();
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            scopes.push(parent);
+            current = &parent.parent;
+        }
+
+        // 2. Apply parent remappings from root to immediate parent
+        for parent in scopes.iter().rev() {
+            result.extend_from_slice(&parent.remappings);
+        }
+
+        // 3. Apply local remappings
+        result.extend_from_slice(&self.local_remappings);
+
+        result
     }
 
-    /// Get current count of remappings (for scope restoration)
+    /// Get current count of local remappings (for scope restoration)
     pub fn remapping_count(&self) -> usize {
-        self.remappings.len()
+        self.local_remappings.len()
     }
 
-    /// Restore remappings to a specific count
+    /// Restore local remappings to a specific count
     /// Used to clean up all remappings added within a scope (e.g., group)
     pub fn restore_remapping_count(&mut self, count: usize) {
-        self.remappings.truncate(count);
+        self.local_remappings.truncate(count);
     }
 
+    /// Declare argument in local scope only
     pub fn declare_argument(&mut self, metadata: ArgumentMetadata) {
-        self.declared_arguments
+        self.local_declared_arguments
             .insert(metadata.name.clone(), metadata);
     }
 
+    /// Get argument metadata, walking parent chain
     pub fn get_argument_metadata(&self, name: &str) -> Option<&ArgumentMetadata> {
-        self.declared_arguments.get(name)
+        // 1. Check local scope first
+        if let Some(metadata) = self.local_declared_arguments.get(name) {
+            return Some(metadata);
+        }
+
+        // 2. Walk parent chain
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            if let Some(metadata) = parent.declared_arguments.get(name) {
+                return Some(metadata);
+            }
+            current = &parent.parent;
+        }
+
+        None
     }
 
-    pub fn declared_arguments(&self) -> &HashMap<String, ArgumentMetadata> {
-        &self.declared_arguments
+    /// Get all declared arguments from entire scope chain
+    pub fn declared_arguments(&self) -> HashMap<String, ArgumentMetadata> {
+        // Walk from root to local, so local values override parent values
+        let mut result = HashMap::new();
+
+        // 1. Collect all parent scopes
+        let mut scopes = Vec::new();
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            scopes.push(parent);
+            current = &parent.parent;
+        }
+
+        // 2. Apply parent scopes from root to immediate parent
+        for parent in scopes.iter().rev() {
+            result.extend(
+                parent
+                    .declared_arguments
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
+        }
+
+        // 3. Apply local scope (overrides parent)
+        result.extend(
+            self.local_declared_arguments
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+
+        result
     }
 
+    /// Set global parameter in local scope only
     pub fn set_global_parameter(&mut self, name: String, value: String) {
-        self.global_parameters.insert(name, value);
+        self.local_global_parameters.insert(name, value);
     }
 
+    /// Get global parameter, walking parent chain
     pub fn get_global_parameter(&self, name: &str) -> Option<String> {
-        self.global_parameters.get(name).cloned()
+        // 1. Check local scope first
+        if let Some(value) = self.local_global_parameters.get(name) {
+            return Some(value.clone());
+        }
+
+        // 2. Walk parent chain
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            if let Some(value) = parent.global_parameters.get(name) {
+                return Some(value.clone());
+            }
+            current = &parent.parent;
+        }
+
+        None
     }
 
-    pub fn global_parameters(&self) -> &HashMap<String, String> {
-        &self.global_parameters
+    /// Get all global parameters from entire scope chain
+    pub fn global_parameters(&self) -> HashMap<String, String> {
+        // Walk from root to local, so local values override parent values
+        let mut result = HashMap::new();
+
+        // 1. Collect all parent scopes
+        let mut scopes = Vec::new();
+        let mut current = &self.parent;
+        while let Some(parent) = current {
+            scopes.push(parent);
+            current = &parent.parent;
+        }
+
+        // 2. Apply parent scopes from root to immediate parent
+        for parent in scopes.iter().rev() {
+            result.extend(
+                parent
+                    .global_parameters
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
+        }
+
+        // 3. Apply local scope (overrides parent)
+        result.extend(
+            self.local_global_parameters
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+
+        result
     }
 
     /// Push a namespace onto the stack
