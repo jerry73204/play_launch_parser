@@ -10,8 +10,10 @@ tests/
 │   ├── launch/         # Main test launch files
 │   └── includes/       # Launch files to be included by other launch files
 ├── autoware_test/      # Autoware-specific testing
-│   ├── autoware/       # Symlink to Autoware workspace
 │   ├── scripts/        # Test and comparison scripts
+│   │   ├── activate_autoware.sh          # User-specific workspace activation (git-ignored)
+│   │   ├── activate_autoware.sh.template # Template for activation script
+│   │   └── compare_rust_python.py        # Autoware comparison script
 │   └── output/         # Test output files
 ├── comparison_tests/   # Rust vs Python comparison tests
 │   ├── compare_rust_python.py  # Main comparison script
@@ -112,20 +114,40 @@ The `autoware_test/` directory contains Autoware-specific test scripts and outpu
 
 ### Setup
 
-The directory includes a symlink `autoware/` pointing to an Autoware workspace. This allows tests to reference Autoware launch files using relative paths.
+Create an activation script to point to your Autoware workspace:
+
+```bash
+cd tests/autoware_test/scripts
+cp activate_autoware.sh.template activate_autoware.sh
+# Edit activate_autoware.sh to point to your Autoware workspace
+```
+
+Example `activate_autoware.sh` content:
+```bash
+#!/usr/bin/env bash
+source /path/to/your/autoware/workspace/install/setup.bash
+```
+
+**Note:** The `activate_autoware.sh` file is git-ignored since it contains user-specific paths.
 
 ### Scripts
 
-- **scripts/compare_rust_python.py** - Same comparison tool, works with autoware/ paths
-- **scripts/test_parse.sh** - Parse Autoware launch files
+- **scripts/compare_rust_python.py** - Comparison tool that validates Rust parser against Python dump_launch
+- **scripts/activate_autoware.sh.template** - Template for workspace activation script
 - **scripts/benchmark.sh** - Performance benchmarking
 
 ### Usage
 
 ```bash
-# Parse Autoware launch file
+# Run default test (planning_simulator.launch.xml)
+just test-autoware
+
+# Or run comparison directly
 cd tests/autoware_test/scripts
-python3 compare_rust_python.py autoware/src/launcher/autoware_launch/autoware_launch/launch/planning_simulator.launch.xml
+python3 compare_rust_python.py
+
+# Test specific launch file
+python3 compare_rust_python.py /path/to/launch/file.launch.xml
 ```
 
 See `autoware_test/README.md` for more details.

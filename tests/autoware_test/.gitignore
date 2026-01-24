@@ -4,4 +4,4 @@ output/
 *.log
 
 # Ignore Autoware symlink (user-specific)
-autoware
+/scripts/activate_autoware.sh

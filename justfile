@@ -163,9 +163,12 @@ test-autoware:
     set -e
     cd tests/autoware_test/scripts
 
-    if [ ! -L "../autoware" ]; then
-        echo "ERROR: Autoware symlink not found"
-        echo "Create symlink: cd tests/autoware_test && ln -s /path/to/autoware autoware"
+    if [ ! -f "activate_autoware.sh" ]; then
+        echo "ERROR: activate_autoware.sh script not found"
+        echo "Create script: tests/autoware_test/scripts/activate_autoware.sh"
+        echo "Example content:"
+        echo "  #!/usr/bin/env bash"
+        echo "  source /path/to/your/autoware/workspace/install/setup.bash"
         exit 1
     fi
 

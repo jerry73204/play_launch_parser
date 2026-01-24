@@ -35,6 +35,41 @@ class Colors:
     BOLD = '\033[1m'
     END = '\033[0m'
 
+def get_autoware_launch_file(activate_script: Path) -> Path | None:
+    """Find autoware_launch package and return path to planning_simulator.launch.xml.
+
+    Uses ROS 2 to locate the package after sourcing the activation script.
+    """
+    if not activate_script.exists():
+        return None
+
+    # Use ros2 pkg prefix to find the autoware_launch package
+    # Redirect activation messages to /dev/null and only capture ros2 command output
+    cmd = [
+        "bash", "-c",
+        f"source /opt/ros/humble/setup.bash >/dev/null 2>&1; "
+        f"source {activate_script} >/dev/null 2>&1; "
+        f"ros2 pkg prefix autoware_launch 2>/dev/null"
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0 and result.stdout.strip():
+            # Take the last line in case there are multiple lines
+            pkg_prefix = Path(result.stdout.strip().split('\n')[-1])
+            # Try common launch file locations
+            candidates = [
+                pkg_prefix / "share" / "autoware_launch" / "launch" / "planning_simulator.launch.xml",
+                pkg_prefix / "launch" / "planning_simulator.launch.xml",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    return candidate
+    except (subprocess.TimeoutExpired, Exception):
+        pass
+
+    return None
+
 def get_paths(profile: str = "dev-release"):
     """Get important paths relative to script location."""
     script_dir = Path(__file__).parent
@@ -43,27 +78,22 @@ def get_paths(profile: str = "dev-release"):
     if 'autoware_test' in str(script_dir):
         test_dir = script_dir.parent
         project_root = test_dir.parent.parent
-        autoware_symlink = test_dir / "autoware"
     else:
         # In comparison_tests or tmp
         project_root = script_dir.parent.parent
-        autoware_symlink = project_root / "tests" / "autoware_test" / "autoware"
+        script_dir = project_root / "tests" / "autoware_test" / "scripts"
 
     # Rust binary location based on profile
     rust_bin = project_root / "target" / profile / "play_launch_parser"
 
-    # Resolve autoware path from symlink if it exists
-    if autoware_symlink.exists() and autoware_symlink.is_symlink():
-        autoware_ws = autoware_symlink.resolve()
-    else:
-        # No autoware symlink found - user will need to provide full paths
-        autoware_ws = None
+    # Check for activation script
+    activate_script = script_dir / "activate_autoware.sh"
 
     return {
         'script_dir': script_dir,
         'project_root': project_root,
         'rust_bin': rust_bin,
-        'autoware_ws': autoware_ws,
+        'activate_script': activate_script if activate_script.exists() else None,
     }
 
 def get_default_args_for_launch_file(launch_file: Path) -> Dict[str, str]:
@@ -96,11 +126,11 @@ def run_rust_parser(launch_file: Path, paths: Dict, extra_args: Dict[str, str] =
         print(f"Run: cargo build --profile {rust_bin.parent.name}")
         sys.exit(1)
 
-    autoware_ws = paths['autoware_ws']
+    activate_script = paths.get('activate_script')
 
-    # Build source command based on whether autoware_ws is available
-    if autoware_ws:
-        source_cmd = f"source /opt/ros/humble/setup.bash 2>/dev/null; source {autoware_ws}/install/setup.bash 2>/dev/null; "
+    # Build source command using activate script if available
+    if activate_script and activate_script.exists():
+        source_cmd = f"source /opt/ros/humble/setup.bash 2>/dev/null; source {activate_script} 2>/dev/null; "
     else:
         source_cmd = "source /opt/ros/humble/setup.bash 2>/dev/null; "
 
@@ -155,7 +185,7 @@ def run_python_dump(launch_file: Path, paths: Dict, extra_args: Dict[str, str] =
     # Write Python output to tmp file
     python_output = Path("/tmp/python_dump_output.json")
 
-    autoware_ws = paths['autoware_ws']
+    activate_script = paths.get('activate_script')
 
     # Try to find play_launch module - check common locations relative to project
     project_root = paths['project_root']
@@ -177,9 +207,9 @@ def run_python_dump(launch_file: Path, paths: Dict, extra_args: Dict[str, str] =
             print(f"  - {dir_path}")
         return None
 
-    # Build source command based on whether autoware_ws is available
-    if autoware_ws:
-        source_cmd = f"source /opt/ros/humble/setup.bash 2>/dev/null; source {autoware_ws}/install/setup.bash 2>/dev/null; "
+    # Build source command using activate script if available
+    if activate_script and activate_script.exists():
+        source_cmd = f"source /opt/ros/humble/setup.bash 2>/dev/null; source {activate_script} 2>/dev/null; "
     else:
         source_cmd = "source /opt/ros/humble/setup.bash 2>/dev/null; "
 
@@ -450,34 +480,25 @@ Examples:
                 launch_file = (paths['script_dir'] / launch_file).resolve()
     else:
         # No argument provided - use default Autoware launch file
-        if paths['autoware_ws'] is None:
-            print(f"{Colors.RED}Error: No autoware symlink found{Colors.END}")
-            print(f"\nCreate a symlink in tests/autoware_test:")
-            print(f"  cd tests/autoware_test")
-            print(f"  ln -s /path/to/autoware/workspace autoware")
+        if paths['activate_script'] is None:
+            print(f"{Colors.RED}Error: activate_autoware.sh not found{Colors.END}")
+            print(f"\nCreate activation script:")
+            print(f"  cd tests/autoware_test/scripts")
+            print(f"  cp activate_autoware.sh.template activate_autoware.sh")
+            print(f"  # Edit activate_autoware.sh to source your Autoware workspace")
             print(f"\nOr provide a launch file:")
             print(f"  {sys.argv[0]} <launch_file>")
             sys.exit(1)
 
-        # Try common Autoware launch files
-        default_files = [
-            'src/launcher/autoware_launch/autoware_launch/launch/planning_simulator.launch.xml',
-            'src/launcher/autoware_launch/autoware_launch/launch/autoware.launch.xml',
-        ]
-
-        launch_file = None
-        for rel_path in default_files:
-            candidate = paths['autoware_ws'] / rel_path
-            if candidate.exists():
-                launch_file = candidate
-                break
+        # Use ROS 2 to find autoware_launch package
+        launch_file = get_autoware_launch_file(paths['activate_script'])
 
         if launch_file is None:
-            print(f"{Colors.RED}Error: Could not find default Autoware launch file{Colors.END}")
-            print(f"\nTried:")
-            for rel_path in default_files:
-                print(f"  - {paths['autoware_ws'] / rel_path}")
-            print(f"\nProvide a launch file:")
+            print(f"{Colors.RED}Error: Could not find autoware_launch package{Colors.END}")
+            print(f"\nMake sure:")
+            print(f"  1. activate_autoware.sh sources a valid Autoware workspace")
+            print(f"  2. autoware_launch package is installed")
+            print(f"\nOr provide a launch file:")
             print(f"  {sys.argv[0]} <launch_file>")
             sys.exit(1)
 

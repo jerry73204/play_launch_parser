@@ -11,13 +11,19 @@ Tests the Rust `play_launch_parser` against Autoware's production launch files t
 
 ## Setup
 
-1. **Create the autoware symlink** pointing to your Autoware workspace:
+1. **Create an activation script** to source your Autoware workspace:
    ```bash
-   cd tests/autoware_test
-   ln -s /path/to/your/autoware autoware
+   cd tests/autoware_test/scripts
+   cp activate_autoware.sh.template activate_autoware.sh
    ```
 
-   The symlink should point to a built Autoware workspace (e.g., `/home/aeon/repos/autoware/2025.02-ws`).
+   Edit `activate_autoware.sh` to source your Autoware workspace setup.bash:
+   ```bash
+   #!/usr/bin/env bash
+   source /path/to/your/autoware/workspace/install/setup.bash
+   ```
+
+   **Note:** This file is git-ignored since it contains user-specific paths.
 
 2. **Ensure Python dump_launch is available** (for comparison):
    ```bash
@@ -29,16 +35,16 @@ Tests the Rust `play_launch_parser` against Autoware's production launch files t
 
 ```
 tests/autoware_test/
-├── README.md                # This file
-├── autoware                 # Symlink to Autoware workspace
+├── README.md                        # This file
 ├── scripts/
-│   ├── test_parse.sh       # Test Rust parser against Autoware launch file
-│   ├── compare_outputs.py  # Compare Rust vs Python output
-│   └── benchmark.sh        # Performance benchmarking
-└── output/                 # Generated test outputs (gitignored)
-    ├── rust_output.json    # Rust parser output
-    ├── python_output.json  # Python dump_launch output
-    └── comparison.txt      # Diff results
+│   ├── activate_autoware.sh         # User-specific workspace activation (git-ignored)
+│   ├── activate_autoware.sh.template # Template for activation script
+│   ├── compare_rust_python.py       # Compare Rust vs Python parser outputs
+│   └── benchmark.sh                 # Performance benchmarking
+└── output/                          # Generated test outputs (gitignored)
+    ├── rust_output.json             # Rust parser output
+    ├── python_output.json           # Python dump_launch output
+    └── comparison.txt               # Diff results
 ```
 
 ## Usage
@@ -63,8 +69,8 @@ This will automatically:
 # Test with a specific launch file
 ./compare_rust_python.py /path/to/test.launch.xml
 
-# Test with a different Autoware launch file
-./compare_rust_python.py autoware/src/launcher/autoware_launch/autoware_launch/launch/autoware.launch.xml
+# Test with a different Autoware launch file (uses absolute path)
+./compare_rust_python.py /path/to/autoware/workspace/src/launcher/autoware_launch/autoware_launch/launch/autoware.launch.xml
 ```
 
 ## Test Files
