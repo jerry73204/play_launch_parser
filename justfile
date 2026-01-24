@@ -1,3 +1,6 @@
+# Default cargo profile for builds and tests
+cargo_profile := "dev-release"
+
 # Detect ROS2 distro based on Ubuntu version
 ros_distro := if `lsb_release -rs 2>/dev/null || echo "22.04"` == "24.04" { "jazzy" } else { "humble" }
 colcon_flags := "--symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release --cargo-args --release"
@@ -6,7 +9,7 @@ colcon_flags := "--symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release --car
 default:
     @just --list
 
-# Install all dependencies
+# Install all dependencies (rosdep + colcon-cargo-ros2)
 install-deps:
     #!/usr/bin/env bash
     set -e
@@ -18,14 +21,21 @@ install-deps:
     rosdep update
     rosdep install --from-paths src --ignore-src -r -y
 
+# Build all packages (Rust + colcon)
+build: build-rust build-colcon
+
 # Build all packages with colcon
-build:
+build-colcon:
     #!/usr/bin/env bash
     set -e
     source /opt/ros/{{ros_distro}}/setup.bash
 
     echo "Building packages with colcon..."
-    colcon build {{colcon_flags}} --base-paths src
+    colcon build {{colcon_flags}} --base-paths src --cargo-args --profile {{cargo_profile}}
+
+# Build Rust packages only
+build-rust:
+	cargo build --all-targets --profile {{cargo_profile}}
 
 # Run all tests (Rust + comparison + Autoware if available)
 test:
@@ -62,19 +72,9 @@ test:
     echo "✓ All tests passed!"
     echo "========================================="
 
-# Run Rust unit tests (260 tests: 218 unit + 18 edge + 20 XML + 15 Python + 3 perf)
+# Run Rust unit tests (274 tests with nextest)
 test-rust:
-    #!/usr/bin/env bash
-    set -e
-
-    echo "Running Rust unit tests..."
-    find src -name "Cargo.toml" -not -path "*/target/*" | while read cargo_toml; do
-        dir=$(dirname "$cargo_toml")
-        echo "Testing $dir..."
-        (cd "$dir" && cargo test --all-features)
-    done
-
-    echo "✓ All Rust tests passed!"
+	cargo nextest run --cargo-profile {{cargo_profile}} --no-fail-fast
 
 # Run colcon tests (ROS 2 integration tests)
 test-colcon:
@@ -93,20 +93,12 @@ test-compare:
     cd tests/comparison_tests
     ./run_tests.sh
 
-# Run linters and formatters
+# Run linters and formatters (clippy + rustfmt check)
 check:
     #!/usr/bin/env bash
     set -e
-
-    echo "Running Rust checks..."
-    find src -name "Cargo.toml" -not -path "*/target/*" | while read cargo_toml; do
-        dir=$(dirname "$cargo_toml")
-        echo "Checking $dir..."
-        (cd "$dir" && cargo clippy --all-targets --all-features -- -D warnings)
-        (cd "$dir" && cargo fmt -- --check)
-    done
-
-    echo "All checks passed!"
+    cargo +nightly fmt -- --check
+    cargo clippy --profile {{cargo_profile}} --all-targets -- -D warnings
 
 # Run quality checks (linters + Rust tests)
 quality: check test-rust
@@ -115,26 +107,13 @@ quality: check test-rust
     @echo "✓ All quality checks passed!"
     @echo "========================================="
 
-# Format all code
+# Format all code with rustfmt
 format:
-    #!/usr/bin/env bash
-    set -e
-
-    echo "Formatting Rust code..."
-    find src -name "Cargo.toml" -not -path "*/target/*" | while read cargo_toml; do
-        dir=$(dirname "$cargo_toml")
-        (cd "$dir" && cargo fmt)
-    done
-
-    echo "Code formatted!"
+    cargo +nightly fmt
 
 # Clean all build artifacts
 clean:
-    rm -rf build install log
-
-# Clean everything including Cargo artifacts
-clean-all: clean
-    find src -type d -name "target" -not -path "*/build/*" -exec rm -rf {} + 2>/dev/null || true
+    rm -rf build install log target
 
 # List ROS 2 packages in workspace
 list-packages:
@@ -158,7 +137,7 @@ download-demos:
     cd ..
     echo "Run 'just build' to compile the demos"
 
-# Compare parser output with dump_launch
+# Compare parser output with dump_launch (Python vs Rust)
 compare-output PACKAGE LAUNCH_FILE:
     #!/usr/bin/env bash
     set -e
@@ -178,7 +157,7 @@ compare-output PACKAGE LAUNCH_FILE:
     # diff -u record_python.json record_rust.json
     echo "Parser not yet implemented"
 
-# Test Rust parser with Autoware launch file (requires Autoware)
+# Test Rust parser with Autoware launch files
 test-autoware:
     #!/usr/bin/env bash
     set -e
