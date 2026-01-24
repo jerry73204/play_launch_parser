@@ -1,10 +1,9 @@
 use play_launch_parser::parse_launch_file;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 #[cfg(feature = "python")]
-use std::sync::MutexGuard;
+use std::sync::{Mutex, MutexGuard};
 
 /// Global mutex to serialize Python tests
 /// This prevents race conditions in the Python interpreter's global state
