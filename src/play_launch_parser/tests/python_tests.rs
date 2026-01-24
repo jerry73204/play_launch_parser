@@ -1026,3 +1026,246 @@ fn test_include_with_list_arguments() {
         "Error should mention the included file"
     );
 }
+
+// ============================================================================
+// Autoware-inspired edge case tests
+// ============================================================================
+
+#[test]
+fn test_namespace_sync_xml_python() {
+    let _guard = python_test_guard();
+
+    // Test: XML <push-ros-namespace> is visible to Python OpaqueFunction
+    // This replicates Autoware's system.launch.xml including component_state_monitor.launch.py
+    let fixture = get_fixture_path("test_namespace_sync_xml_python.launch.xml");
+    assert!(fixture.exists(), "Fixture should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse successfully: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify the node was created with the namespace from XML context
+    let nodes = json["node"].as_array().unwrap();
+    assert!(!nodes.is_empty(), "Should have at least one node");
+
+    let node = &nodes[0];
+    assert_eq!(
+        node["name"].as_str().unwrap(),
+        "context_aware_node",
+        "Node should have the expected name"
+    );
+    assert_eq!(
+        node["namespace"].as_str().unwrap(),
+        "/system",
+        "Node should have namespace from XML context"
+    );
+}
+
+#[test]
+fn test_list_namespace_concatenation() {
+    let _guard = python_test_guard();
+
+    // Test: List concatenation in namespace field (Autoware pattern)
+    // namespace=["/", "my_container"]
+    let fixture = get_fixture_path("python/list_namespace_concatenation.launch.py");
+    assert!(fixture.exists(), "Fixture should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse successfully: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify container namespace was concatenated correctly
+    let containers = json["container"].as_array().unwrap();
+    assert_eq!(containers.len(), 1, "Should have one container");
+
+    let container = &containers[0];
+    assert_eq!(
+        container["namespace"].as_str().unwrap(),
+        "/my_container",
+        "Container namespace should be concatenated from list ['/\", \"my_container\"]"
+    );
+
+    // Verify composable node also has concatenated namespace
+    let load_nodes = json["load_node"].as_array().unwrap();
+    assert_eq!(load_nodes.len(), 1, "Should have one composable node");
+
+    let load_node = &load_nodes[0];
+    assert_eq!(
+        load_node["namespace"].as_str().unwrap(),
+        "my_container",
+        "Composable node namespace should be concatenated from list [\"my\", \"_\", \"container\"]"
+    );
+}
+
+#[test]
+fn test_opaque_xml_namespace_preservation() {
+    let _guard = python_test_guard();
+
+    // Test: XML includes returned from OpaqueFunction preserve namespace
+    // This is the core Autoware component_state_monitor pattern:
+    // 1. XML pushes /system namespace
+    // 2. Python OpaqueFunction returns XML includes
+    // 3. Those XML includes should get /system namespace applied
+    let fixture = get_fixture_path("test_opaque_xml_namespace.launch.xml");
+    assert!(fixture.exists(), "Fixture should exist: {:?}", fixture);
+
+    let fixture_dir = get_fixture_path("");
+    let mut args = HashMap::new();
+    args.insert(
+        "fixture_dir".to_string(),
+        fixture_dir.to_str().unwrap().to_string(),
+    );
+
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse successfully: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify container was created in /system namespace
+    let containers = json["container"].as_array().unwrap();
+    assert!(!containers.is_empty(), "Should have at least one container");
+
+    let container = &containers[0];
+    assert_eq!(
+        container["namespace"].as_str().unwrap(),
+        "/system/monitor",
+        "Container should be in /system/monitor namespace"
+    );
+
+    // Verify composable nodes from XML includes target the correctly-namespaced container
+    let load_nodes = json["load_node"].as_array().unwrap();
+    assert!(
+        load_nodes.len() >= 2,
+        "Should have at least 2 composable nodes from XML includes"
+    );
+
+    for load_node in load_nodes.iter() {
+        let target = load_node["target_container_name"].as_str().unwrap();
+        assert!(
+            target.starts_with("/system/"),
+            "Composable nodes should target container in /system namespace, got: {}",
+            target
+        );
+    }
+}
+
+#[test]
+fn test_utilities_functions() {
+    let _guard = python_test_guard();
+
+    // Test: launch_ros.utilities functions (make_namespace_absolute, prefix_namespace)
+    let fixture = get_fixture_path("python/test_utilities.launch.py");
+    assert!(fixture.exists(), "Fixture should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse successfully: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify nodes were created with computed namespaces
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2, "Should have 2 nodes");
+
+    // First node uses make_namespace_absolute("robot1") -> "/robot1"
+    let node1 = &nodes[0];
+    assert_eq!(node1["name"].as_str().unwrap(), "test_abs");
+    assert_eq!(
+        node1["namespace"].as_str().unwrap(),
+        "/robot1",
+        "make_namespace_absolute should add leading slash"
+    );
+
+    // Second node uses prefix_namespace("/system", "monitor") -> "/system/monitor"
+    let node2 = &nodes[1];
+    assert_eq!(node2["name"].as_str().unwrap(), "test_prefixed");
+    assert_eq!(
+        node2["namespace"].as_str().unwrap(),
+        "/system/monitor",
+        "prefix_namespace should combine namespaces correctly"
+    );
+}
+
+#[test]
+fn test_autoware_patterns_combined() {
+    let _guard = python_test_guard();
+
+    // Test: Multiple Autoware patterns in one launch file
+    // This combines: nested namespaces, OpaqueFunction, XML includes, list concatenation
+    let fixture = get_fixture_path("test_autoware_patterns.launch.xml");
+    assert!(fixture.exists(), "Fixture should exist: {:?}", fixture);
+
+    let fixture_dir = get_fixture_path("");
+    let mut args = HashMap::new();
+    args.insert(
+        "fixture_dir".to_string(),
+        fixture_dir.to_str().unwrap().to_string(),
+    );
+
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse successfully: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes from multiple sources
+    let nodes = json["node"].as_array().unwrap();
+    assert!(
+        nodes.len() >= 3,
+        "Should have nodes from nested namespaces and utilities test"
+    );
+
+    // Verify we have containers from different tests
+    let containers = json["container"].as_array().unwrap();
+    assert!(
+        containers.len() >= 2,
+        "Should have containers from list concat and opaque tests"
+    );
+
+    // Verify namespace scoping worked correctly
+    let has_vehicle_sensors_ns = nodes
+        .iter()
+        .any(|n| n["namespace"].as_str() == Some("/vehicle/sensors"));
+    assert!(
+        has_vehicle_sensors_ns,
+        "Should have node in /vehicle/sensors namespace from nested groups"
+    );
+
+    let has_system_ns_container = containers.iter().any(|c| {
+        c["namespace"]
+            .as_str()
+            .is_some_and(|ns| ns.starts_with("/system"))
+    });
+    assert!(
+        has_system_ns_container,
+        "Should have container in /system namespace from OpaqueFunction test"
+    );
+}
