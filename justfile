@@ -96,9 +96,27 @@ test-compare:
 # Run linters and formatters (clippy + rustfmt check)
 check:
     #!/usr/bin/env bash
-    set -e
-    cargo +nightly fmt -- --check
-    cargo clippy --profile {{cargo_profile}} --all-targets -- -D warnings
+    # Run all checks even if some fail, then return error if any failed
+    exit_code=0
+
+    echo "Running rustfmt check..."
+    if ! cargo +nightly fmt -- --check; then
+        echo "❌ Format check failed"
+        exit_code=1
+    else
+        echo "✓ Format check passed"
+    fi
+
+    echo ""
+    echo "Running clippy..."
+    if ! cargo clippy --profile {{cargo_profile}} --all-targets -- -D warnings; then
+        echo "❌ Clippy check failed"
+        exit_code=1
+    else
+        echo "✓ Clippy check passed"
+    fi
+
+    exit $exit_code
 
 # Run quality checks (linters + Rust tests)
 quality: check test-rust
