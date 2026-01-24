@@ -47,9 +47,16 @@ impl PythonLaunchExecutor {
         // Check if this is an OpaqueFunction - extract and execute it
         if let Ok(opaque_func) = action.extract::<OpaqueFunction>() {
             log::debug!("Executing OpaqueFunction");
-            if let Ok(result) = opaque_func.execute(py) {
-                // Process the result (list of actions returned from function)
-                Self::process_action_result(py, result.as_ref(py))?;
+            match opaque_func.execute(py) {
+                Ok(result) => {
+                    // Process the result (list of actions returned from function)
+                    Self::process_action_result(py, result.as_ref(py))?;
+                }
+                Err(e) => {
+                    log::error!("OpaqueFunction execution failed: {}", e);
+                    // Don't fail the entire parse, but log the error
+                    // This matches Python's behavior where OpaqueFunction errors are often caught
+                }
             }
             return Ok(());
         }

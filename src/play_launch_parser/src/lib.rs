@@ -131,12 +131,12 @@ impl LaunchTraverser {
             PythonLaunchExecutor::new().map_err(|e| ParseError::PythonError(e.to_string()))?;
         let (nodes, containers, load_nodes, includes) = executor.execute_launch_file(path, args)?;
 
-        log::info!(
-            "Captured {} nodes, {} containers, {} composable nodes, {} includes from Python launch file",
+        eprintln!(
+            "[RUST] Python file '{}' generated {} nodes, {} containers, {} load_nodes",
+            path.display(),
             nodes.len(),
             containers.len(),
-            load_nodes.len(),
-            includes.len()
+            load_nodes.len()
         );
 
         // Apply the current namespace context to all entities from Python
@@ -161,12 +161,40 @@ impl LaunchTraverser {
                 })
                 .collect();
 
-            // Apply namespace to containers
+            // Apply namespace to containers and build a mapping of old names to new names
+            let mut container_name_map = std::collections::HashMap::new();
             let namespaced_containers: Vec<_> = containers
                 .into_iter()
                 .map(|mut container| {
+                    // Build old full name (namespace + name)
+                    let old_full_name = if container.namespace.starts_with('/') {
+                        if container.namespace == "/" {
+                            format!("/{}", container.name)
+                        } else {
+                            format!("{}/{}", container.namespace, container.name)
+                        }
+                    } else {
+                        format!("/{}/{}", container.namespace, container.name)
+                    };
+
+                    // Apply namespace prefix
                     container.namespace =
                         Self::apply_namespace_prefix(&current_ns, &container.namespace);
+
+                    // Build new full name (namespace + name)
+                    let new_full_name = if container.namespace.starts_with('/') {
+                        if container.namespace == "/" {
+                            format!("/{}", container.name)
+                        } else {
+                            format!("{}/{}", container.namespace, container.name)
+                        }
+                    } else {
+                        format!("/{}/{}", container.namespace, container.name)
+                    };
+
+                    // Store mapping for updating load_nodes
+                    container_name_map.insert(old_full_name, new_full_name);
+
                     container
                 })
                 .collect();
@@ -177,9 +205,32 @@ impl LaunchTraverser {
                 .map(|mut load_node| {
                     load_node.namespace =
                         Self::apply_namespace_prefix(&current_ns, &load_node.namespace);
-                    // Also update target_container_name to include the namespace
-                    load_node.target_container_name =
-                        Self::apply_namespace_prefix(&current_ns, &load_node.target_container_name);
+
+                    // Update target_container_name if it matches a container that was renamed
+                    if let Some(new_name) = container_name_map.get(&load_node.target_container_name) {
+                        log::debug!(
+                            "Updating target_container_name from '{}' to '{}'",
+                            load_node.target_container_name,
+                            new_name
+                        );
+                        load_node.target_container_name = new_name.clone();
+                    } else {
+                        // If not in the map, still apply namespace prefix for containers defined elsewhere
+                        // This handles the case where target_container is a string reference to an external container
+                        if load_node.target_container_name.starts_with('/') {
+                            // Already absolute path - check if it needs namespace prefix
+                            let prefixed = Self::apply_namespace_prefix(&current_ns, &load_node.target_container_name);
+                            if prefixed != load_node.target_container_name {
+                                log::debug!(
+                                    "Applying namespace prefix to target_container_name: '{}' -> '{}'",
+                                    load_node.target_container_name,
+                                    prefixed
+                                );
+                                load_node.target_container_name = prefixed;
+                            }
+                        }
+                    }
+
                     load_node
                 })
                 .collect();
@@ -585,6 +636,11 @@ impl LaunchTraverser {
 
                 // Add container record
                 self.containers.push(container_action.to_container_record());
+
+                // Add container as a regular node (the actual component_container executable)
+                // Python's dump_launch captures containers as both container records and node records
+                let node_record = container_action.to_node_record(&self.context)?;
+                self.records.push(node_record);
 
                 // Add load_node records for each composable node
                 self.load_nodes

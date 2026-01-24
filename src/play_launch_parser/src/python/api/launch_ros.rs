@@ -442,6 +442,17 @@ impl ComposableNodeContainer {
 
         // Convert PyObject parameters to strings (may be substitutions)
         let name_str = Self::pyobject_to_string(py, &name)?;
+
+        // Debug: Log if name is empty
+        if name_str.is_empty() {
+            use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+            let configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
+            log::warn!(
+                "ComposableNodeContainer has empty name! Available configs: {:?}",
+                configs.keys().collect::<Vec<_>>()
+            );
+        }
+
         let namespace_str = namespace
             .map(|ns| Self::pyobject_to_string(py, &ns))
             .transpose()?;
@@ -458,14 +469,27 @@ impl ComposableNodeContainer {
 
         // Evaluate condition (if present) and only capture if true
         let should_capture = if let Some(cond_obj) = &condition {
-            Self::evaluate_condition(py, cond_obj).unwrap_or(true)
+            let result = Self::evaluate_condition(py, cond_obj).unwrap_or(true);
+            log::debug!(
+                "ComposableNodeContainer name='{}' namespace={:?}: condition evaluated to {}",
+                name_str,
+                namespace_str,
+                result
+            );
+            result
         } else {
+            log::debug!(
+                "ComposableNodeContainer name='{}' namespace={:?}: no condition, capturing",
+                name_str,
+                namespace_str
+            );
             true // No condition means always capture
         };
 
         if should_capture {
             // Capture the container
             Self::capture_container(&container);
+            log::debug!("Captured ComposableNodeContainer '{}'", name_str);
         } else {
             log::debug!(
                 "Skipping container capture due to condition: {} (namespace: {:?})",
@@ -505,7 +529,7 @@ impl ComposableNodeContainer {
 
         let capture = ContainerCapture {
             name: container.name.clone(),
-            namespace,
+            namespace: namespace.clone(),
         };
 
         log::debug!(
@@ -515,6 +539,27 @@ impl ComposableNodeContainer {
         );
 
         CAPTURED_CONTAINERS.lock().unwrap().push(capture);
+
+        // Also capture container as a regular node (the actual component_container executable)
+        // Python's dump_launch captures containers as both container records and node records
+        let node_capture = NodeCapture {
+            package: container.package.clone(),
+            executable: container.executable.clone(),
+            name: Some(container.name.clone()),
+            namespace: Some(namespace.clone()),
+            parameters: Vec::new(),
+            remappings: Vec::new(),
+            arguments: Vec::new(),
+            env_vars: Vec::new(),
+        };
+
+        log::debug!(
+            "Captured Python container as node: {} / {}",
+            node_capture.package,
+            node_capture.executable
+        );
+
+        CAPTURED_NODES.lock().unwrap().push(node_capture);
 
         // Capture each composable node as a load_node entry
         Python::with_gil(|py| {
@@ -528,6 +573,11 @@ impl ComposableNodeContainer {
     /// Evaluate a condition object (same logic as Node)
     fn evaluate_condition(py: Python, condition: &PyObject) -> PyResult<bool> {
         let cond_ref = condition.as_ref(py);
+
+        log::debug!(
+            "Evaluating container condition, type: {:?}",
+            cond_ref.get_type().name()
+        );
 
         // Try calling evaluate() method on the condition object
         if let Ok(result) = cond_ref.call_method0("evaluate") {
@@ -1207,10 +1257,24 @@ impl LoadComposableNodes {
         condition: Option<PyObject>,
         _kwargs: Option<&pyo3::types::PyDict>,
     ) -> PyResult<Self> {
+        // Extract target container name for logging
+        let target_str = Self::pyobject_to_string(target_container.as_ref(py))
+            .unwrap_or_else(|_| "<unknown>".to_string());
+
         // Evaluate condition (if present) and only capture if true
         let should_capture = if let Some(cond_obj) = &condition {
-            Self::evaluate_condition(py, cond_obj).unwrap_or(true)
+            let result = Self::evaluate_condition(py, cond_obj).unwrap_or(true);
+            log::debug!(
+                "LoadComposableNodes target='{}': condition evaluated to {}",
+                target_str,
+                result
+            );
+            result
         } else {
+            log::debug!(
+                "LoadComposableNodes target='{}': no condition, capturing",
+                target_str
+            );
             true // No condition means always capture
         };
 
@@ -1393,38 +1457,34 @@ impl LoadComposableNodes {
             name
         );
 
-        // If the name is already absolute (starts with '/'), use it as-is
-        // Otherwise, normalize it to have a leading slash
-        let normalized_name = if name.starts_with('/') {
-            name
-        } else if name.is_empty() {
-            // Empty string means root namespace
-            "/".to_string()
-        } else {
-            // Relative name: prepend slash
-            format!("/{}", name)
-        };
-
-        // Extract namespace from the full path (everything except the last segment)
-        let namespace = if let Some(last_slash_idx) = normalized_name.rfind('/') {
-            if last_slash_idx == 0 {
-                // Container is directly in root namespace
-                Some("/".to_string())
+        // When target_container is a simple string/LaunchConfiguration, use the name as-is
+        // Python's behavior: just use the string value directly without modification
+        // But extract the namespace from the path for composable nodes to inherit
+        let namespace = if name.contains('/') {
+            // Extract namespace from the path (everything before the last /)
+            if let Some(last_slash_idx) = name.rfind('/') {
+                if last_slash_idx == 0 {
+                    // Path like "/container_name" -> namespace is "/"
+                    Some("/".to_string())
+                } else {
+                    // Path like "/ns/container_name" -> namespace is "/ns"
+                    Some(name[..last_slash_idx].to_string())
+                }
             } else {
-                // Extract namespace path
-                Some(normalized_name[..last_slash_idx].to_string())
+                None
             }
         } else {
+            // Simple name without slashes -> no namespace to extract
             None
         };
 
         log::debug!(
-            "Normalized target container: '{}', namespace: {:?}",
-            normalized_name,
+            "Target container: '{}', extracted namespace: {:?}",
+            name,
             namespace
         );
 
-        Ok((normalized_name, namespace))
+        Ok((name, namespace))
     }
 
     /// Normalize namespace + name into a proper path

@@ -22,7 +22,7 @@ impl CommandGenerator {
         let name = if let Some(name_subs) = &node.name {
             Some(resolve_substitutions(name_subs, context)?)
         } else {
-            Some(executable.clone())
+            None
         };
 
         let namespace = if let Some(ns_subs) = &node.namespace {

@@ -11,6 +11,8 @@ use std::collections::HashMap;
 pub struct ContainerAction {
     pub name: String,
     pub namespace: String,
+    pub package: String,
+    pub executable: String,
     pub composable_nodes: Vec<ComposableNodeAction>,
 }
 
@@ -39,6 +41,24 @@ impl ContainerAction {
         let name_parsed = parse_substitutions(&name_subs)?;
         let name = resolve_substitutions(&name_parsed, context)
             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        // Get package (defaults to "rclcpp_components" if not specified)
+        let package = if let Some(pkg_str) = entity.get_attr_str("pkg", true)? {
+            let pkg_parsed = parse_substitutions(&pkg_str)?;
+            resolve_substitutions(&pkg_parsed, context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?
+        } else {
+            "rclcpp_components".to_string()
+        };
+
+        // Get executable (defaults to "component_container" if not specified)
+        let executable = if let Some(exec_str) = entity.get_attr_str("exec", true)? {
+            let exec_parsed = parse_substitutions(&exec_str)?;
+            resolve_substitutions(&exec_parsed, context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?
+        } else {
+            "component_container".to_string()
+        };
 
         // Get namespace, combining with accumulated namespace from context
         let namespace = if let Some(ns_str) = entity.get_attr_str("namespace", true)? {
@@ -86,6 +106,8 @@ impl ContainerAction {
         Ok(Self {
             name,
             namespace,
+            package,
+            executable,
             composable_nodes,
         })
     }
@@ -102,6 +124,44 @@ impl ContainerAction {
             .iter()
             .map(|node| node.to_load_node_record(&self.name, &self.namespace))
             .collect()
+    }
+
+    pub fn to_node_record(&self, context: &LaunchContext) -> Result<crate::record::NodeRecord> {
+        use crate::record::NodeRecord;
+
+        // Generate the command line for the container executable
+        let mut cmd = vec![
+            format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable),
+            "--ros-args".to_string(),
+            "-r".to_string(),
+            format!("__node:={}", self.name),
+            "-r".to_string(),
+            format!("__ns:={}", self.namespace),
+        ];
+
+        // Add global parameters to the command
+        for (key, value) in context.global_parameters() {
+            cmd.push("-p".to_string());
+            cmd.push(format!("{}:={}", key, value));
+        }
+
+        Ok(NodeRecord {
+            args: None,
+            cmd,
+            env: None,
+            exec_name: None,
+            executable: self.executable.clone(),
+            global_params: None,
+            name: Some(self.name.clone()),
+            namespace: Some(self.namespace.clone()),
+            package: Some(self.package.clone()),
+            params: Vec::new(),
+            params_files: Vec::new(),
+            remaps: Vec::new(),
+            respawn: None,
+            respawn_delay: None,
+            ros_args: None,
+        })
     }
 }
 

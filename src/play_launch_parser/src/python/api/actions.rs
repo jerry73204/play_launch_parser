@@ -82,6 +82,7 @@ impl DeclareLaunchArgument {
 
 impl DeclareLaunchArgument {
     /// Convert PyObject to string (handles strings, substitutions, and lists)
+    /// For substitutions, this will call perform() to resolve them
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
         use pyo3::types::PyList;
 
@@ -90,13 +91,31 @@ impl DeclareLaunchArgument {
             return Ok(s);
         }
 
-        // Try list (concatenate all elements)
+        // Try list (concatenate all elements after performing them)
         if let Ok(list) = obj.downcast::<PyList>(py) {
             let mut result = String::new();
             for item in list.iter() {
                 // Try to extract as string
                 if let Ok(s) = item.extract::<String>() {
                     result.push_str(&s);
+                }
+                // Try calling perform() if it exists (for substitutions)
+                else if item.hasattr("perform")? {
+                    // Create a mock context for perform()
+                    if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                        if let Ok(performed) = item.call_method1("perform", (context,)) {
+                            if let Ok(s) = performed.extract::<String>() {
+                                result.push_str(&s);
+                                continue;
+                            }
+                        }
+                    }
+                    // Fallback to __str__ if perform fails
+                    if let Ok(str_result) = item.call_method0("__str__") {
+                        if let Ok(s) = str_result.extract::<String>() {
+                            result.push_str(&s);
+                        }
+                    }
                 }
                 // Try calling __str__
                 else if let Ok(str_result) = item.call_method0("__str__") {
@@ -106,6 +125,19 @@ impl DeclareLaunchArgument {
                 }
             }
             return Ok(result);
+        }
+
+        // For single substitution objects, try perform() first
+        let obj_ref = obj.as_ref(py);
+        if obj_ref.hasattr("perform")? {
+            // Create a mock context for perform()
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(performed) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = performed.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
         }
 
         // Try calling __str__ method (for substitutions)
