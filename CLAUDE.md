@@ -32,6 +32,28 @@ This runs:
 
 ## Development Workflow
 
+### File Creation Best Practices
+
+**CRITICAL**: Always use Write tool for creating files, never use cat with heredoc pattern.
+
+**Correct**:
+```rust
+Write tool with file_path and content parameters
+```
+
+**Incorrect**:
+```bash
+cat > file.txt << 'EOF'
+content
+EOF
+```
+
+**Reasons**:
+- Write tool is clearer and more reliable
+- Avoids shell escaping issues
+- Better error handling
+- Consistent with other file operations
+
 ### When Making Changes
 
 1. **Read files first**: Always use the Read tool before modifying
@@ -400,3 +422,87 @@ See implementation docs for detailed architecture and design decisions.
 - **Phase 7.2**: Hybrid Arc + Local context (20-40% improvement in 1 week)
 - **Phase 7.3**: rayon parallelization (2.1x improvement in 2-3 days)
 - **Phase 7.4**: Additional optimizations (+10-20% in 1 week)
+
+## ROS 2 Include Scoping Behavior (Session 13 Findings)
+
+### Critical Discovery: YAML vs XML Include Semantics
+
+**Problem Identified**: Parallel include processing broke YAML preset files in Autoware.
+
+**Root Cause**: ROS 2 has different scoping semantics for YAML vs XML includes:
+
+#### XML Includes (Isolated Scope)
+- Create child context: `include_context = self.context.child()`
+- Variables declared inside stay in child scope
+- Context changes are discarded after processing
+- **Safe for parallel processing** ✅
+
+#### YAML Includes (Parent Scope Modification)
+- Modify parent context directly: `self.process_yaml_launch_file()`
+- Variables declared are visible to subsequent includes
+- Used for preset files that declare configuration variables
+- **Must be processed sequentially** ⚠️
+
+### Real-World Example from Autoware
+
+```xml
+<!-- tier4_planning_component.launch.xml -->
+<include file=".../preset/default_preset.yaml"/>  <!-- Declares velocity_smoother_type -->
+
+<include file=".../planning.launch.xml">
+  <arg name="param" value="...$(var velocity_smoother_type)..."/>  <!-- Uses it -->
+</include>
+```
+
+If processed in parallel:
+- YAML modifies clone context (discarded) ✗
+- XML sees original context (missing variable) ✗
+- Result: "Undefined variable: velocity_smoother_type"
+
+If processed sequentially:
+- YAML modifies self.context ✓
+- XML sees updated self.context ✓
+- Result: Variable resolved correctly
+
+### Implementation Solution
+
+**Code Change** (src/lib.rs:624-680):
+- Detect YAML includes during batch collection
+- Process any collected XML includes in parallel
+- Process YAML include sequentially
+- Break batching to restart after YAML
+
+**Result**:
+- XML includes: parallel for performance
+- YAML includes: sequential for correctness
+- Maintains both performance and correctness
+
+### ROS 2 Documentation Analysis
+
+**Official Docs Reviewed**:
+- [ROS 2 Launch XML Format](https://design.ros2.org/articles/roslaunch_xml.html)
+- [ROS 2 Launch System](https://design.ros2.org/articles/roslaunch.html)
+- [Using Python, XML, and YAML for ROS 2 Launch Files](https://docs.ros.org/en/foxy/How-To-Guides/Launch-file-different-formats.html)
+
+**Key Findings**:
+1. XML format doc: "included launch file description has its own scope"
+2. Main launch doc: "Changes to the local state by included launch descriptions persist"
+3. **YAML scoping behavior is completely undocumented** ❌
+
+**Observed Behavior** (reverse-engineered from Autoware):
+- YAML preset files modify parent context
+- Subsequent includes see YAML-declared variables
+- This is critical for Autoware's preset system to work
+
+**Documentation Created**:
+- `docs/include_scoping_behavior.md` - Comprehensive analysis with sources
+
+### Key Takeaway for Development
+
+When implementing include processing:
+1. ✅ XML includes can be parallelized safely
+2. ⚠️ YAML includes must respect execution order
+3. ⚠️ Include arg values may reference variables from previous YAML includes
+4. ✅ Don't assume all includes can be parallelized - check file type
+
+This behavior is essential for Autoware compatibility and likely affects other large ROS 2 projects using preset files.

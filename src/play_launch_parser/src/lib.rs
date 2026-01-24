@@ -97,6 +97,7 @@ impl LaunchTraverser {
     }
 
     /// Apply namespace prefix to a path (handles both absolute and relative namespaces)
+    #[cfg(feature = "python")]
     fn apply_namespace_prefix(prefix: &str, path: &str) -> String {
         // If path is empty, return the prefix
         if path.is_empty() {
@@ -370,6 +371,7 @@ impl LaunchTraverser {
     }
 
     /// Helper to process an XML include with given arguments
+    #[cfg(feature = "python")]
     fn process_xml_include(
         &mut self,
         resolved_path: &Path,
@@ -626,18 +628,53 @@ impl LaunchTraverser {
                     if children[i].type_name() == "include"
                         && should_process_entity(&children[i], &self.context)?
                     {
-                        // Collect consecutive includes
+                        // Collect consecutive includes, but stop at YAML includes
+                        // YAML includes modify context and must be processed sequentially
                         let mut includes = Vec::new();
                         while i < children.len()
                             && children[i].type_name() == "include"
                             && should_process_entity(&children[i], &self.context)?
                         {
                             let include = IncludeAction::from_entity(&children[i])?;
-                            includes.push(include);
-                            i += 1;
+
+                            // Check if this is a YAML include by resolving its file path
+                            let file_path_str = resolve_substitutions(&include.file, &self.context)
+                                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                            let is_yaml =
+                                file_path_str.ends_with(".yaml") || file_path_str.ends_with(".yml");
+
+                            if is_yaml {
+                                // Process any collected includes first
+                                if includes.len() > 1 {
+                                    log::debug!(
+                                        "Processing {} includes in parallel (before YAML)",
+                                        includes.len()
+                                    );
+                                    let (records, containers, load_nodes) =
+                                        self.process_includes_parallel(includes)?;
+                                    self.records.extend(records);
+                                    self.containers.extend(containers);
+                                    self.load_nodes.extend(load_nodes);
+                                } else if includes.len() == 1 {
+                                    self.process_include(&includes[0])?;
+                                }
+                                includes = Vec::new();
+
+                                // Process YAML include sequentially (modifies context)
+                                log::debug!(
+                                    "Processing YAML include sequentially: {}",
+                                    file_path_str
+                                );
+                                self.process_include(&include)?;
+                                i += 1;
+                                break; // Exit inner loop to restart include collection
+                            } else {
+                                includes.push(include);
+                                i += 1;
+                            }
                         }
 
-                        // Process includes in parallel if we have more than one
+                        // Process any remaining includes
                         if includes.len() > 1 {
                             log::debug!("Processing {} includes in parallel", includes.len());
                             let (records, containers, load_nodes) =
