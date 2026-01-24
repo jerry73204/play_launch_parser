@@ -693,6 +693,25 @@ impl ComposableNodeContainer {
             return Ok(s);
         }
 
+        // Handle lists (concatenate elements) - common in ROS 2 Python launch files
+        // Example: namespace=["/", "my_container"]
+        if let Ok(list) = obj_ref.downcast::<pyo3::types::PyList>() {
+            log::debug!(
+                "ComposableNodeContainer: handling list with {} elements for concatenation",
+                list.len()
+            );
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_str = Self::pyobject_to_string(py, &item.into())?;
+                result.push_str(&item_str);
+            }
+            log::debug!(
+                "ComposableNodeContainer: concatenated list to: '{}'",
+                result
+            );
+            return Ok(result);
+        }
+
         // Try calling perform() method first (for LaunchConfiguration substitutions)
         if obj_ref.hasattr("perform")? {
             if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
