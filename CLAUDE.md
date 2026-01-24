@@ -56,6 +56,40 @@ Write tests covering:
 - **Clear naming**: Use descriptive names
 - **Documentation**: Add doc comments for public APIs
 
+### Optimization Best Practices
+
+**When implementing Phase 7 optimizations**:
+
+1. **Measure First**: Benchmark before optimizing to establish baseline
+   - Use `hyperfine` for timing
+   - Use `heaptrack` for memory profiling
+   - Use `cargo flamegraph` for CPU profiling
+
+2. **Follow the Roadmap**: `docs/roadmap/phase-7-performance_optimization.md` has detailed implementation steps
+   - Each phase has specific tasks with checkboxes
+   - Full code examples provided
+   - Success criteria defined
+
+3. **Incremental Implementation**: Implement one phase at a time
+   - Phase 7.1 (caching) before Phase 7.2 (context refactoring)
+   - Phase 7.2 required before Phase 7.3 (parallelization)
+   - Run benchmarks after each phase
+
+4. **Test After Each Change**: All 260 tests must pass
+   - Optimizations should not change behavior
+   - Use regression tests to validate output matches
+
+5. **Reference Analysis Documents**: Detailed analysis in `/tmp/`
+   - `optimization_opportunities.md` - Why each optimization works
+   - `context_cloning_best_practices.md` - Compiler pattern details
+   - `parallelism_strategy_analysis.md` - Why rayon over async
+   - `cache_strategy_dashmap.md` - Why DashMap over LRU
+
+6. **Standard Patterns**: Use well-known compiler/systems patterns
+   - Context: Hybrid Arc + Local (V8, Python, Rust compiler, LLVM)
+   - Parallelism: rayon work-stealing (Rust compiler, ripgrep, fd)
+   - Caching: DashMap for bounded, thread_local LRU for unbounded
+
 ## Project-Specific Practices
 
 ### Temporary Files and Scripts
@@ -198,6 +232,7 @@ Checklist:
 - [ ] Quality checks pass (`just quality`)
 - [ ] New functionality has tests
 - [ ] Documentation is updated if needed
+- [ ] If working on optimization: Follow Phase 7 roadmap (`docs/roadmap/phase-7-performance_optimization.md`)
 
 ## Environment Setup
 
@@ -219,9 +254,10 @@ After creating/modifying `.envrc`, run `direnv allow` to enable it.
 
 **Current Status**: ✅ **PRODUCTION READY** - Autoware Compatibility Complete
 - **Test Coverage**: 260 tests passing (~95% code coverage)
-- **Feature Completion**: 95% (Phase 5 complete)
+- **Feature Completion**: 95% (Phase 5 complete, Phase 6 planned, **Phase 7 roadmap ready**)
 - **Autoware Compatibility**: ✅ **100%** - Full planning_simulator test passes (46 nodes, 15 containers, 54 composable nodes)
-- **Performance**: <5s to parse full Autoware launch tree (vs ~10-15s with Python)
+- **Performance**: ~5s to parse full Autoware launch tree (vs ~10-15s with Python)
+  - **Phase 7 Target**: <1s (5-7x improvement planned)
 
 ### Current Capabilities
 
@@ -235,12 +271,61 @@ After creating/modifying `.envrc`, run `direnv allow` to enable it.
 - ✅ Python API: launch, launch_ros, launch_xml, launch.frontend, launch.utilities
 - ✅ Autoware production workload validated
 
+### Next Phase: Performance Optimization (Phase 7)
+
+**Status**: 📋 Planned (comprehensive roadmap created in Session 12)
+
+**Goal**: Achieve **5-7x performance improvement** for complex launch files
+
+**Current Performance**: ~5s for Autoware planning_simulator.launch.xml
+**Target Performance**: <1s (5-7x improvement)
+
+**Three-Phase Approach**:
+
+1. **Phase 7.1: DashMap Caching** (2-3 days, Low Risk, **Highest Impact**)
+   - Package resolution cache: 80-95% improvement for lookups
+   - File content cache: 30-50% improvement for repeated includes
+   - Python mutex upgrade (parking_lot): 15-25% improvement
+   - **Expected**: Autoware ~5s → ~3s (60-80% improvement)
+
+2. **Phase 7.2: Hybrid Arc + Local Context** (1 week, Medium Risk, **Enables Parallelization**)
+   - Standard compiler pattern (used by V8, Python, Rust compiler, LLVM)
+   - Parent scope frozen in `Arc<ParentScope>`, child has local HashMap
+   - 500-1000x faster context creation (O(1) vs O(n))
+   - **Expected**: Autoware ~3s → ~2s (20-40% improvement + thread-safe for Phase 7.3)
+
+3. **Phase 7.3: rayon Parallel Processing** (2-3 days, Low Risk, **Final Multiplier**)
+   - Work-stealing threadpool (NOT async, NOT manual task queue)
+   - Change `.iter()` to `.par_iter()` for include processing
+   - rayon implements dynamic task spawning automatically
+   - **Expected**: Autoware ~2s → ~1s (2.1x improvement on 8 cores)
+
+**Why These Approaches**:
+- **DashMap over LRU+RwLock**: 7.5x vs 1.3x speedup on 8 threads, lock-free reads
+- **Hybrid context over simple Arc or CoW**: Standard compiler pattern, natural scope semantics, enables parallelization
+- **rayon over async**: Workload is 80%+ CPU-bound after caching, no tokio overhead, proven and simple
+
+**Key Dependencies**:
+```toml
+dashmap = "5.5"           # Concurrent HashMap
+parking_lot = "0.12"      # Faster mutexes
+rayon = "1.8"             # Parallel processing
+lru = "0.12"              # LRU cache (optional)
+```
+
+**Analysis Documents** (created Session 12, in `/tmp/`):
+- `optimization_opportunities.md` - Complete 8-category analysis (800+ lines)
+- `context_cloning_best_practices.md` - 4 compiler patterns compared
+- `parallelism_strategy_analysis.md` - Async vs rayon vs task queue
+- `cache_strategy_dashmap.md` - DashMap vs LRU detailed comparison
+
 ### Detailed Documentation
 
 For detailed information, see:
 - **Feature tracking**: `docs/feature_list.md`
 - **Implementation status**: `docs/roadmap/implementation_status.md`
 - **Phase 5 roadmap**: `docs/roadmap/phase-5-python_support.md`
+- **Phase 7 roadmap**: `docs/roadmap/phase-7-performance_optimization.md` ⭐
 - **Test organization**: `tests/README.md`
 
 ### Quick Reference
@@ -257,9 +342,11 @@ See implementation docs for detailed architecture and design decisions.
 
 ## Recent Session Work (Latest)
 
-### Session 12: Test Organization & Documentation ✅
+### Session 12: Test Organization, Documentation & Optimization Planning ✅
 
 **Work Completed**:
+
+**Part 1: Test Organization & Documentation**
 1. ✅ Cleaned up debug code - Converted all `eprintln!` to structured logging (`log::trace!`, `log::debug!`, `log::error!`)
 2. ✅ Fixed test script bugs - `compare_rust_python.py` now correctly validates all metrics including node count adjustments for containers
 3. ✅ Created comprehensive edge case tests - 4 new fixtures testing Autoware-derived patterns (OpaqueFunction conditional logic, list concatenation, ParameterFile, nested substitutions)
@@ -273,14 +360,32 @@ See implementation docs for detailed architecture and design decisions.
 6. ✅ Updated documentation:
    - `docs/feature_list.md` - Added edge case testing section, test coverage matrix, and Autoware validation results
    - Test counts updated to 260 total tests
+   - Rewrote `README.md` in minimalist style (266 lines → 70 lines)
+   - Revised justfile test recipes for better workflow
 
-**Key Technical Fixes**:
+**Part 2: Performance Optimization Analysis**
+7. ✅ Comprehensive optimization analysis - Identified 8 major categories with 5-7x total improvement potential
+8. ✅ Created Phase 7 roadmap - Detailed 3-4 week implementation plan with code examples and success criteria
+9. ✅ Context cloning best practices - Analyzed 4 compiler approaches, recommended Hybrid Arc + Local pattern
+10. ✅ Parallelism strategy analysis - Compared async vs rayon vs manual task queue, recommended rayon (Approach 2)
+11. ✅ Cache strategy documentation - DashMap vs LRU analysis for different cache types
+
+**Key Technical Decisions**:
 - **Logging**: All debug output now uses proper log levels for RUST_LOG control
 - **Test Serialization**: Python tests run sequentially to avoid race conditions in global capture storage
 - **Test Organization**: Logical separation of XML, Python, and performance tests
+- **Context Pattern**: Hybrid Arc + Local (used by V8, Python, Rust compiler, LLVM) - 500-1000x faster child creation
+- **Parallelization**: rayon threadpool (NOT async) - 80%+ CPU-bound workload, work-stealing queue
+- **Caching**: DashMap for bounded caches (packages, files, commands), thread_local LRU for unbounded (substitutions)
 
 **Documentation Created**:
 - `/tmp/test_coverage_update.md` - Comprehensive test coverage documentation
+- `/tmp/optimization_opportunities.md` - Complete 8-category optimization analysis (800+ lines)
+- `/tmp/context_cloning_best_practices.md` - Compiler pattern analysis (4 approaches)
+- `/tmp/parallelism_strategy_analysis.md` - Async vs rayon vs task queue comparison
+- `/tmp/cache_strategy_dashmap.md` - DashMap vs LRU detailed comparison
+- `/tmp/package_resolution_context_analysis.md` - Context awareness analysis
+- `docs/roadmap/phase-7-performance_optimization.md` - Implementation roadmap with tasks and code examples
 - Edge case test fixtures validating Autoware patterns
 
 **Validation**:
@@ -288,3 +393,10 @@ See implementation docs for detailed architecture and design decisions.
 - ✅ 100% Autoware compatibility maintained (46 nodes, 15 containers, 54 composable nodes)
 - ✅ Zero clippy warnings
 - ✅ All quality checks passing
+
+**Next Phase Preview**: Phase 7 Performance Optimization
+- **Goal**: 5-7x improvement (Autoware: ~5s → ~0.7-1s)
+- **Phase 7.1**: DashMap caching (60-80% improvement in 2-3 days)
+- **Phase 7.2**: Hybrid Arc + Local context (20-40% improvement in 1 week)
+- **Phase 7.3**: rayon parallelization (2.1x improvement in 2-3 days)
+- **Phase 7.4**: Additional optimizations (+10-20% in 1 week)
