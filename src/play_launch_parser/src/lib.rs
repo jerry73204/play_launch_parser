@@ -617,7 +617,8 @@ impl LaunchTraverser {
             "launch" => {
                 // Root element, traverse children
                 // Collect consecutive includes and process them in parallel for maximum performance
-                let children = entity.children();
+                // Note: We collect here because we need random access for include batching
+                let children: Vec<_> = entity.children().collect();
                 let mut i = 0;
 
                 while i < children.len() {

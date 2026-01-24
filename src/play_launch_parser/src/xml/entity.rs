@@ -87,11 +87,13 @@ impl<'a, 'input> Entity for XmlEntity<'a, 'input> {
 }
 
 impl<'a, 'input> XmlEntity<'a, 'input> {
-    pub fn children(&self) -> Vec<XmlEntity<'a, 'input>> {
+    /// Return an iterator over child elements
+    /// This avoids allocating a Vec on every call, enabling lazy evaluation
+    pub fn children(&self) -> impl Iterator<Item = XmlEntity<'a, 'input>> {
         self.node
             .children()
             .filter(|n| n.is_element())
             .map(XmlEntity::new)
-            .collect()
+            // No .collect() - returns iterator directly
     }
 }

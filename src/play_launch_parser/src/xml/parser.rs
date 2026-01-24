@@ -31,7 +31,7 @@ mod tests {
         let root = XmlEntity::new(doc.root_element());
         assert_eq!(root.type_name(), "launch");
 
-        let children = root.children();
+        let children: Vec<_> = root.children().collect();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].type_name(), "node");
     }
