@@ -194,17 +194,24 @@ impl OpaqueFunction {
     /// Execute the function and return the result
     /// This is called by our executor
     pub fn execute(&self, py: Python) -> PyResult<PyObject> {
+        log::debug!("OpaqueFunction::execute called");
         if let Some(ref func) = self.function {
+            log::debug!("OpaqueFunction has function, executing it");
             // Create a mock LaunchContext that provides access to launch configurations
             // This allows OpaqueFunction code to call LaunchConfiguration().perform(context)
-            use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+            use crate::python::bridge::{get_current_ros_namespace, LAUNCH_CONFIGURATIONS};
             let configs = LAUNCH_CONFIGURATIONS.lock().clone();
+            let ros_namespace = get_current_ros_namespace();
 
-            // Create a context dict with launch_configurations
+            log::debug!("OpaqueFunction context: ros_namespace='{}'", ros_namespace);
+
+            // Create a context dict with launch_configurations and ros_namespace
             let context_code = r#"
 class MockLaunchContext:
-    def __init__(self, launch_configurations):
+    def __init__(self, launch_configurations, ros_namespace):
         self.launch_configurations = launch_configurations
+        # Store ros_namespace for OpaqueFunction access (e.g. context.launch_configurations.get('ros_namespace'))
+        self.launch_configurations['ros_namespace'] = ros_namespace
 
     def perform_substitution(self, sub):
         # Support LaunchConfiguration.perform(context)
@@ -212,7 +219,7 @@ class MockLaunchContext:
             return self.launch_configurations.get(sub.variable_name, '')
         return str(sub)
 
-context = MockLaunchContext(launch_configurations)
+context = MockLaunchContext(launch_configurations, ros_namespace)
 "#;
 
             let main_module = py.import("__main__")?;
@@ -225,6 +232,9 @@ context = MockLaunchContext(launch_configurations)
             }
             namespace.set_item("launch_configurations", configs_dict)?;
 
+            // Add ros_namespace to namespace
+            namespace.set_item("ros_namespace", ros_namespace)?;
+
             // Add Python builtins that OpaqueFunction might need
             // Import Path for file operations
             py.run("from pathlib import Path", Some(namespace), Some(namespace))?;
@@ -236,7 +246,19 @@ context = MockLaunchContext(launch_configurations)
             let context = namespace.get_item("context")?.unwrap();
 
             // Call the function with the context
-            func.call1(py, (context,))
+            log::debug!("Calling OpaqueFunction with context");
+            let result = func.call1(py, (context,))?;
+
+            // Log the result type
+            let result_type = result.as_ref(py).get_type().name().unwrap_or("unknown");
+            log::debug!("OpaqueFunction returned type: {}", result_type);
+
+            // If it's a list, log the count
+            if let Ok(list) = result.as_ref(py).extract::<Vec<PyObject>>() {
+                log::debug!("OpaqueFunction returned list with {} items", list.len());
+            }
+
+            Ok(result)
         } else {
             Ok(py.None())
         }
@@ -596,12 +618,18 @@ impl IncludeLaunchDescription {
             }
         };
 
-        // Capture the include request
+        // Capture the include request with current ROS namespace
         {
+            use crate::python::bridge::get_current_ros_namespace;
+            let ros_namespace = get_current_ros_namespace();
+
+            log::debug!("Capturing include with ROS namespace: '{}'", ros_namespace);
+
             let mut includes = CAPTURED_INCLUDES.lock();
             includes.push(crate::python::bridge::IncludeCapture {
                 file_path: file_path.clone(),
                 args: args.clone(),
+                ros_namespace,
             });
         }
 

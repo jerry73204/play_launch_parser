@@ -180,6 +180,11 @@ impl LaunchTraverser {
         // Apply the current namespace context to all entities from Python
         // (Python launch files don't know about the XML namespace context they're included in)
         let current_ns = self.context.current_namespace();
+        log::debug!(
+            "Python file executed with XML context namespace: '{}' (will {} apply)",
+            current_ns,
+            if current_ns != "/" { "YES" } else { "NO" }
+        );
         if current_ns != "/" {
             log::debug!(
                 "Applying namespace '{}' to Python-generated entities",
@@ -284,7 +289,11 @@ impl LaunchTraverser {
 
         // Process includes recursively
         for include in includes {
-            log::debug!("Processing Python include: {}", include.file_path);
+            log::debug!(
+                "Processing Python include: {} with ROS namespace '{}'",
+                include.file_path,
+                include.ros_namespace
+            );
 
             // Convert args to HashMap
             let mut include_args = args.clone();
@@ -322,45 +331,78 @@ impl LaunchTraverser {
                 include_path.to_path_buf()
             };
 
-            // Recursively process the included file (determine type by extension)
-            if let Some(ext) = resolved_include_path.extension().and_then(|s| s.to_str()) {
-                match ext {
-                    "py" => {
-                        self.execute_python_file(&resolved_include_path, &include_args)?;
-                    }
-                    "xml" => {
-                        // Process as XML include
-                        self.process_xml_include(&resolved_include_path, &include_args)?;
-                    }
-                    "yaml" | "yml" => {
-                        // Process as YAML launch file
-                        self.process_yaml_launch_file(&resolved_include_path)?;
-                    }
-                    _ => {
-                        log::warn!(
-                            "Unknown file type for Python include: {}",
-                            resolved_include_path.display()
-                        );
-                    }
-                }
+            // Apply the captured ROS namespace for this include
+            use crate::python::bridge::{pop_ros_namespace, push_ros_namespace};
+
+            // Determine the ROS namespace to apply
+            let ros_ns = if !include.ros_namespace.is_empty() && include.ros_namespace != "/" {
+                Some(include.ros_namespace.clone())
             } else {
-                log::warn!(
-                    "No file extension for Python include: {}",
-                    resolved_include_path.display()
-                );
-            }
+                None
+            };
+
+            // Process the include with namespace context
+            let result =
+                if let Some(ext) = resolved_include_path.extension().and_then(|s| s.to_str()) {
+                    match ext {
+                        "py" => {
+                            // For Python includes, push namespace onto stack
+                            if let Some(ref ns) = ros_ns {
+                                push_ros_namespace(ns.clone());
+                            }
+                            let result =
+                                self.execute_python_file(&resolved_include_path, &include_args);
+                            if ros_ns.is_some() {
+                                pop_ros_namespace();
+                            }
+                            result
+                        }
+                        "xml" => {
+                            // For XML includes, pass namespace directly
+                            self.process_xml_include_with_namespace(
+                                &resolved_include_path,
+                                &include_args,
+                                ros_ns.clone(),
+                            )
+                        }
+                        "yaml" | "yml" => {
+                            // Process as YAML launch file
+                            self.process_yaml_launch_file(&resolved_include_path)
+                        }
+                        _ => {
+                            log::warn!(
+                                "Unknown file type for Python include: {}",
+                                resolved_include_path.display()
+                            );
+                            Ok(())
+                        }
+                    }
+                } else {
+                    log::warn!(
+                        "No file extension for Python include: {}",
+                        resolved_include_path.display()
+                    );
+                    Ok(())
+                };
+
+            // Propagate any errors
+            result?;
         }
 
         Ok(())
     }
 
-    /// Helper to process an XML include with given arguments
-    fn process_xml_include(
+    /// Process an XML include with an optional ROS namespace to apply
+    fn process_xml_include_with_namespace(
         &mut self,
         resolved_path: &Path,
         include_args: &HashMap<String, String>,
+        ros_namespace: Option<String>,
     ) -> Result<()> {
         log::info!("Including XML launch file: {}", resolved_path.display());
+        if let Some(ref ns) = ros_namespace {
+            log::debug!("Applying ROS namespace '{}' to XML include", ns);
+        }
 
         // Create a new context for the included file (O(1) with Arc, not O(n) clone!)
         let mut include_context = self.context.child();
@@ -390,6 +432,89 @@ impl LaunchTraverser {
             include_chain: self.include_chain.clone(),
         };
         included_traverser.traverse_entity(&root)?;
+
+        // Apply ROS namespace if provided (for includes from Python OpaqueFunction)
+        if let Some(ns) = ros_namespace {
+            if !ns.is_empty() && ns != "/" {
+                log::debug!(
+                    "Applying ROS namespace '{}' to {} nodes, {} containers, {} load_nodes from XML include",
+                    ns,
+                    included_traverser.records.len(),
+                    included_traverser.containers.len(),
+                    included_traverser.load_nodes.len()
+                );
+
+                // Apply namespace to regular nodes
+                for node in &mut included_traverser.records {
+                    if let Some(ref node_ns) = node.namespace {
+                        node.namespace = Some(Self::apply_namespace_prefix(&ns, node_ns));
+                    } else {
+                        node.namespace = Some(ns.clone());
+                    }
+                }
+
+                // Apply namespace to containers and build a mapping
+                let mut container_name_map = std::collections::HashMap::new();
+                for container in &mut included_traverser.containers {
+                    // Build old full name
+                    let old_full_name = if container.namespace.starts_with('/') {
+                        if container.namespace == "/" {
+                            format!("/{}", container.name)
+                        } else {
+                            format!("{}/{}", container.namespace, container.name)
+                        }
+                    } else {
+                        format!("/{}/{}", container.namespace, container.name)
+                    };
+
+                    // Apply namespace prefix
+                    container.namespace = Self::apply_namespace_prefix(&ns, &container.namespace);
+
+                    // Build new full name
+                    let new_full_name = if container.namespace.starts_with('/') {
+                        if container.namespace == "/" {
+                            format!("/{}", container.name)
+                        } else {
+                            format!("{}/{}", container.namespace, container.name)
+                        }
+                    } else {
+                        format!("/{}/{}", container.namespace, container.name)
+                    };
+
+                    container_name_map.insert(old_full_name, new_full_name);
+                }
+
+                // Apply namespace to load_nodes and update target containers
+                for load_node in &mut included_traverser.load_nodes {
+                    load_node.namespace = Self::apply_namespace_prefix(&ns, &load_node.namespace);
+
+                    // Update target_container_name if it matches a renamed container
+                    if let Some(new_name) = container_name_map.get(&load_node.target_container_name)
+                    {
+                        log::debug!(
+                            "Updating target_container_name from '{}' to '{}'",
+                            load_node.target_container_name,
+                            new_name
+                        );
+                        load_node.target_container_name = new_name.clone();
+                    } else {
+                        // If not in map, still apply namespace prefix for external containers
+                        if load_node.target_container_name.starts_with('/') {
+                            let prefixed =
+                                Self::apply_namespace_prefix(&ns, &load_node.target_container_name);
+                            if prefixed != load_node.target_container_name {
+                                log::debug!(
+                                    "Applying namespace prefix to target_container_name: '{}' -> '{}'",
+                                    load_node.target_container_name,
+                                    prefixed
+                                );
+                                load_node.target_container_name = prefixed;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Merge records from included file into current records
         self.records.extend(included_traverser.records);
@@ -797,10 +922,21 @@ impl LaunchTraverser {
                 let ns_subs = parse_substitutions(&ns_str)?;
                 let namespace = resolve_substitutions(&ns_subs, &self.context)
                     .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-                self.context.push_namespace(namespace);
+
+                // Push to XML context namespace stack
+                self.context.push_namespace(namespace.clone());
+
+                // ALSO push to Python ROS namespace stack so Python files can access it
+                use crate::python::bridge::push_ros_namespace;
+                push_ros_namespace(namespace);
             }
             "pop-ros-namespace" => {
+                // Pop from XML context namespace stack
                 self.context.pop_namespace();
+
+                // ALSO pop from Python ROS namespace stack to keep them in sync
+                use crate::python::bridge::pop_ros_namespace;
+                pop_ros_namespace();
             }
             "node_container" | "node-container" => {
                 // Parse container and its composable nodes

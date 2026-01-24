@@ -44,12 +44,15 @@ impl PythonLaunchExecutor {
     fn process_action(py: Python, action: &PyAny) -> PyResult<()> {
         use crate::python::api::actions::OpaqueFunction;
 
+        let action_type = action.get_type().name().unwrap_or("unknown");
+        log::trace!("Processing action of type: {}", action_type);
+
         // Check if this is an OpaqueFunction - extract and execute it
         if let Ok(opaque_func) = action.extract::<OpaqueFunction>() {
-            log::trace!("Executing OpaqueFunction");
+            log::debug!("Found OpaqueFunction, executing it");
             match opaque_func.execute(py) {
                 Ok(result) => {
-                    log::trace!("OpaqueFunction succeeded");
+                    log::debug!("OpaqueFunction succeeded");
                     // Process the result (list of actions returned from function)
                     Self::process_action_result(py, result.as_ref(py))?;
                 }

@@ -32,17 +32,25 @@ pub fn make_namespace_absolute(namespace: String) -> String {
 ///
 /// Joins a namespace prefix with a name
 #[pyfunction]
-pub fn prefix_namespace(prefix: String, name: String) -> String {
-    let prefix = make_namespace_absolute(prefix);
+#[pyo3(signature = (prefix, name))]
+pub fn prefix_namespace(py: Python, prefix: PyObject, name: String) -> PyResult<String> {
+    // Handle None prefix (treat as empty string)
+    let prefix_str = if prefix.is_none(py) {
+        String::new()
+    } else {
+        prefix.extract::<String>(py)?
+    };
+
+    let prefix = make_namespace_absolute(prefix_str);
 
     if name.is_empty() {
-        prefix
+        Ok(prefix)
     } else if name.starts_with('/') {
-        name
+        Ok(name)
     } else if prefix == "/" {
-        format!("/{}", name)
+        Ok(format!("/{}", name))
     } else {
-        format!("{}/{}", prefix, name)
+        Ok(format!("{}/{}", prefix, name))
     }
 }
 

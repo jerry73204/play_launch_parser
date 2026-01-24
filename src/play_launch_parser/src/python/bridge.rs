@@ -12,6 +12,11 @@ use std::sync::Arc;
 pub static LAUNCH_CONFIGURATIONS: Lazy<Arc<Mutex<HashMap<String, String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
 
+/// Global ROS namespace stack
+/// Tracks the current ROS namespace hierarchy from PushRosNamespace/PopRosNamespace actions
+pub static ROS_NAMESPACE_STACK: Lazy<Arc<Mutex<Vec<String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(vec!["".to_string()])));
+
 /// Captured node data from Python
 #[derive(Debug, Clone)]
 pub struct NodeCapture {
@@ -120,11 +125,48 @@ pub static CAPTURED_LOAD_NODES: Lazy<Arc<Mutex<Vec<LoadNodeCapture>>>> =
 pub struct IncludeCapture {
     pub file_path: String,
     pub args: Vec<(String, String)>,
+    pub ros_namespace: String,
 }
 
 /// Global storage for captured includes (thread-safe)
 pub static CAPTURED_INCLUDES: Lazy<Arc<Mutex<Vec<IncludeCapture>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+
+/// Push a namespace onto the ROS namespace stack
+pub fn push_ros_namespace(namespace: String) {
+    let normalized = if namespace.is_empty() {
+        String::new()
+    } else if namespace.starts_with('/') {
+        namespace
+    } else {
+        format!("/{}", namespace)
+    };
+
+    log::debug!("Pushing ROS namespace: '{}'", normalized);
+    ROS_NAMESPACE_STACK.lock().push(normalized);
+}
+
+/// Pop a namespace from the ROS namespace stack
+pub fn pop_ros_namespace() {
+    let mut stack = ROS_NAMESPACE_STACK.lock();
+    if stack.len() > 1 {
+        let popped = stack.pop();
+        log::debug!("Popped ROS namespace: {:?}", popped);
+    } else {
+        log::warn!("Attempted to pop from empty namespace stack");
+    }
+}
+
+/// Get the current ROS namespace (concatenation of all namespaces in the stack)
+pub fn get_current_ros_namespace() -> String {
+    let stack = ROS_NAMESPACE_STACK.lock();
+    let result = stack.join("");
+    if result.is_empty() {
+        "/".to_string()
+    } else {
+        result
+    }
+}
 
 /// Clear all captured global state
 ///
@@ -137,4 +179,9 @@ pub fn clear_all_captured() {
     CAPTURED_CONTAINERS.lock().clear();
     CAPTURED_LOAD_NODES.lock().clear();
     CAPTURED_INCLUDES.lock().clear();
+
+    // Reset namespace stack to root
+    let mut stack = ROS_NAMESPACE_STACK.lock();
+    stack.clear();
+    stack.push("".to_string());
 }

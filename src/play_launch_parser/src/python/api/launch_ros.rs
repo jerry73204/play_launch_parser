@@ -76,7 +76,11 @@ impl Node {
         let package = Self::pyobject_to_string(py, &package)?;
         let executable = Self::pyobject_to_string(py, &executable)?;
 
-        log::debug!("Node::new: package='{}', executable='{}'", package, executable);
+        log::debug!(
+            "Node::new: package='{}', executable='{}'",
+            package,
+            executable
+        );
 
         let name = name
             .map(|obj| {
@@ -165,7 +169,11 @@ impl Node {
 
         // Debug: log the type of object we're trying to convert
         let obj_type = obj_ref.get_type().name().unwrap_or("unknown");
-        log::debug!("pyobject_to_string: converting type '{}', repr: {}", obj_type, obj_ref);
+        log::debug!(
+            "pyobject_to_string: converting type '{}', repr: {}",
+            obj_type,
+            obj_ref
+        );
 
         // Try direct string extraction first
         if let Ok(s) = obj_ref.extract::<String>() {
@@ -175,7 +183,10 @@ impl Node {
 
         // Handle lists (concatenate elements) - common in ROS 2 Python launch files
         if let Ok(list) = obj_ref.downcast::<PyList>() {
-            log::debug!("pyobject_to_string: handling list with {} elements", list.len());
+            log::debug!(
+                "pyobject_to_string: handling list with {} elements",
+                list.len()
+            );
             let mut result = String::new();
             for item in list.iter() {
                 let item_str = Self::pyobject_to_string(py, &item.into())?;
@@ -216,15 +227,52 @@ impl Node {
 
     /// Capture node to global storage
     fn capture_node(node: &Node) {
+        use crate::python::bridge::get_current_ros_namespace;
+
         // Parse parameters and remappings from Python objects
         let parameters = Python::with_gil(|py| node.parse_parameters(py).unwrap_or_default());
         let remappings = Python::with_gil(|py| node.parse_remappings(py).unwrap_or_default());
+
+        // Get current ROS namespace and combine with node's namespace
+        let ros_namespace = get_current_ros_namespace();
+        let node_ns = node.namespace.as_ref().map(|ns| {
+            if ns.is_empty() {
+                String::new()
+            } else if ns.starts_with('/') {
+                ns.clone()
+            } else {
+                format!("/{}", ns)
+            }
+        });
+
+        let full_namespace = match node_ns {
+            Some(ns) => {
+                if ros_namespace == "/" {
+                    if ns.is_empty() {
+                        None
+                    } else {
+                        Some(ns)
+                    }
+                } else if ns.is_empty() {
+                    Some(ros_namespace.clone())
+                } else {
+                    Some(format!("{}{}", ros_namespace, ns))
+                }
+            }
+            None => {
+                if ros_namespace == "/" {
+                    None
+                } else {
+                    Some(ros_namespace.clone())
+                }
+            }
+        };
 
         let capture = NodeCapture {
             package: node.package.clone(),
             executable: node.executable.clone(),
             name: node.name.clone(),
-            namespace: node.namespace.clone(),
+            namespace: full_namespace,
             parameters,
             remappings,
             arguments: node.arguments.clone(),
@@ -232,9 +280,10 @@ impl Node {
         };
 
         log::debug!(
-            "Captured Python node: {} / {}",
+            "Captured Python node: {} / {} (ros_namespace: {})",
             capture.package,
-            capture.executable
+            capture.executable,
+            ros_namespace
         );
 
         CAPTURED_NODES.lock().push(capture);
@@ -557,30 +606,49 @@ impl ComposableNodeContainer {
 
 impl ComposableNodeContainer {
     fn capture_container(container: &ComposableNodeContainer) {
-        // Normalize namespace to have leading slash
-        let namespace = container
+        use crate::python::bridge::get_current_ros_namespace;
+
+        // Get current ROS namespace from the stack
+        let ros_namespace = get_current_ros_namespace();
+
+        // Normalize container's namespace
+        let container_ns = container
             .namespace
             .as_ref()
             .map(|ns| {
                 if ns.is_empty() {
-                    "/".to_string()
+                    String::new()
                 } else if ns.starts_with('/') {
                     ns.clone()
                 } else {
                     format!("/{}", ns)
                 }
             })
-            .unwrap_or_else(|| "/".to_string());
+            .unwrap_or_default();
+
+        // Combine ROS namespace with container namespace
+        let full_namespace = if ros_namespace == "/" {
+            if container_ns.is_empty() {
+                "/".to_string()
+            } else {
+                container_ns
+            }
+        } else if container_ns.is_empty() {
+            ros_namespace.clone()
+        } else {
+            format!("{}{}", ros_namespace, container_ns)
+        };
 
         let capture = ContainerCapture {
             name: container.name.clone(),
-            namespace: namespace.clone(),
+            namespace: full_namespace.clone(),
         };
 
         log::debug!(
-            "Captured Python container: {} (namespace: {})",
+            "Captured Python container: {} (namespace: {}, ros_namespace: {})",
             capture.name,
-            capture.namespace
+            capture.namespace,
+            ros_namespace
         );
 
         CAPTURED_CONTAINERS.lock().push(capture);
@@ -687,6 +755,7 @@ impl ComposableNode {
         remappings=None,
         **_kwargs
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python,
         package: PyObject,
@@ -712,7 +781,10 @@ impl ComposableNode {
 
         log::debug!(
             "ComposableNode::new: package='{}', plugin='{}', name='{}', namespace={:?}",
-            package_str, plugin_str, name_str, namespace_str
+            package_str,
+            plugin_str,
+            name_str,
+            namespace_str
         );
         Ok(Self {
             package: package_str,
@@ -1058,7 +1130,7 @@ impl LifecycleNode {
 impl LifecycleNode {
     /// Capture the lifecycle node as a regular NodeCapture
     fn capture_node(&self, py: Python) -> PyResult<()> {
-        use crate::python::bridge::{NodeCapture, CAPTURED_NODES};
+        use crate::python::bridge::{get_current_ros_namespace, NodeCapture, CAPTURED_NODES};
 
         // Parse parameters (same logic as regular Node)
         let parsed_params = self.parse_parameters(py)?;
@@ -1069,11 +1141,46 @@ impl LifecycleNode {
         // Parse arguments
         let parsed_args = self.parse_arguments(py)?;
 
+        // Get current ROS namespace and combine with node's namespace
+        let ros_namespace = get_current_ros_namespace();
+        let node_ns = self.namespace.as_ref().map(|ns| {
+            if ns.is_empty() {
+                String::new()
+            } else if ns.starts_with('/') {
+                ns.clone()
+            } else {
+                format!("/{}", ns)
+            }
+        });
+
+        let full_namespace = match node_ns {
+            Some(ns) => {
+                if ros_namespace == "/" {
+                    if ns.is_empty() {
+                        None
+                    } else {
+                        Some(ns)
+                    }
+                } else if ns.is_empty() {
+                    Some(ros_namespace.clone())
+                } else {
+                    Some(format!("{}{}", ros_namespace, ns))
+                }
+            }
+            None => {
+                if ros_namespace == "/" {
+                    None
+                } else {
+                    Some(ros_namespace.clone())
+                }
+            }
+        };
+
         let capture = NodeCapture {
             package: self.package.clone(),
             executable: self.executable.clone(),
             name: self.name.clone(),
-            namespace: self.namespace.clone(),
+            namespace: full_namespace,
             parameters: parsed_params,
             remappings: parsed_remaps,
             arguments: parsed_args,
@@ -1081,9 +1188,10 @@ impl LifecycleNode {
         };
 
         log::debug!(
-            "Captured Python lifecycle node: {} / {}",
+            "Captured Python lifecycle node: {} / {} (ros_namespace: {})",
             capture.package,
-            capture.executable
+            capture.executable,
+            ros_namespace
         );
 
         CAPTURED_NODES.lock().push(capture);
@@ -1223,16 +1331,30 @@ impl LifecycleNode {
 #[pyclass]
 #[derive(Clone)]
 pub struct PushRosNamespace {
-    #[allow(dead_code)] // Keep for API compatibility
+    #[allow(dead_code)] // Stored for API compatibility
     namespace: PyObject,
 }
 
 #[pymethods]
 impl PushRosNamespace {
     #[new]
-    fn new(namespace: PyObject) -> Self {
-        log::debug!("Python Launch PushRosNamespace created (limited support)");
-        Self { namespace }
+    fn new(py: Python, namespace: PyObject) -> PyResult<Self> {
+        // Convert namespace to string
+        let namespace_str = if let Ok(s) = namespace.extract::<String>(py) {
+            s
+        } else if let Ok(str_result) = namespace.call_method0(py, "__str__") {
+            str_result.extract::<String>(py)?
+        } else {
+            namespace.to_string()
+        };
+
+        log::debug!("Python Launch PushRosNamespace: '{}'", namespace_str);
+
+        // Push onto the namespace stack
+        use crate::python::bridge::push_ros_namespace;
+        push_ros_namespace(namespace_str);
+
+        Ok(Self { namespace })
     }
 
     fn __repr__(&self) -> String {
@@ -1257,7 +1379,12 @@ pub struct PopRosNamespace {}
 impl PopRosNamespace {
     #[new]
     fn new() -> Self {
-        log::debug!("Python Launch PopRosNamespace created (limited support)");
+        log::debug!("Python Launch PopRosNamespace");
+
+        // Pop from the namespace stack
+        use crate::python::bridge::pop_ros_namespace;
+        pop_ros_namespace();
+
         Self {}
     }
 
