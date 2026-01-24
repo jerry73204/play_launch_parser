@@ -47,7 +47,6 @@ impl CommandGenerator {
         let mut params_files = Vec::new();
         for param_file_subs in &node.param_files {
             let param_file_path = resolve_substitutions(param_file_subs, context)?;
-            params_files.push(param_file_path.clone());
 
             // Load parameters from file and merge with inline params
             match load_param_file(Path::new(&param_file_path)) {
@@ -58,6 +57,9 @@ impl CommandGenerator {
                     log::warn!("Failed to load parameter file {}: {}", param_file_path, e);
                 }
             }
+
+            // Move param_file_path into vec after use, no clone needed
+            params_files.push(param_file_path);
         }
 
         // Collect node-specific remappings
@@ -74,16 +76,12 @@ impl CommandGenerator {
 
         // Prepend global remappings from context (set_remap actions)
         // Global remappings are added first so node-specific remappings can override them
-        let global_remaps: Vec<(String, String)> = context
-            .remappings()
-            .iter()
-            .map(|(from, to)| (from.clone(), to.clone()))
-            .collect();
+        let global_remaps = context.remappings(); // Already owned Vec, no clone needed
         remaps.splice(0..0, global_remaps);
 
         // Merge context environment with node-specific environment
         // Node-specific environment takes precedence
-        let mut merged_env = context.environment().clone();
+        let mut merged_env = context.environment(); // Already owned HashMap, no clone needed
         for (key, value) in &node.environment {
             // Resolve any substitutions in the environment value
             let substitutions = crate::substitution::parse_substitutions(value).map_err(|e| {
@@ -92,7 +90,7 @@ impl CommandGenerator {
                 ))
             })?;
             let resolved_value = resolve_substitutions(&substitutions, context)?;
-            merged_env.insert(key.clone(), resolved_value);
+            merged_env.insert(key.clone(), resolved_value); // key.clone() needed since we're iterating with &
         }
 
         let env = if merged_env.is_empty() {
@@ -105,13 +103,8 @@ impl CommandGenerator {
         let global_params = if context.global_parameters().is_empty() {
             None
         } else {
-            Some(
-                context
-                    .global_parameters()
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-            )
+            // context.global_parameters() returns owned HashMap, convert to Vec
+            Some(context.global_parameters().into_iter().collect::<Vec<_>>())
         };
 
         Ok(NodeRecord {
@@ -177,13 +170,14 @@ impl CommandGenerator {
         cmd.push("--ros-args".to_string());
 
         // 3. Node name
-        let node_name = if let Some(name_subs) = &node.name {
-            resolve_substitutions(name_subs, context)?
-        } else {
-            executable.clone()
-        };
         cmd.push("-r".to_string());
-        cmd.push(format!("__node:={}", node_name));
+        if let Some(name_subs) = &node.name {
+            let node_name = resolve_substitutions(name_subs, context)?;
+            cmd.push(format!("__node:={}", node_name));
+        } else {
+            // Use executable as node name, no clone needed - format! takes &str
+            cmd.push(format!("__node:={}", executable));
+        }
 
         // 4. Namespace
         let namespace = if let Some(ns_subs) = &node.namespace {
@@ -223,6 +217,8 @@ impl CommandGenerator {
         context: &LaunchContext,
     ) -> Result<NodeRecord, GenerationError> {
         let cmd_str = resolve_substitutions(&exec.cmd, context)?;
+
+        // Build command vector - clone cmd_str since we need it for executable field
         let mut cmd = vec![cmd_str.clone()];
 
         // Add arguments
@@ -231,15 +227,18 @@ impl CommandGenerator {
             cmd.push(arg_str);
         }
 
+        // Calculate name - if custom name provided, use it; otherwise use cmd[0] reference
+        // This avoids cloning cmd_str twice
         let name = if let Some(name_subs) = &exec.name {
             Some(resolve_substitutions(name_subs, context)?)
         } else {
-            Some(cmd_str.clone())
+            // Reuse cmd[0] instead of cloning cmd_str again
+            cmd.first().cloned()
         };
 
         // Merge context environment with executable-specific environment
         // Executable-specific environment takes precedence
-        let mut merged_env = context.environment().clone();
+        let mut merged_env = context.environment(); // Already owned HashMap, no clone needed
         for (key, value) in &exec.environment {
             // Resolve any substitutions in the environment value
             let substitutions = crate::substitution::parse_substitutions(value).map_err(|e| {
@@ -248,7 +247,7 @@ impl CommandGenerator {
                 ))
             })?;
             let resolved_value = resolve_substitutions(&substitutions, context)?;
-            merged_env.insert(key.clone(), resolved_value);
+            merged_env.insert(key.clone(), resolved_value); // key.clone() needed since we're iterating with &
         }
 
         let env = if merged_env.is_empty() {

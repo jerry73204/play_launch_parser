@@ -94,6 +94,6 @@ impl<'a, 'input> XmlEntity<'a, 'input> {
             .children()
             .filter(|n| n.is_element())
             .map(XmlEntity::new)
-            // No .collect() - returns iterator directly
+        // No .collect() - returns iterator directly
     }
 }
