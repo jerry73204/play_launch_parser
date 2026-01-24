@@ -124,3 +124,17 @@ pub struct IncludeCapture {
 /// Global storage for captured includes (thread-safe)
 pub static CAPTURED_INCLUDES: Lazy<Arc<Mutex<Vec<IncludeCapture>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+
+/// Clear all captured global state
+///
+/// This should be called at the start of each parse_launch_file call to prevent
+/// test contamination when running multiple tests in sequence.
+/// Note: LAUNCH_CONFIGURATIONS is managed separately by the executor and should
+/// not be cleared here.
+#[cfg(feature = "python")]
+pub fn clear_all_captured() {
+    CAPTURED_NODES.lock().unwrap().clear();
+    CAPTURED_CONTAINERS.lock().unwrap().clear();
+    CAPTURED_LOAD_NODES.lock().unwrap().clear();
+    CAPTURED_INCLUDES.lock().unwrap().clear();
+}
