@@ -21,6 +21,7 @@ use condition::should_process_entity;
 use dashmap::DashMap;
 use error::{ParseError, Result};
 use once_cell::sync::Lazy;
+use rayon::prelude::*;
 use record::{CommandGenerator, RecordJson};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -74,6 +75,8 @@ pub struct LaunchTraverser {
     records: Vec<record::NodeRecord>,
     containers: Vec<record::ComposableNodeContainerRecord>,
     load_nodes: Vec<record::LoadNodeRecord>,
+    /// Track include chain to detect circular includes (thread-local stack)
+    include_chain: Vec<PathBuf>,
 }
 
 impl LaunchTraverser {
@@ -89,6 +92,7 @@ impl LaunchTraverser {
             records: Vec::new(),
             containers: Vec::new(),
             load_nodes: Vec::new(),
+            include_chain: Vec::new(),
         }
     }
 
@@ -398,6 +402,7 @@ impl LaunchTraverser {
             records: Vec::new(),
             containers: Vec::new(),
             load_nodes: Vec::new(),
+            include_chain: self.include_chain.clone(),
         };
         included_traverser.traverse_entity(&root)?;
 
@@ -431,6 +436,17 @@ impl LaunchTraverser {
         } else {
             file_path.to_path_buf()
         };
+
+        // Canonicalize path for circular include detection
+        let canonical_path = resolved_path
+            .canonicalize()
+            .unwrap_or_else(|_| resolved_path.clone());
+
+        // Check for circular includes in the current include chain
+        if self.include_chain.contains(&canonical_path) {
+            log::warn!("Circular include detected: {}", canonical_path.display());
+            return Ok(()); // Skip circular includes
+        }
 
         log::info!("Including launch file: {}", resolved_path.display());
 
@@ -508,12 +524,16 @@ impl LaunchTraverser {
         let doc = roxmltree::Document::parse(&content)?;
         let root = xml::XmlEntity::new(doc.root_element());
 
-        // Create temporary traverser for included file
+        // Create temporary traverser for included file with extended include chain
+        let mut child_chain = self.include_chain.clone();
+        child_chain.push(canonical_path);
+
         let mut included_traverser = LaunchTraverser {
             context: include_context,
             records: Vec::new(),
             containers: Vec::new(),
             load_nodes: Vec::new(),
+            include_chain: child_chain,
         };
         included_traverser.traverse_entity(&root)?;
 
@@ -523,6 +543,67 @@ impl LaunchTraverser {
         self.load_nodes.extend(included_traverser.load_nodes);
 
         Ok(())
+    }
+
+    /// Process multiple includes in parallel using rayon
+    /// Returns aggregated (nodes, containers, load_nodes)
+    fn process_includes_parallel(
+        &self,
+        includes: Vec<IncludeAction>,
+    ) -> Result<(
+        Vec<record::NodeRecord>,
+        Vec<record::ComposableNodeContainerRecord>,
+        Vec<record::LoadNodeRecord>,
+    )> {
+        // Capture current file and include chain for parallel tasks
+        let current_file = self.context.current_file().cloned();
+        let include_chain = self.include_chain.clone();
+
+        // Process includes in parallel using rayon
+        let results: Vec<Result<_>> = includes
+            .par_iter()
+            .map(|include| {
+                // Each thread gets its own traverser with preserved context
+                // We clone the context for each thread (context is cheap to clone after Phase 7.2)
+                let mut thread_context = self.context.clone();
+
+                // Preserve current file for relative path resolution
+                if let Some(ref file) = current_file {
+                    thread_context.set_current_file(file.clone());
+                }
+
+                let mut traverser = LaunchTraverser {
+                    context: thread_context,
+                    records: Vec::new(),
+                    containers: Vec::new(),
+                    load_nodes: Vec::new(),
+                    include_chain: include_chain.clone(), // Each thread gets its own chain
+                };
+
+                // Process the include
+                traverser.process_include(include)?;
+
+                Ok((
+                    traverser.records,
+                    traverser.containers,
+                    traverser.load_nodes,
+                ))
+            })
+            .collect();
+
+        // Merge results from all parallel tasks
+        let mut all_records = Vec::new();
+        let mut all_containers = Vec::new();
+        let mut all_load_nodes = Vec::new();
+
+        for result in results {
+            let (records, containers, load_nodes) = result?;
+            all_records.extend(records);
+            all_containers.extend(containers);
+            all_load_nodes.extend(load_nodes);
+        }
+
+        Ok((all_records, all_containers, all_load_nodes))
     }
 
     fn traverse_entity(&mut self, entity: &XmlEntity) -> Result<()> {
@@ -535,8 +616,43 @@ impl LaunchTraverser {
         match entity.type_name() {
             "launch" => {
                 // Root element, traverse children
-                for child in entity.children() {
-                    self.traverse_entity(&child)?;
+                // Collect consecutive includes and process them in parallel for maximum performance
+                let children = entity.children();
+                let mut i = 0;
+
+                while i < children.len() {
+                    // Check if this is the start of a sequence of includes
+                    if children[i].type_name() == "include"
+                        && should_process_entity(&children[i], &self.context)?
+                    {
+                        // Collect consecutive includes
+                        let mut includes = Vec::new();
+                        while i < children.len()
+                            && children[i].type_name() == "include"
+                            && should_process_entity(&children[i], &self.context)?
+                        {
+                            let include = IncludeAction::from_entity(&children[i])?;
+                            includes.push(include);
+                            i += 1;
+                        }
+
+                        // Process includes in parallel if we have more than one
+                        if includes.len() > 1 {
+                            log::debug!("Processing {} includes in parallel", includes.len());
+                            let (records, containers, load_nodes) =
+                                self.process_includes_parallel(includes)?;
+                            self.records.extend(records);
+                            self.containers.extend(containers);
+                            self.load_nodes.extend(load_nodes);
+                        } else if includes.len() == 1 {
+                            // Single include, process sequentially
+                            self.process_include(&includes[0])?;
+                        }
+                    } else {
+                        // Not an include, process normally
+                        self.traverse_entity(&children[i])?;
+                        i += 1;
+                    }
                 }
             }
             "arg" => {
