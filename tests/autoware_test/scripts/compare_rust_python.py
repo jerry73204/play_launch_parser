@@ -8,7 +8,7 @@ This comprehensive comparison tool:
 - Saves JSON outputs for manual inspection
 
 Usage:
-    python3 compare_rust_python.py [launch_file]
+    python3 compare_rust_python.py [launch_file] [--profile PROFILE]
 
     If no launch file is specified, the script will automatically test against
     Autoware's planning_simulator.launch.xml (requires autoware symlink).
@@ -16,9 +16,10 @@ Usage:
 Examples:
     python3 compare_rust_python.py
     python3 compare_rust_python.py /path/to/test.launch.xml
-    python3 compare_rust_python.py autoware/src/launcher/autoware_launch/autoware_launch/launch/autoware.launch.xml
+    python3 compare_rust_python.py --profile release
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -34,7 +35,7 @@ class Colors:
     BOLD = '\033[1m'
     END = '\033[0m'
 
-def get_paths():
+def get_paths(profile: str = "dev-release"):
     """Get important paths relative to script location."""
     script_dir = Path(__file__).parent
 
@@ -48,7 +49,8 @@ def get_paths():
         project_root = script_dir.parent.parent
         autoware_symlink = project_root / "tests" / "autoware_test" / "autoware"
 
-    rust_bin = project_root / "src" / "play_launch_parser" / "target" / "release" / "play_launch_parser"
+    # Rust binary location based on profile
+    rust_bin = project_root / "target" / profile / "play_launch_parser"
 
     # Resolve autoware path from symlink if it exists
     if autoware_symlink.exists() and autoware_symlink.is_symlink():
@@ -69,6 +71,13 @@ def get_default_args_for_launch_file(launch_file: Path) -> Dict[str, str]:
     filename = launch_file.name
 
     if filename == "planning_simulator.launch.xml":
+        # Minimal required arguments per Autoware documentation:
+        # https://autowarefoundation.github.io/autoware-documentation/main/demos/planning-sim/
+        #
+        # Note: Our parser should load the YAML preset file automatically to get
+        # velocity_smoother_type and other planning parameters, but there's currently
+        # a context inheritance bug preventing YAML variables from being accessible
+        # in child contexts. This will be fixed in a future update.
         return {
             "map_path": "/tmp/dummy_map",
             "vehicle_model": "sample_vehicle",
@@ -84,7 +93,7 @@ def run_rust_parser(launch_file: Path, paths: Dict, extra_args: Dict[str, str] =
     rust_bin = paths['rust_bin']
     if not rust_bin.exists():
         print(f"{Colors.RED}Error: Rust binary not found at {rust_bin}{Colors.END}")
-        print("Run: cargo build --release --features python")
+        print(f"Run: cargo build --profile {rust_bin.parent.name}")
         sys.exit(1)
 
     autoware_ws = paths['autoware_ws']
@@ -411,16 +420,31 @@ def compare_nodes(rust_data: Dict, python_data: Dict) -> bool:
 
 def main():
     """Main test function."""
-    paths = get_paths()
+    parser = argparse.ArgumentParser(
+        description="Compare Rust and Python launch file parsers on Autoware",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                           # Use default planning_simulator.launch.xml
+  %(prog)s /path/to/test.launch.xml  # Test specific file
+  %(prog)s --profile release         # Use release build
+        """
+    )
+    parser.add_argument('launch_file', nargs='?', help='Path to the launch file to parse (optional)')
+    parser.add_argument('--profile', default='dev-release',
+                        help='Cargo build profile (default: dev-release)')
+
+    args = parser.parse_args()
+
+    paths = get_paths(args.profile)
 
     # Determine launch file to test
-    if len(sys.argv) >= 2:
+    if args.launch_file:
         # User provided a launch file
-        launch_file_arg = sys.argv[1]
-        if launch_file_arg.startswith('autoware/'):
-            launch_file = paths['autoware_ws'] / launch_file_arg[9:]  # Strip 'autoware/'
+        if args.launch_file.startswith('autoware/'):
+            launch_file = paths['autoware_ws'] / args.launch_file[9:]  # Strip 'autoware/'
         else:
-            launch_file = Path(launch_file_arg)
+            launch_file = Path(args.launch_file)
             # If relative path, resolve relative to script directory
             if not launch_file.is_absolute():
                 launch_file = (paths['script_dir'] / launch_file).resolve()
