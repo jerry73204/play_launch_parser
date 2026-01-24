@@ -4,10 +4,7 @@ pub mod actions;
 pub mod condition;
 pub mod error;
 pub mod params;
-
-#[cfg(feature = "python")]
 pub mod python;
-
 pub mod record;
 pub mod substitution;
 pub mod xml;
@@ -97,7 +94,6 @@ impl LaunchTraverser {
     }
 
     /// Apply namespace prefix to a path (handles both absolute and relative namespaces)
-    #[cfg(feature = "python")]
     fn apply_namespace_prefix(prefix: &str, path: &str) -> String {
         // If path is empty, return the prefix
         if path.is_empty() {
@@ -136,19 +132,8 @@ impl LaunchTraverser {
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
             match ext {
                 "py" => {
-                    #[cfg(feature = "python")]
-                    {
-                        log::info!("Executing Python launch file: {}", path.display());
-                        return self.execute_python_file(path, &self.context.configurations());
-                    }
-                    #[cfg(not(feature = "python"))]
-                    {
-                        log::warn!(
-                            "Skipping Python launch file (Python support not enabled): {}",
-                            path.display()
-                        );
-                        return Ok(());
-                    }
+                    log::info!("Executing Python launch file: {}", path.display());
+                    return self.execute_python_file(path, &self.context.configurations());
                 }
                 "yaml" | "yml" => {
                     // YAML files in traverse_file are always launch files
@@ -171,7 +156,6 @@ impl LaunchTraverser {
         Ok(())
     }
 
-    #[cfg(feature = "python")]
     fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
         use crate::python::PythonLaunchExecutor;
 
@@ -371,7 +355,6 @@ impl LaunchTraverser {
     }
 
     /// Helper to process an XML include with given arguments
-    #[cfg(feature = "python")]
     fn process_xml_include(
         &mut self,
         resolved_path: &Path,
@@ -463,31 +446,20 @@ impl LaunchTraverser {
         if let Some(ext) = resolved_path.extension().and_then(|s| s.to_str()) {
             match ext {
                 "py" => {
-                    #[cfg(feature = "python")]
-                    {
-                        log::info!("Including Python launch file: {}", resolved_path.display());
+                    log::info!("Including Python launch file: {}", resolved_path.display());
 
-                        // Create args for the Python file (include args override current context)
-                        let mut python_args = self.context.configurations();
-                        for (key, value) in &include.args {
-                            let resolved_value_subs = parse_substitutions(value)?;
-                            let resolved_value =
-                                resolve_substitutions(&resolved_value_subs, &self.context)
-                                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-                            log::trace!("  Include arg: {} = {}", key, resolved_value);
-                            python_args.insert(key.clone(), resolved_value);
-                        }
+                    // Create args for the Python file (include args override current context)
+                    let mut python_args = self.context.configurations();
+                    for (key, value) in &include.args {
+                        let resolved_value_subs = parse_substitutions(value)?;
+                        let resolved_value =
+                            resolve_substitutions(&resolved_value_subs, &self.context)
+                                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                        log::trace!("  Include arg: {} = {}", key, resolved_value);
+                        python_args.insert(key.clone(), resolved_value);
+                    }
 
-                        return self.execute_python_file(&resolved_path, &python_args);
-                    }
-                    #[cfg(not(feature = "python"))]
-                    {
-                        log::warn!(
-                            "Skipping Python launch file (Python support not enabled): {}",
-                            resolved_path.display()
-                        );
-                        return Ok(());
-                    }
+                    return self.execute_python_file(&resolved_path, &python_args);
                 }
                 "yaml" | "yml" => {
                     // YAML files in <include> are always launch files

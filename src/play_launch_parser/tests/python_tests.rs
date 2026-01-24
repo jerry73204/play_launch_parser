@@ -2,16 +2,13 @@ use play_launch_parser::parse_launch_file;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[cfg(feature = "python")]
 use std::sync::{Mutex, MutexGuard};
 
 /// Global mutex to serialize Python tests
 /// This prevents race conditions in the Python interpreter's global state
-#[cfg(feature = "python")]
 static PYTHON_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Helper to get a lock for Python tests to ensure they run serially
-#[cfg(feature = "python")]
 fn python_test_guard() -> MutexGuard<'static, ()> {
     PYTHON_TEST_LOCK.lock().unwrap()
 }
@@ -67,7 +64,6 @@ fn test_parse_args_fixture() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parse_python_no_import() {
     let _guard = python_test_guard();
     // Test that sys.modules registration works
@@ -106,7 +102,6 @@ fn test_parse_python_no_import() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parse_python_container() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_python_container.launch.py");
@@ -176,7 +171,6 @@ fn test_parse_python_container() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parse_simple_python_launch() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_simple_python.launch.py");
@@ -224,7 +218,6 @@ fn test_parse_simple_python_launch() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parse_python_substitutions() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_python_substitutions.launch.py");
@@ -289,7 +282,6 @@ fn test_parse_python_substitutions() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parse_python_parameters() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_python_parameters.launch.py");
@@ -491,7 +483,6 @@ fn test_parse_python_parameters() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parse_python_conditions() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_python_conditions.launch.py");
@@ -610,7 +601,6 @@ fn test_parse_python_conditions() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parse_python_include() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_python_include.launch.py");
@@ -685,7 +675,6 @@ fn test_parse_python_include() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_python_load_composable_nodes() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_python_load_composable_nodes.launch.py");
@@ -800,7 +789,6 @@ fn test_python_load_composable_nodes() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_opaque_function() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_opaque_function.launch.py");
@@ -852,7 +840,6 @@ fn test_opaque_function() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_opaque_function_file_io() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_opaque_file_io.launch.py");
@@ -943,7 +930,6 @@ fn test_opaque_function_file_io() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_opaque_function_conditional_nodes() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_opaque_conditional.launch.py");
@@ -978,7 +964,6 @@ fn test_opaque_function_conditional_nodes() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_list_concatenation_in_substitutions() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_list_concatenation.launch.py");
@@ -1001,7 +986,6 @@ fn test_list_concatenation_in_substitutions() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_parameter_file_usage() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_parameter_file.launch.py");
@@ -1022,7 +1006,6 @@ fn test_parameter_file_usage() {
 }
 
 #[test]
-#[cfg(feature = "python")]
 fn test_include_with_list_arguments() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("test_include_with_list_args.launch.py");

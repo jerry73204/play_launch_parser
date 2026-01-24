@@ -54,6 +54,27 @@ EOF
 - Better error handling
 - Consistent with other file operations
 
+### Python Support (Mandatory)
+
+**Python support is now mandatory** (as of Session 13):
+- pyo3 is a required dependency (no longer optional)
+- All `#[cfg(feature = "python")]` gates have been removed
+- Python launch file support is always enabled
+- No need to build with `--features python`
+
+**Why Python is mandatory**:
+- Required for 100% Autoware compatibility (46 nodes vs 31 without Python)
+- Many ROS 2 packages use Python launch files
+- Python files contain critical nodes (ADAPI, MRM operators, control nodes)
+- Python includes are processed and tracked just like XML includes
+
+**Build commands** (Python automatically included):
+```bash
+cargo build --profile dev-release
+just build-rust
+just test
+```
+
 ### When Making Changes
 
 1. **Read files first**: Always use the Read tool before modifying

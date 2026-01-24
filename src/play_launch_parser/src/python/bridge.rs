@@ -132,7 +132,6 @@ pub static CAPTURED_INCLUDES: Lazy<Arc<Mutex<Vec<IncludeCapture>>>> =
 /// test contamination when running multiple tests in sequence.
 /// Note: LAUNCH_CONFIGURATIONS is managed separately by the executor and should
 /// not be cleared here.
-#[cfg(feature = "python")]
 pub fn clear_all_captured() {
     CAPTURED_NODES.lock().clear();
     CAPTURED_CONTAINERS.lock().clear();

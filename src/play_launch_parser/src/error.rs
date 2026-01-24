@@ -39,12 +39,10 @@ pub enum ParseError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[cfg(feature = "python")]
     #[error("Python error: {0}")]
     PythonError(String),
 }
 
-#[cfg(feature = "python")]
 impl From<pyo3::PyErr> for ParseError {
     fn from(err: pyo3::PyErr) -> Self {
         ParseError::PythonError(err.to_string())
