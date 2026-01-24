@@ -190,6 +190,12 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_ros_mod.add_submodule(launch_ros_subs)?;
     launch_ros_mod.add_submodule(launch_ros_param_desc)?;
 
+    // Also set as direct attributes for Python's attribute access
+    launch_ros_mod.add("actions", launch_ros_actions)?;
+    launch_ros_mod.add("descriptions", launch_ros_desc)?;
+    launch_ros_mod.add("substitutions", launch_ros_subs)?;
+    launch_ros_mod.add("parameter_descriptions", launch_ros_param_desc)?;
+
     // Register in sys.modules
     let sys = py.import("sys")?;
     let modules = sys.getattr("modules")?;

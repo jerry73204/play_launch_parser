@@ -46,9 +46,10 @@ impl PythonLaunchExecutor {
 
         // Check if this is an OpaqueFunction - extract and execute it
         if let Ok(opaque_func) = action.extract::<OpaqueFunction>() {
-            log::debug!("Executing OpaqueFunction");
+            log::trace!("Executing OpaqueFunction");
             match opaque_func.execute(py) {
                 Ok(result) => {
+                    log::trace!("OpaqueFunction succeeded");
                     // Process the result (list of actions returned from function)
                     Self::process_action_result(py, result.as_ref(py))?;
                 }
@@ -129,7 +130,7 @@ impl PythonLaunchExecutor {
                 let mut configs = LAUNCH_CONFIGURATIONS.lock().unwrap();
                 configs.clear();
                 for (key, value) in args {
-                    log::debug!(
+                    log::trace!(
                         "Setting launch configuration from args: '{}' = '{}'",
                         key,
                         value

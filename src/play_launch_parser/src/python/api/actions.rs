@@ -93,6 +93,10 @@ impl DeclareLaunchArgument {
 
         // Try list (concatenate all elements after performing them)
         if let Ok(list) = obj.downcast::<PyList>(py) {
+            log::trace!(
+                "pyobject_to_string: processing list with {} items",
+                list.len()
+            );
             let mut result = String::new();
             for item in list.iter() {
                 // Try to extract as string
@@ -103,10 +107,15 @@ impl DeclareLaunchArgument {
                 else if item.hasattr("perform")? {
                     // Create a mock context for perform()
                     if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                        if let Ok(performed) = item.call_method1("perform", (context,)) {
-                            if let Ok(s) = performed.extract::<String>() {
-                                result.push_str(&s);
-                                continue;
+                        match item.call_method1("perform", (context,)) {
+                            Ok(performed) => {
+                                if let Ok(s) = performed.extract::<String>() {
+                                    result.push_str(&s);
+                                    continue;
+                                }
+                            }
+                            Err(e) => {
+                                log::trace!("perform() failed: {}", e);
                             }
                         }
                     }
@@ -124,6 +133,7 @@ impl DeclareLaunchArgument {
                     }
                 }
             }
+            log::trace!("pyobject_to_string: concatenated to '{}'", result);
             return Ok(result);
         }
 
@@ -477,6 +487,44 @@ pub struct IncludeLaunchDescription {
     launch_arguments: Vec<(String, String)>,
 }
 
+/// Convert PyObject to string for launch arguments (handles strings, lists, substitutions)
+fn pyobject_to_string_for_include_args(_py: Python, obj: &PyAny) -> PyResult<String> {
+    use pyo3::types::PyList;
+
+    // Try direct string extraction
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(s);
+    }
+
+    // Try list (concatenate all elements)
+    if let Ok(list) = obj.downcast::<PyList>() {
+        let mut result = String::new();
+        for item in list.iter() {
+            // Try to extract as string
+            if let Ok(s) = item.extract::<String>() {
+                result.push_str(&s);
+            }
+            // Try calling __str__
+            else if let Ok(str_result) = item.call_method0("__str__") {
+                if let Ok(s) = str_result.extract::<String>() {
+                    result.push_str(&s);
+                }
+            }
+        }
+        return Ok(result);
+    }
+
+    // Try calling __str__ method (for substitutions)
+    if let Ok(str_result) = obj.call_method0("__str__") {
+        if let Ok(s) = str_result.extract::<String>() {
+            return Ok(s);
+        }
+    }
+
+    // Fallback to to_string
+    Ok(obj.to_string())
+}
+
 #[pymethods]
 impl IncludeLaunchDescription {
     #[new]
@@ -494,14 +542,8 @@ impl IncludeLaunchDescription {
             if let Ok(dict) = launch_args_obj.downcast::<pyo3::types::PyDict>(py) {
                 for (key, value) in dict.iter() {
                     let key_str = key.extract::<String>()?;
-                    // Try to extract value as string, or call __str__ for substitutions
-                    let value_str = if let Ok(s) = value.extract::<String>() {
-                        s
-                    } else if let Ok(str_result) = value.call_method0("__str__") {
-                        str_result.extract::<String>()?
-                    } else {
-                        value.to_string()
-                    };
+                    // Try to extract value as string, list, or substitution
+                    let value_str = pyobject_to_string_for_include_args(py, value)?;
                     args.push((key_str, value_str));
                 }
             }
@@ -513,14 +555,8 @@ impl IncludeLaunchDescription {
                         if tuple.len() == 2 {
                             let key = tuple.get_item(0)?.extract::<String>()?;
                             let value_obj = tuple.get_item(1)?;
-                            // Try to extract value as string, or call __str__ for substitutions
-                            let value = if let Ok(s) = value_obj.extract::<String>() {
-                                s
-                            } else if let Ok(str_result) = value_obj.call_method0("__str__") {
-                                str_result.extract::<String>()?
-                            } else {
-                                value_obj.to_string()
-                            };
+                            // Try to extract value as string, list, or substitution
+                            let value = pyobject_to_string_for_include_args(py, value_obj)?;
                             args.push((key, value));
                         }
                     }

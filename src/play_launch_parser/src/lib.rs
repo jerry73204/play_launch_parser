@@ -127,12 +127,18 @@ impl LaunchTraverser {
     fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
         use crate::python::PythonLaunchExecutor;
 
+        log::debug!("Executing Python file: {}", path.display());
+        log::trace!("Python file arguments: {} args", args.len());
+        for (k, v) in args {
+            log::trace!("  {} = {}", k, v);
+        }
+
         let executor =
             PythonLaunchExecutor::new().map_err(|e| ParseError::PythonError(e.to_string()))?;
         let (nodes, containers, load_nodes, includes) = executor.execute_launch_file(path, args)?;
 
-        eprintln!(
-            "[RUST] Python file '{}' generated {} nodes, {} containers, {} load_nodes",
+        log::debug!(
+            "Python file '{}' generated {} nodes, {} containers, {} load_nodes",
             path.display(),
             nodes.len(),
             containers.len(),
@@ -366,6 +372,8 @@ impl LaunchTraverser {
             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
         let file_path = Path::new(&file_path_str);
 
+        log::trace!("Processing include: {}", file_path_str);
+
         // Resolve relative paths relative to the current launch file
         let resolved_path = if file_path.is_relative() {
             if let Some(current_file) = self.context.current_file() {
@@ -386,14 +394,8 @@ impl LaunchTraverser {
         // Log include arguments being passed
         if !include.args.is_empty() {
             let arg_names: Vec<&str> = include.args.iter().map(|(k, _)| k.as_str()).collect();
-            log::debug!("[RUST] Include args: {:?}", arg_names);
+            log::trace!("Include args: {:?}", arg_names);
         }
-
-        // Log current context state
-        log::debug!(
-            "[RUST] Context before include has {} configs",
-            self.context.configurations().len()
-        );
 
         // Check if this is a Python launch file
         // Check file extension and handle non-XML files
@@ -411,6 +413,7 @@ impl LaunchTraverser {
                             let resolved_value =
                                 resolve_substitutions(&resolved_value_subs, &self.context)
                                     .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                            log::trace!("  Include arg: {} = {}", key, resolved_value);
                             python_args.insert(key.clone(), resolved_value);
                         }
 
@@ -636,11 +639,6 @@ impl LaunchTraverser {
 
                 // Add container record
                 self.containers.push(container_action.to_container_record());
-
-                // Add container as a regular node (the actual component_container executable)
-                // Python's dump_launch captures containers as both container records and node records
-                let node_record = container_action.to_node_record(&self.context)?;
-                self.records.push(node_record);
 
                 // Add load_node records for each composable node
                 self.load_nodes

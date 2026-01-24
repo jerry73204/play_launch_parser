@@ -540,27 +540,6 @@ impl ComposableNodeContainer {
 
         CAPTURED_CONTAINERS.lock().unwrap().push(capture);
 
-        // Also capture container as a regular node (the actual component_container executable)
-        // Python's dump_launch captures containers as both container records and node records
-        let node_capture = NodeCapture {
-            package: container.package.clone(),
-            executable: container.executable.clone(),
-            name: Some(container.name.clone()),
-            namespace: Some(namespace.clone()),
-            parameters: Vec::new(),
-            remappings: Vec::new(),
-            arguments: Vec::new(),
-            env_vars: Vec::new(),
-        };
-
-        log::debug!(
-            "Captured Python container as node: {} / {}",
-            node_capture.package,
-            node_capture.executable
-        );
-
-        CAPTURED_NODES.lock().unwrap().push(node_capture);
-
         // Capture each composable node as a load_node entry
         Python::with_gil(|py| {
             for node_obj in &container.composable_nodes {
