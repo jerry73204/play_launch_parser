@@ -72,14 +72,27 @@ impl Node {
         _kwargs: Option<&PyDict>,
     ) -> PyResult<Self> {
         // Convert PyObjects to strings (handles both strings and substitutions)
+        log::debug!("Node::new: creating node with package and executable");
         let package = Self::pyobject_to_string(py, &package)?;
         let executable = Self::pyobject_to_string(py, &executable)?;
+
+        log::debug!("Node::new: package='{}', executable='{}'", package, executable);
+
         let name = name
-            .map(|obj| Self::pyobject_to_string(py, &obj))
+            .map(|obj| {
+                log::debug!("Node::new: processing name parameter");
+                Self::pyobject_to_string(py, &obj)
+            })
             .transpose()?;
+
         let namespace = namespace
-            .map(|obj| Self::pyobject_to_string(py, &obj))
+            .map(|obj| {
+                log::debug!("Node::new: processing namespace parameter");
+                Self::pyobject_to_string(py, &obj)
+            })
             .transpose()?;
+
+        log::debug!("Node::new: name={:?}, namespace={:?}", name, namespace);
 
         let node = Self {
             package: package.clone(),
@@ -150,17 +163,36 @@ impl Node {
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
         let obj_ref = obj.as_ref(py);
 
+        // Debug: log the type of object we're trying to convert
+        let obj_type = obj_ref.get_type().name().unwrap_or("unknown");
+        log::debug!("pyobject_to_string: converting type '{}', repr: {}", obj_type, obj_ref);
+
         // Try direct string extraction first
         if let Ok(s) = obj_ref.extract::<String>() {
+            log::debug!("pyobject_to_string: successfully extracted string: '{}'", s);
             return Ok(s);
+        }
+
+        // Handle lists (concatenate elements) - common in ROS 2 Python launch files
+        if let Ok(list) = obj_ref.downcast::<PyList>() {
+            log::debug!("pyobject_to_string: handling list with {} elements", list.len());
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_str = Self::pyobject_to_string(py, &item.into())?;
+                result.push_str(&item_str);
+            }
+            log::debug!("pyobject_to_string: concatenated list to: '{}'", result);
+            return Ok(result);
         }
 
         // Try calling perform() method first (for LaunchConfiguration substitutions)
         // This resolves the substitution to its actual value
         if obj_ref.hasattr("perform")? {
+            log::debug!("pyobject_to_string: object has perform() method, calling it");
             if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
                 if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
                     if let Ok(s) = result.extract::<String>() {
+                        log::debug!("pyobject_to_string: perform() returned string: '{}'", s);
                         return Ok(s);
                     }
                 }
@@ -168,14 +200,18 @@ impl Node {
         }
 
         // Try calling __str__ method (for other substitutions)
+        log::debug!("pyobject_to_string: trying __str__ method");
         if let Ok(str_result) = obj_ref.call_method0("__str__") {
             if let Ok(s) = str_result.extract::<String>() {
+                log::debug!("pyobject_to_string: __str__() returned: '{}'", s);
                 return Ok(s);
             }
         }
 
         // Fallback to repr
-        Ok(obj_ref.to_string())
+        let repr = obj_ref.to_string();
+        log::debug!("pyobject_to_string: using repr fallback: '{}'", repr);
+        Ok(repr)
     }
 
     /// Capture node to global storage
@@ -441,6 +477,7 @@ impl ComposableNodeContainer {
         let composable_nodes = composable_node_descriptions.unwrap_or_default();
 
         // Convert PyObject parameters to strings (may be substitutions)
+        log::debug!("ComposableNodeContainer::new: creating container");
         let name_str = Self::pyobject_to_string(py, &name)?;
 
         // Debug: Log if name is empty
@@ -454,10 +491,18 @@ impl ComposableNodeContainer {
         }
 
         let namespace_str = namespace
-            .map(|ns| Self::pyobject_to_string(py, &ns))
+            .map(|ns| {
+                log::debug!("ComposableNodeContainer::new: processing namespace parameter");
+                Self::pyobject_to_string(py, &ns)
+            })
             .transpose()?;
         let package_str = Self::pyobject_to_string(py, &package)?;
         let executable_str = Self::pyobject_to_string(py, &executable)?;
+
+        log::debug!(
+            "ComposableNodeContainer::new: name='{}', namespace={:?}, package='{}', executable='{}'",
+            name_str, namespace_str, package_str, executable_str
+        );
 
         let container = Self {
             name: name_str.clone(),
@@ -643,19 +688,37 @@ impl ComposableNode {
         **_kwargs
     ))]
     fn new(
-        package: String,
-        plugin: String,
-        name: String,
-        namespace: Option<String>,
+        py: Python,
+        package: PyObject,
+        plugin: PyObject,
+        name: PyObject,
+        namespace: Option<PyObject>,
         parameters: Option<Vec<PyObject>>,
         remappings: Option<Vec<PyObject>>,
         _kwargs: Option<&PyDict>,
     ) -> PyResult<Self> {
+        // Convert PyObjects to strings (handles both strings and substitutions/lists)
+        log::debug!("ComposableNode::new: creating composable node");
+        let package_str = Self::pyobject_to_string(py, &package)?;
+        let plugin_str = Self::pyobject_to_string(py, &plugin)?;
+        let name_str = Self::pyobject_to_string(py, &name)?;
+
+        let namespace_str = namespace
+            .map(|ns| {
+                log::debug!("ComposableNode::new: processing namespace parameter");
+                Self::pyobject_to_string(py, &ns)
+            })
+            .transpose()?;
+
+        log::debug!(
+            "ComposableNode::new: package='{}', plugin='{}', name='{}', namespace={:?}",
+            package_str, plugin_str, name_str, namespace_str
+        );
         Ok(Self {
-            package,
-            plugin,
-            name,
-            namespace,
+            package: package_str,
+            plugin: plugin_str,
+            name: name_str,
+            namespace: namespace_str,
             parameters: parameters.unwrap_or_default(),
             remappings: remappings.unwrap_or_default(),
         })
@@ -701,6 +764,12 @@ impl ComposableNode {
 }
 
 impl ComposableNode {
+    /// Convert a PyObject to a string (handles both strings and substitutions)
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        // Reuse the same logic as Node::pyobject_to_string
+        Node::pyobject_to_string(py, obj)
+    }
+
     fn capture_as_load_node(&self, container_name: &str, container_namespace: &Option<String>) {
         // Parse parameters and remappings from Python objects
         let parameters = Python::with_gil(|py| self.parse_parameters(py).unwrap_or_default());

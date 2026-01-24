@@ -9,6 +9,7 @@ pub mod launch_ros;
 pub mod parameter_descriptions;
 pub mod some_substitutions_type;
 pub mod substitutions;
+pub mod utilities;
 
 use pyo3::prelude::*;
 
@@ -184,17 +185,30 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_ros_param_desc.add_class::<parameter_descriptions::ParameterFile>()?;
     launch_ros_param_desc.add_class::<parameter_descriptions::ParameterValue>()?;
 
+    // Create launch_ros.utilities submodule
+    let launch_ros_utilities = PyModule::new(py, "launch_ros.utilities")?;
+    launch_ros_utilities.add_function(wrap_pyfunction!(
+        utilities::make_namespace_absolute,
+        launch_ros_utilities
+    )?)?;
+    launch_ros_utilities.add_function(wrap_pyfunction!(
+        utilities::prefix_namespace,
+        launch_ros_utilities
+    )?)?;
+
     // Add submodules to parent module as attributes
     launch_ros_mod.add_submodule(launch_ros_actions)?;
     launch_ros_mod.add_submodule(launch_ros_desc)?;
     launch_ros_mod.add_submodule(launch_ros_subs)?;
     launch_ros_mod.add_submodule(launch_ros_param_desc)?;
+    launch_ros_mod.add_submodule(launch_ros_utilities)?;
 
     // Also set as direct attributes for Python's attribute access
     launch_ros_mod.add("actions", launch_ros_actions)?;
     launch_ros_mod.add("descriptions", launch_ros_desc)?;
     launch_ros_mod.add("substitutions", launch_ros_subs)?;
     launch_ros_mod.add("parameter_descriptions", launch_ros_param_desc)?;
+    launch_ros_mod.add("utilities", launch_ros_utilities)?;
 
     // Register in sys.modules
     let sys = py.import("sys")?;
@@ -215,6 +229,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     modules.set_item("launch_ros.descriptions", launch_ros_desc)?;
     modules.set_item("launch_ros.substitutions", launch_ros_subs)?;
     modules.set_item("launch_ros.parameter_descriptions", launch_ros_param_desc)?;
+    modules.set_item("launch_ros.utilities", launch_ros_utilities)?;
 
     // Create and register launch.some_substitutions_type submodule
     let launch_some_subs_type = some_substitutions_type::register_module(py)?;
