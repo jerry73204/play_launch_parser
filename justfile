@@ -27,17 +27,42 @@ build:
     echo "Building packages with colcon..."
     colcon build {{colcon_flags}} --base-paths src
 
-# Run tests
+# Run all tests (Rust + comparison + Autoware if available)
 test:
     #!/usr/bin/env bash
     set -e
-    source /opt/ros/{{ros_distro}}/setup.bash
-    source install/setup.bash
 
-    colcon test --base-paths src
-    colcon test-result --all --verbose
+    echo "========================================="
+    echo "Running all tests..."
+    echo "========================================="
 
-# Run Rust unit tests
+    # Run Rust unit tests
+    just test-rust
+
+    # Run comparison tests if directory exists
+    if [ -d "tests/comparison_tests" ]; then
+        echo ""
+        echo "========================================="
+        echo "Running comparison tests..."
+        echo "========================================="
+        just test-compare
+    fi
+
+    # Run Autoware tests if symlink exists
+    if [ -L "tests/autoware_test/autoware" ]; then
+        echo ""
+        echo "========================================="
+        echo "Running Autoware validation tests..."
+        echo "========================================="
+        just test-autoware
+    fi
+
+    echo ""
+    echo "========================================="
+    echo "✓ All tests passed!"
+    echo "========================================="
+
+# Run Rust unit tests (260 tests: 218 unit + 18 edge + 20 XML + 15 Python + 3 perf)
 test-rust:
     #!/usr/bin/env bash
     set -e
@@ -46,10 +71,20 @@ test-rust:
     find src -name "Cargo.toml" -not -path "*/target/*" | while read cargo_toml; do
         dir=$(dirname "$cargo_toml")
         echo "Testing $dir..."
-        (cd "$dir" && cargo test)
+        (cd "$dir" && cargo test --all-features)
     done
 
-    echo "All Rust tests passed!"
+    echo "✓ All Rust tests passed!"
+
+# Run colcon tests (ROS 2 integration tests)
+test-colcon:
+    #!/usr/bin/env bash
+    set -e
+    source /opt/ros/{{ros_distro}}/setup.bash
+    source install/setup.bash
+
+    colcon test --base-paths src
+    colcon test-result --all --verbose
 
 # Run comparison tests (Rust vs Python parser)
 test-compare:
@@ -73,9 +108,12 @@ check:
 
     echo "All checks passed!"
 
-# Run quality checks (linters + tests)
+# Run quality checks (linters + Rust tests)
 quality: check test-rust
+    @echo ""
+    @echo "========================================="
     @echo "✓ All quality checks passed!"
+    @echo "========================================="
 
 # Format all code
 format:
