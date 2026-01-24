@@ -2,7 +2,7 @@
 
 Comprehensive feature list for the play_launch_parser project.
 
-**Last Updated**: 2026-01-24 (Session 12)
+**Last Updated**: 2026-01-25 (Session 14)
 **Current Phase**: Phase 5 Complete ✅ + Autoware 100% Compatible ✅
 **Next Phase**: Production readiness & additional features
 
@@ -20,7 +20,7 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 260 tests passing (218 unit + 18 edge + 24 integration without Python, +4 with Python)
+- **Test Coverage**: 279 tests passing (218 unit + 23 edge + 33 integration without Python, +5 with Python)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
@@ -258,10 +258,10 @@ Comprehensive feature list for the play_launch_parser project.
 | Category             | Tests   | Status | Coverage        |
 |----------------------|---------|--------|-----------------|
 | Unit tests           | 218     | ✅     | 95%             |
-| Edge cases           | 18      | ✅     | Critical paths  |
-| Integration (XML)    | 20      | ✅     | End-to-end      |
-| Integration (Python) | 4       | ✅     | Python features |
-| **Total**            | **260** | **✅** | **95%**         |
+| Edge cases           | 23      | ✅     | Critical paths  |
+| Integration (XML)    | 28      | ✅     | End-to-end      |
+| Integration (Python) | 10      | ✅     | Python features |
+| **Total**            | **279** | **✅** | **95%**         |
 
 ### 8.2 Quality Checks ✅
 | Check           | Status | Notes      |
@@ -272,16 +272,21 @@ Comprehensive feature list for the play_launch_parser project.
 
 ### 8.3 Edge Case Testing (Autoware-Derived) ✅
 
-**Status**: Comprehensive edge case coverage from Autoware integration (Session 12)
+**Status**: Comprehensive edge case coverage from Autoware integration (Session 12-14)
 
-| Edge Case                                   | Test File                               | Integration Test                               | Notes                                                                                                   |
-|---------------------------------------------|-----------------------------------------|------------------------------------------------|---------------------------------------------------------------------------------------------------------|
-| **OpaqueFunction with conditional logic**   | `test_opaque_conditional.launch.py`     | `test_opaque_function_conditional_nodes`       | Creates different nodes based on runtime LaunchConfiguration values (simple_planning_simulator pattern) |
-| **List concatenation in substitutions**     | `test_list_concatenation.launch.py`     | `test_list_concatenation_in_substitutions`     | Lists of substitutions concatenated to single strings (vehicle_info_param_file pattern)                 |
-| **ParameterFile usage**                     | `test_parameter_file.launch.py`         | `test_parameter_file_usage`                    | launch_ros.parameter_descriptions.ParameterFile with allow_substs                                       |
-| **IncludeLaunchDescription with list args** | `test_include_with_list_args.launch.py` | `test_include_with_list_arguments`             | Passing lists as arguments to included files (global_params.launch.py pattern)                          |
-| **Nested substitutions in lists**           | `test_list_concatenation.launch.py`     | `test_list_concatenation_in_substitutions`     | FindPackageShare([LaunchConfiguration('var'), '_suffix']) pattern                                       |
-| **Container node handling**                 | Existing container tests                | `test_node_container`, `test_python_container` | Containers NOT duplicated as regular nodes (Python implementation detail)                               |
+| Edge Case                                       | Test File                                   | Integration Test                           | Notes                                                                                                   |
+|-------------------------------------------------|---------------------------------------------|--------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| **OpaqueFunction with conditional logic**       | `test_opaque_conditional.launch.py`         | `test_opaque_function_conditional_nodes`   | Creates different nodes based on runtime LaunchConfiguration values (simple_planning_simulator pattern) |
+| **List concatenation in substitutions**         | `test_list_concatenation.launch.py`         | `test_list_concatenation_in_substitutions` | Lists of substitutions concatenated to single strings (vehicle_info_param_file pattern)                 |
+| **ParameterFile usage**                         | `test_parameter_file.launch.py`             | `test_parameter_file_usage`                | launch_ros.parameter_descriptions.ParameterFile with allow_substs                                       |
+| **IncludeLaunchDescription with list args**     | `test_include_with_list_args.launch.py`     | `test_include_with_list_arguments`         | Passing lists as arguments to included files (global_params.launch.py pattern)                          |
+| **Nested substitutions in lists**               | `test_list_concatenation.launch.py`         | `test_list_concatenation_in_substitutions` | FindPackageShare([LaunchConfiguration('var'), '_suffix']) pattern                                       |
+| **Container node handling**                     | Existing container tests                    | `test_node_container`, `test_python_container` | Containers NOT duplicated as regular nodes (Python implementation detail)                           |
+| **XML→Python namespace sync** (Session 14)      | `test_namespace_sync_xml_python.launch.xml` | `test_namespace_sync_xml_python`           | XML push-ros-namespace visible to included Python files                                                |
+| **List namespace concatenation** (Session 14)   | `list_namespace_concatenation.launch.py`    | `test_list_namespace_concatenation`        | Lists in namespace fields: `namespace=["/", "name"]` → `/name`                                          |
+| **OpaqueFunction XML includes** (Session 14)    | `test_opaque_xml_namespace.launch.xml`      | `test_opaque_xml_namespace_preservation`   | XML includes from OpaqueFunction preserve namespace context                                             |
+| **launch_ros.utilities functions** (Session 14) | `test_utilities.launch.py`                  | `test_utilities_functions`                 | `make_namespace_absolute()` and `prefix_namespace()`                                                    |
+| **Autoware combined patterns** (Session 14)     | `test_autoware_patterns.launch.xml`         | `test_autoware_patterns_combined`          | Integration test combining all Autoware edge cases                                                      |
 
 ### 8.4 Test Coverage Matrix
 
@@ -363,7 +368,7 @@ Comprehensive feature list for the play_launch_parser project.
 
 ## 9. Python Launch File Support 🔄
 
-**Status**: Phase 5.2 (Advanced Features + Autoware Fixes Complete - Session 10)
+**Status**: Phase 5.2 (Advanced Features + Autoware Fixes Complete - Session 10, Namespace Sync Complete - Session 14)
 
 ### 9.1 Infrastructure ✅
 | Feature                | Status | Priority | Notes                         |
@@ -531,12 +536,12 @@ Comprehensive feature list for the play_launch_parser project.
 6. ✅ Container nodes NOT duplicated in regular node list
 
 ### 9.9 Current Outcomes ✅
-| Metric | Session 10 | Session 12 | Notes |
-|--------|------------|------------|-------|
-| Autoware coverage | ~88% | **100%** | **planning_simulator complete** |
-| Test count | 249 | 260 | +11 edge case tests |
-| Python classes | 30 | 30 | Complete for Autoware |
-| Edge case fixtures | 0 | 4 | Autoware-derived patterns |
+| Metric             | Session 10 | Session 12 | Session 14 | Notes                            |
+|--------------------|------------|------------|------------|----------------------------------|
+| Autoware coverage  | ~88%       | **100%**   | **100%**   | **planning_simulator complete**  |
+| Test count         | 249        | 260        | **279**    | **+5 namespace edge case tests** |
+| Python classes     | 30         | 30         | 30         | Complete for Autoware            |
+| Edge case fixtures | 0          | 4          | **9**      | **+5 namespace/utilities tests** |
 
 ---
 
@@ -678,35 +683,158 @@ Comprehensive feature list for the play_launch_parser project.
 
 ---
 
+## 14. Comparison with Official ROS Launch (Session 14)
+
+**Status**: Comprehensive audit of ROS 2 Humble launch packages
+
+This section documents ALL features from the official ROS 2 launch repositories, comparing implemented vs missing features.
+
+### 14.1 launch.actions
+
+| Action Class                    | Status | Priority | Notes                                    |
+|---------------------------------|--------|----------|------------------------------------------|
+| `DeclareLaunchArgument`         | ✅     | Critical | Fully implemented (Python + XML)        |
+| `ExecuteProcess`                | ✅     | Medium   | Python implementation                    |
+| `GroupAction`                   | ✅     | High     | Python implementation                    |
+| `IncludeLaunchDescription`      | ✅     | Critical | Python + XML includes                    |
+| `LogInfo`                       | ✅     | High     | Python implementation                    |
+| `OpaqueFunction`                | ✅     | Low      | Limited support (no file I/O)            |
+| `SetEnvironmentVariable`        | ✅     | High     | Python implementation                    |
+| `SetLaunchConfiguration`        | ✅     | Medium   | Python implementation (Session 10)       |
+| `TimerAction`                   | ✅     | Medium   | Python implementation                    |
+| `UnsetEnvironmentVariable`      | ✅     | High     | Python implementation                    |
+| `AppendEnvironmentVariable`     | ❌     | Low      | Appends to existing env vars             |
+| `EmitEvent`                     | ❌     | Low      | Custom event system                      |
+| `ExecuteLocal`                  | ❌     | Low      | Local execution context                  |
+| `OpaqueCoroutine`               | ❌     | Low      | Async coroutine support                  |
+| `PopEnvironment`                | ❌     | Low      | Environment stack management             |
+| `PopLaunchConfigurations`       | ❌     | Low      | Configuration stack management           |
+| `PushEnvironment`               | ❌     | Low      | Environment stack management             |
+| `PushLaunchConfigurations`      | ❌     | Low      | Configuration stack management           |
+| `RegisterEventHandler`          | ❌     | Low      | Dynamic event handling                   |
+| `ResetEnvironment`              | ❌     | Low      | Reset to original environment            |
+| `ResetLaunchConfigurations`     | ❌     | Low      | Clear all configurations                 |
+| `ShutdownAction`                | ❌     | Low      | Programmatic shutdown                    |
+| `UnregisterEventHandler`        | ❌     | Low      | Remove event handlers                    |
+| `UnsetLaunchConfiguration`      | ❌     | Low      | Remove specific configuration            |
+
+**Summary**: 10/24 implemented (42%)
+
+### 14.2 launch.substitutions
+
+| Substitution Class       | Status | Priority | Notes                                  |
+|--------------------------|--------|----------|----------------------------------------|
+| `LaunchConfiguration`    | ✅     | Critical | Python + XML (var)                     |
+| `EnvironmentVariable`    | ✅     | High     | Python + XML (env, optenv)             |
+| `PathJoinSubstitution`   | ✅     | High     | Python implementation                  |
+| `PythonExpression`       | ✅     | Medium   | Python implementation                  |
+| `TextSubstitution`       | ✅     | Medium   | Python + XML (literals)                |
+| `ThisLaunchFileDir`      | ✅     | Medium   | Python implementation                  |
+| `Command`                | ✅     | Medium   | XML $(command) implementation          |
+| `AnonName`               | ✅     | Medium   | XML $(anon) implementation             |
+| `BooleanSubstitution`    | ❌     | Low      | Boolean value substitution             |
+| `EqualsSubstitution`     | ❌     | Medium   | Equality comparison                    |
+| `FileContent`            | ❌     | Low      | Read file contents as substitution     |
+| `FindExecutable`         | ❌     | Low      | Find executable in PATH                |
+| `IfElseSubstitution`     | ❌     | Medium   | Ternary conditional                    |
+| `LaunchLogDir`           | ❌     | Low      | Launch log directory path              |
+| `LocalSubstitution`      | ❌     | Low      | Local variable scoping                 |
+| `NotEqualsSubstitution`  | ❌     | Low      | Inequality comparison                  |
+| `ThisLaunchFile`         | ❌     | Low      | Full path to current launch file       |
+
+**Summary**: 8/17 implemented (47%)
+
+### 14.3 launch_ros.actions
+
+| Action Class                 | Status | Priority | Notes                                |
+|------------------------------|--------|----------|--------------------------------------|
+| `Node`                       | ✅     | Critical | Full parameter support (Python + XML)|
+| `ComposableNodeContainer`    | ✅     | High     | Python + XML (Session 6)             |
+| `LoadComposableNodes`        | ✅     | High     | Python implementation (Session 8)    |
+| `SetParameter`               | ✅     | Medium   | Python implementation (Session 10)   |
+| `SetRemap`                   | ✅     | Medium   | XML implementation (Session 11)      |
+| `LifecycleNode`              | ❌     | Medium   | Lifecycle management                 |
+| `LifecycleTransition`        | ❌     | Low      | State transitions                    |
+| `PushRosNamespace`           | ❌     | Low      | Python ROS namespace stack           |
+| `RosTimer`                   | ❌     | Low      | ROS time-based timer                 |
+| `SetParametersFromFile`      | ❌     | Medium   | Load params from YAML                |
+| `SetUseSimTime`              | ❌     | Low      | Simulation time configuration        |
+
+**Summary**: 5/11 implemented (45%)
+
+### 14.4 launch_ros.substitutions
+
+| Substitution Class      | Status | Priority | Notes                          |
+|-------------------------|--------|----------|--------------------------------|
+| `FindPackageShare`      | ✅     | Critical | Python + XML (find-pkg-share)  |
+| `ExecutableInPackage`   | ❌     | Low      | Find executable in ROS package |
+| `FindPackage` (prefix)  | ❌     | Low      | Package install prefix path    |
+| `Parameter`             | ❌     | Low      | Parameter value substitution   |
+
+**Summary**: 1/4 implemented (25%)
+
+### 14.5 Missing Features Summary
+
+| Category                  | Implemented | Total | Percentage |
+|---------------------------|-------------|-------|------------|
+| launch.actions            | 10          | 24    | 42%        |
+| launch.substitutions      | 8           | 17    | 47%        |
+| launch_ros.actions        | 5           | 11    | 45%        |
+| launch_ros.substitutions  | 1           | 4     | 25%        |
+| **Total**                 | **24**      | **56**| **43%**    |
+
+**Note**: While only 43% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
+
+### 14.6 Recommended Implementation Priorities
+
+**High Priority** (would benefit real-world usage):
+1. `EqualsSubstitution` / `IfElseSubstitution` - Better conditional logic
+2. `SetParametersFromFile` - Common pattern for parameter management
+3. `LifecycleNode` - Managed node lifecycle support
+4. `ExecutableInPackage` - Alternative to FindPackageShare for executables
+
+**Medium Priority** (occasionally useful):
+1. `AppendEnvironmentVariable` - Environment manipulation
+2. `RegisterEventHandler` / `EmitEvent` - Dynamic event handling
+3. `FileContent` - Read configuration from files
+
+**Low Priority** (rarely used):
+1. Stack management actions (Push/Pop/Reset)
+2. `OpaqueCoroutine` - Advanced async patterns
+3. Boolean logic substitutions (And/Or/Not)
+4. Event handler unregistration
+
+---
+
 ## Summary Statistics
 
 ### Feature Completion
 
-| Category | Features | Complete | Planned | Not Started |
-|----------|----------|----------|---------|-------------|
-| Core Infrastructure | 12 | 12 (100%) | 0 | 0 |
-| XML Parser | 46 | 45 (98%) | 1 (2%) | 0 |
-| Substitution Engine | 20 | 20 (100%) | 0 | 0 |
-| Node Metadata | 28 | 28 (100%) | 0 | 0 |
-| record.json | 8 | 8 (100%) | 0 | 0 |
-| Error Handling | 12 | 12 (100%) | 0 | 0 |
-| Testing | 6 | 6 (100%) | 0 | 0 |
-| CLI | 4 | 4 (100%) | 0 | 0 |
-| **Python Support** | **50** | **47 (94%)** | **3 (6%)** | **0** |
-| **Autoware Features (Phase 6)** | **20** | **1 (5%)** | **19 (95%)** | **0** |
-| Documentation | 12 | 8 (67%) | 4 (33%) | 0 |
-| **Total** | **218** | **191 (88%)** | **27 (12%)** | **0** |
+| Category                        | Features | Complete      | Planned      | Not Started |
+|---------------------------------|----------|---------------|--------------|-------------|
+| Core Infrastructure             | 12       | 12 (100%)     | 0            | 0           |
+| XML Parser                      | 46       | 45 (98%)      | 1 (2%)       | 0           |
+| Substitution Engine             | 20       | 20 (100%)     | 0            | 0           |
+| Node Metadata                   | 28       | 28 (100%)     | 0            | 0           |
+| record.json                     | 8        | 8 (100%)      | 0            | 0           |
+| Error Handling                  | 12       | 12 (100%)     | 0            | 0           |
+| Testing                         | 6        | 6 (100%)      | 0            | 0           |
+| CLI                             | 4        | 4 (100%)      | 0            | 0           |
+| **Python Support**              | **50**   | **47 (94%)**  | **3 (6%)**   | **0**       |
+| **Autoware Features (Phase 6)** | **20**   | **1 (5%)**    | **19 (95%)** | **0**       |
+| Documentation                   | 12       | 8 (67%)       | 4 (33%)      | 0           |
+| **Total**                       | **218**  | **191 (88%)** | **27 (12%)** | **0**       |
 
 ### Test Coverage
 
-- **Total Tests**: 260 (100% passing)
-  - Without Python: 218 lib tests, 18 edge cases, 20 integration tests (256 total)
-  - With Python: +4 integration tests (260 total)
+- **Total Tests**: 279 (100% passing)
+  - Without Python: 218 lib tests, 23 edge cases, 28 integration tests (269 total)
+  - With Python: +10 integration tests (279 total)
 - **Code Coverage**: 95%
 
 ### Autoware Compatibility ✅
 
-**Status**: 100% Compatible (Session 12)
+**Status**: 100% Compatible (Session 12-14)
 - **Nodes**: 46/46 (100%)
 - **Containers**: 15/15 (100%)
 - **Composable Nodes**: 54/54 (100%)
