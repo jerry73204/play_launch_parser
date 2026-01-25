@@ -20,14 +20,14 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 285 tests passing (218 unit + 23 edge + 33 integration without Python, +9 with Python)
+- **Test Coverage**: 287 tests passing (218 unit + 18 edge + 3 performance + 28 Python + 20 XML)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
   - Containers: 15/15 captured (100%) ✅
   - Composable Nodes: 54/54 captured (100%) ✅
   - **Overall**: **100% complete for planning_simulator.launch.xml** ✅
-- **ROS API Coverage**: 41/56 official ROS features (73%) - **Target Exceeded** ✅
+- **ROS API Coverage**: 46/56 official ROS features (82%) - **Target Far Exceeded** ✅
 - **Performance**: <0.1ms parse time for simple files, <5s for full Autoware
 - **Code Quality**: 0 clippy warnings, properly formatted
 
@@ -733,17 +733,17 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `ThisLaunchFileDir`      | ✅     | Medium   | Python implementation                  |
 | `Command`                | ✅     | Medium   | XML $(command) implementation          |
 | `AnonName`               | ✅     | Medium   | XML $(anon) implementation             |
-| `BooleanSubstitution`    | ❌     | Low      | Boolean value substitution             |
+| `BooleanSubstitution`    | ✅     | Low      | **Boolean value substitution (Session 14)** |
 | `EqualsSubstitution`     | ✅     | Medium   | **Equality comparison (Session 14)**   |
 | `FileContent`            | ✅     | Low      | **Read file contents (Session 14)**    |
-| `FindExecutable`         | ❌     | Low      | Find executable in PATH                |
+| `FindExecutable`         | ✅     | Low      | **Find executable in PATH (Session 14)** |
 | `IfElseSubstitution`     | ✅     | Medium   | **Ternary conditional (Session 14)**   |
-| `LaunchLogDir`           | ❌     | Low      | Launch log directory path              |
+| `LaunchLogDir`           | ✅     | Low      | **Launch log directory path (Session 14)** |
 | `LocalSubstitution`      | ❌     | Low      | Local variable scoping                 |
 | `NotEqualsSubstitution`  | ✅     | Low      | **Inequality comparison (Session 14)** |
-| `ThisLaunchFile`         | ❌     | Low      | Full path to current launch file       |
+| `ThisLaunchFile`         | ✅     | Low      | **Full path to current launch file (Session 14)** |
 
-**Summary**: 12/17 implemented (71%)
+**Summary**: 16/17 implemented (94%)
 
 ### 14.3 launch_ros.actions
 
@@ -756,7 +756,8 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `SetRemap`                   | ✅     | Medium   | XML implementation (Session 11)      |
 | `LifecycleNode`              | ✅     | Medium   | **Lifecycle management (Session 14)**|
 | `LifecycleTransition`        | ✅     | Low      | **State transitions (Session 14)**   |
-| `PushRosNamespace`           | ❌     | Low      | Python ROS namespace stack           |
+| `PushRosNamespace`           | ✅     | Low      | **Python ROS namespace stack**       |
+| `PopRosNamespace`            | ✅     | Low      | **Python ROS namespace stack**       |
 | `RosTimer`                   | ❌     | Low      | ROS time-based timer                 |
 | `SetParametersFromFile`      | ✅     | Medium   | **Load params from YAML (Session 14)**|
 | `SetUseSimTime`              | ❌     | Low      | Simulation time configuration        |

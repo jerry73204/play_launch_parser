@@ -1,14 +1,13 @@
 # Test Directory
 
-This directory contains test fixtures and testing utilities for the play_launch_parser project.
+This directory contains testing utilities and auxiliary test scripts for the play_launch_parser project.
+
+**Note**: The actual test fixtures used by Rust unit/integration tests are located at `src/play_launch_parser/tests/fixtures/`, not here. This directory contains auxiliary testing tools.
 
 ## Directory Structure
 
 ```
 tests/
-├── fixtures/
-│   ├── launch/         # Main test launch files
-│   └── includes/       # Launch files to be included by other launch files
 ├── autoware_test/      # Autoware-specific testing
 │   ├── scripts/        # Test and comparison scripts
 │   │   ├── activate_autoware.sh          # User-specific workspace activation (git-ignored)
@@ -20,69 +19,53 @@ tests/
 │   ├── test_simple.launch.xml  # Simple test case
 │   ├── test_group_namespace.launch.xml  # Namespace test
 │   └── run_tests.sh    # Run all comparison tests
-└── README.md
+└── README.md           # This file
+
+src/play_launch_parser/tests/
+├── fixtures/           # ACTUAL TEST FIXTURES (used by Rust tests)
+│   ├── launch/         # Main test launch files
+│   │   ├── python/     # Python launch files
+│   │   └── *.xml       # XML launch files
+│   └── includes/       # Launch files to be included by other launch files
+├── edge_cases.rs       # Edge case tests
+├── integration_tests.rs # Integration tests
+├── python_tests.rs     # Python launch file tests
+└── xml_tests.rs        # XML launch file tests
 ```
 
 ## Test Launch Files
 
-### Main Test Files (fixtures/launch/)
+The actual test launch files are located at `src/play_launch_parser/tests/fixtures/launch/`.
 
-- **test_all_features.launch.xml** - Comprehensive test covering multiple features:
-  - CLI arguments with defaults
-  - Let variables
-  - Groups with namespaces
-  - Nodes with if/unless conditions
-  - Includes with conditions and arguments
-  - Substitutions (find-pkg-share, var)
+For documentation on test fixtures, see the inline comments in the test files or refer to:
+- `src/play_launch_parser/tests/xml_tests.rs` - XML test documentation
+- `src/play_launch_parser/tests/python_tests.rs` - Python test documentation
+- `src/play_launch_parser/tests/edge_cases.rs` - Edge case documentation
 
-- **test_args.launch.xml** - Tests argument handling:
-  - Multiple arguments with defaults
-  - Argument usage in node configurations
+### Usage
 
-- **test_conditions.launch.xml** - Tests conditional execution:
-  - If conditions on nodes
-  - Unless conditions on nodes
-  - Condition evaluation with variables
+Test fixtures are accessed via the helper functions in each test file:
 
-- **test_find_pkg.launch.xml** - Tests find-pkg-share substitution:
-  - Package directory resolution
-  - Path construction with substitutions
-
-- **test_include.launch.xml** - Tests include functionality:
-  - Basic includes without arguments
-  - Includes with argument overrides
-  - Multiple includes of the same file
-
-- **test_include_pkg.launch.xml** - Tests package-based includes:
-  - Including launch files from ROS 2 packages
-  - Cross-package dependencies
-
-### Included Files (fixtures/includes/)
-
-- **included.launch.xml** - Simple launch file used by include tests:
-  - Accepts node_name argument
-  - Launches a single node
-
-## Usage
-
-These fixtures are used by integration tests to verify the parser handles various ROS 2 launch file features correctly.
-
-To use these fixtures in tests:
 ```rust
 use std::path::PathBuf;
 
-let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    .join("../../tests/fixtures/launch/test_all_features.launch.xml");
+// In xml_tests.rs and python_tests.rs:
+fn get_fixture_path(filename: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/launch")
+        .join(filename)
+}
 ```
 
-## Adding New Fixtures
+### Adding New Fixtures
 
 When adding new test fixtures:
-1. Place main launch files in `fixtures/launch/`
-2. Place included launch files in `fixtures/includes/`
-3. Use descriptive names like `test_<feature>.launch.xml`
-4. Document the fixture purpose in this README
-5. Update any include paths to use relative paths (e.g., `../includes/included.launch.xml`)
+1. Place main launch files in `src/play_launch_parser/tests/fixtures/launch/`
+2. For Python files: `src/play_launch_parser/tests/fixtures/launch/python/`
+3. Place included launch files in `src/play_launch_parser/tests/fixtures/includes/`
+4. Use descriptive names like `test_<feature>.launch.xml` or `test_<feature>.launch.py`
+5. Add corresponding test cases in the appropriate test file
+6. Update any include paths to use relative paths (e.g., `../includes/included.launch.xml`)
 
 ## Comparison Tests
 

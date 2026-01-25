@@ -10,8 +10,8 @@
 
 Implement remaining features from official ROS 2 launch repositories to achieve broader ecosystem compatibility beyond Autoware.
 
-**Current Coverage**: 41/56 official ROS features (73%) ✅
-**Target Coverage**: 40+/56 (70%+) **TARGET EXCEEDED** ✅
+**Current Coverage**: 46/56 official ROS features (82%) ✅
+**Target Coverage**: 40+/56 (70%+) **TARGET FAR EXCEEDED** ✅
 
 **Key Insight**: While we have 100% Autoware compatibility, many ROS 2 launch files in the broader ecosystem use additional features not found in Autoware. This phase targets commonly-used features to maximize real-world compatibility.
 
@@ -25,13 +25,13 @@ Implement remaining features from official ROS 2 launch repositories to achieve 
 
 Based on official ROS 2 Humble launch repositories:
 
-| Category                  | Implemented | Total | Coverage | Session 14 Progress |
-|---------------------------|-------------|-------|----------|---------------------|
-| `launch.actions`          | 18          | 24    | 75%      | ✅ +8 (8.4 & 8.5)   |
-| `launch.substitutions`    | 12          | 17    | 71%      | ✅ +4 (Phase 8.1)   |
-| `launch_ros.actions`      | 7           | 11    | 64%      | ✅ +2 (8.2 & 8.3)   |
-| `launch_ros.substitutions`| 4           | 4     | **100%** | ✅ +3 (Phase 8.6)   |
-| **Total**                 | **41**      | **56**| **73%**  | **+17 features**    |
+| Category                  | Implemented | Total | Coverage | Session 14 Progress    |
+|---------------------------|-------------|-------|----------|------------------------|
+| `launch.actions`          | 18          | 24    | 75%      | ✅ +8 (8.4 & 8.5)      |
+| `launch.substitutions`    | 16          | 17    | 94%      | ✅ +8 (8.1 & 8.6.4)    |
+| `launch_ros.actions`      | 8           | 11    | 73%      | ✅ +3 (8.2, 8.3, Push) |
+| `launch_ros.substitutions`| 4           | 4     | **100%** | ✅ +3 (Phase 8.6)      |
+| **Total**                 | **46**      | **56**| **82%**  | **+22 features**       |
 
 ### Implementation Priorities
 
@@ -76,12 +76,16 @@ Features prioritized by:
 - ExecutableInPackage - Find executable in ROS package
 - FindPackage - Package install prefix path (different from FindPackageShare)
 - Parameter - Read ROS parameter value
+- BooleanSubstitution - Convert value to boolean string
+- FindExecutable - Search PATH for executable
+- LaunchLogDir - Return launch log directory path
+- ThisLaunchFile - Return current launch file path
 
 **Statistics**:
-- Features Added: +17 (7 substitutions, 10 actions)
-- Test Coverage: 285 tests (100% passing)
-- ROS API Coverage: 43% → 73% (+30 percentage points)
-- Time Spent: 4 days total
+- Features Added: +22 (11 substitutions, 11 actions)
+- Test Coverage: 287 tests (100% passing)
+- ROS API Coverage: 43% → 82% (+39 percentage points)
+- Time Spent: 4.5 days total
 
 **Key Achievements**:
 - Conditional logic support (EqualsSubstitution, IfElseSubstitution)
@@ -90,10 +94,14 @@ Features prioritized by:
 - Environment management (PushEnvironment, PopEnvironment, ResetEnvironment, AppendEnvironmentVariable)
 - Launch configuration management (PushLaunchConfigurations, PopLaunchConfigurations, ResetLaunchConfigurations, UnsetLaunchConfiguration)
 - Additional ROS substitutions (ExecutableInPackage, FindPackage, Parameter)
+- Utility substitutions (BooleanSubstitution, FindExecutable, LaunchLogDir, ThisLaunchFile)
+- Namespace management (PushRosNamespace, PopRosNamespace)
 - **100% coverage of launch_ros.substitutions** ✅
-- Comprehensive test coverage (test_conditional_substitutions.launch.py, test_set_parameters_from_file.launch.py, test_lifecycle_nodes.launch.py, test_environment_management.launch.py, test_launch_config_management.launch.py, test_additional_substitutions.launch.py)
+- **94% coverage of launch.substitutions** ✅
+- **73% coverage of launch_ros.actions** ✅
+- Comprehensive test coverage (test_conditional_substitutions.launch.py, test_set_parameters_from_file.launch.py, test_lifecycle_nodes.launch.py, test_environment_management.launch.py, test_launch_config_management.launch.py, test_additional_substitutions.launch.py, test_utility_substitutions.launch.py)
 - Maintained 100% Autoware compatibility
-- **Exceeded 70% target** - achieved 73% ROS API coverage ✅
+- **Far exceeded 70% target** - achieved 82% ROS API coverage ✅
 
 ---
 
@@ -486,21 +494,33 @@ Parameter(LaunchConfiguration('param_name'))
 
 ---
 
-#### 8.6.4: Utility Substitutions
+#### 8.6.4: Utility Substitutions ✅
 
 **Tasks**:
-- [ ] Implement `BooleanSubstitution`
-  - [ ] Convert value to boolean string
-- [ ] Implement `FindExecutable`
-  - [ ] Search PATH for executable
-- [ ] Implement `LaunchLogDir`
-  - [ ] Return log directory path
-- [ ] Implement `ThisLaunchFile`
-  - [ ] Return full path to current launch file
-- [ ] Add tests
+- [x] Implement `BooleanSubstitution`
+  - [x] Convert value to boolean string ("true"/"false")
+  - [x] Support PyObject parameters for LaunchConfiguration
+- [x] Implement `FindExecutable`
+  - [x] Search PATH for executable (placeholder in static analysis)
+  - [x] Support PyObject parameters
+- [x] Implement `LaunchLogDir`
+  - [x] Return log directory path (placeholder in static analysis)
+- [x] Implement `ThisLaunchFile`
+  - [x] Return full path to current launch file (placeholder in static analysis)
+- [x] Add tests
 
-**Files**:
+**Files**: ✅
 - `src/python/api/substitutions.rs`
+- `src/python/api/mod.rs`
+
+**Validation**: ✅
+- Integration test (test_utility_substitutions.launch.py)
+
+**Note**: For static analysis:
+- `BooleanSubstitution` converts values to "true"/"false" strings based on truthiness
+- `FindExecutable` returns `$(find-exec <name>)` placeholder
+- `LaunchLogDir` returns `$(launch-log-dir)` placeholder
+- `ThisLaunchFile` returns `$(this-launch-file)` placeholder
 
 ---
 

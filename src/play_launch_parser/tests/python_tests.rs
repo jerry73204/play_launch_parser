@@ -1882,3 +1882,233 @@ fn test_additional_substitutions() {
     // 2. All nodes are captured properly
     // 3. The parser handles these substitutions gracefully
 }
+
+#[test]
+fn test_utility_substitutions() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_utility_substitutions.launch.py");
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing utility substitutions file should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 10, "Should have 10 nodes");
+
+    // Test 1: Node with BooleanSubstitution (true)
+    let node_bool_true = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_bool_true")
+        .unwrap();
+    assert_eq!(
+        node_bool_true["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_bool_true["executable"].as_str().unwrap(), "talker");
+
+    // Test 2: Node with BooleanSubstitution (false)
+    let node_bool_false = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_bool_false")
+        .unwrap();
+    assert_eq!(
+        node_bool_false["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_bool_false["executable"].as_str().unwrap(), "listener");
+
+    // Test 3: Node with BooleanSubstitution (1 -> true)
+    let node_bool_1 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_bool_1")
+        .unwrap();
+    assert_eq!(node_bool_1["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_bool_1["executable"].as_str().unwrap(), "talker");
+
+    // Test 4: Node with BooleanSubstitution (0 -> false)
+    let node_bool_0 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_bool_0")
+        .unwrap();
+    assert_eq!(node_bool_0["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_bool_0["executable"].as_str().unwrap(), "listener");
+
+    // Test 5: Node with BooleanSubstitution (dynamic)
+    let node_bool_dynamic = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_bool_dynamic")
+        .unwrap();
+    assert_eq!(
+        node_bool_dynamic["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_bool_dynamic["executable"].as_str().unwrap(), "talker");
+
+    // Test 6: Node with FindExecutable (static)
+    let node_find_exec_static = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_find_exec_static")
+        .unwrap();
+    assert_eq!(
+        node_find_exec_static["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(
+        node_find_exec_static["executable"].as_str().unwrap(),
+        "listener"
+    );
+
+    // Test 7: Node with FindExecutable (dynamic)
+    let node_find_exec_dynamic = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_find_exec_dynamic")
+        .unwrap();
+    assert_eq!(
+        node_find_exec_dynamic["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(
+        node_find_exec_dynamic["executable"].as_str().unwrap(),
+        "talker"
+    );
+
+    // Test 8: Node with LaunchLogDir
+    let node_log_dir = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_log_dir")
+        .unwrap();
+    assert_eq!(node_log_dir["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_log_dir["executable"].as_str().unwrap(), "listener");
+
+    // Test 9: Node with ThisLaunchFile
+    let node_this_file = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_this_file")
+        .unwrap();
+    assert_eq!(
+        node_this_file["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_this_file["executable"].as_str().unwrap(), "talker");
+
+    // Test 10: Node with BooleanSubstitution ("yes" -> "true")
+    let node_bool_yes = nodes
+        .iter()
+        .find(|n| n["name"] == "node_combined_bool_yes")
+        .unwrap();
+    assert_eq!(node_bool_yes["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_bool_yes["executable"].as_str().unwrap(), "listener");
+
+    // Note: BooleanSubstitution, FindExecutable, LaunchLogDir, and ThisLaunchFile
+    // return placeholder values in static analysis:
+    // - BooleanSubstitution converts values to "true"/"false" strings
+    // - FindExecutable returns $(find-exec <name>) placeholder
+    // - LaunchLogDir returns $(launch-log-dir) placeholder
+    // - ThisLaunchFile returns $(this-launch-file) placeholder
+    // The test verifies that:
+    // 1. The substitutions parse correctly without errors
+    // 2. All nodes are captured properly
+    // 3. The parser handles these substitutions gracefully
+}
+
+#[test]
+fn test_push_pop_ros_namespace() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_push_pop_namespace.launch.py");
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing push/pop namespace file should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 5, "Should have 5 nodes");
+
+    // Test 1: Node with default namespace (null)
+    let node_default = nodes
+        .iter()
+        .find(|n| n["name"] == "node_default_ns")
+        .unwrap();
+    assert_eq!(node_default["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_default["executable"].as_str().unwrap(), "talker");
+    assert!(
+        node_default["namespace"].is_null(),
+        "Default namespace should be null"
+    );
+
+    // Test 2: Node in pushed namespace
+    let node_pushed = nodes
+        .iter()
+        .find(|n| n["name"] == "node_in_pushed_ns")
+        .unwrap();
+    assert_eq!(node_pushed["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_pushed["executable"].as_str().unwrap(), "listener");
+    assert_eq!(
+        node_pushed["namespace"].as_str().unwrap(),
+        "/pushed_ns",
+        "Namespace should be /pushed_ns after push"
+    );
+
+    // Test 3: Node in nested namespace
+    let node_nested = nodes
+        .iter()
+        .find(|n| n["name"] == "node_in_nested_ns")
+        .unwrap();
+    assert_eq!(node_nested["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_nested["executable"].as_str().unwrap(), "talker");
+    assert_eq!(
+        node_nested["namespace"].as_str().unwrap(),
+        "/pushed_ns/nested",
+        "Namespace should be /pushed_ns/nested after nested push"
+    );
+
+    // Test 4: Node after first pop (back to /pushed_ns)
+    let node_first_pop = nodes
+        .iter()
+        .find(|n| n["name"] == "node_after_first_pop")
+        .unwrap();
+    assert_eq!(
+        node_first_pop["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_first_pop["executable"].as_str().unwrap(), "listener");
+    assert_eq!(
+        node_first_pop["namespace"].as_str().unwrap(),
+        "/pushed_ns",
+        "Namespace should be /pushed_ns after first pop"
+    );
+
+    // Test 5: Node after second pop (back to default)
+    let node_second_pop = nodes
+        .iter()
+        .find(|n| n["name"] == "node_after_second_pop")
+        .unwrap();
+    assert_eq!(
+        node_second_pop["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_second_pop["executable"].as_str().unwrap(), "talker");
+    assert!(
+        node_second_pop["namespace"].is_null(),
+        "Namespace should be null after second pop (back to default)"
+    );
+}

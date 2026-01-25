@@ -1260,3 +1260,207 @@ impl Parameter {
         Self::pyobject_to_string(obj, py)
     }
 }
+
+/// Mock BooleanSubstitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import BooleanSubstitution
+/// bool_val = BooleanSubstitution('true')
+/// ```
+///
+/// Converts a value to a boolean string representation ("true" or "false")
+#[pyclass]
+#[derive(Clone)]
+pub struct BooleanSubstitution {
+    value: PyObject,
+}
+
+#[pymethods]
+impl BooleanSubstitution {
+    #[new]
+    fn new(value: PyObject) -> Self {
+        Self { value }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let val_str = Self::pyobject_to_string(&self.value, py)?;
+        Ok(Self::to_boolean_string(&val_str))
+    }
+
+    fn __repr__(&self, py: Python) -> String {
+        let val_str =
+            Self::pyobject_to_string(&self.value, py).unwrap_or_else(|_| "<value>".to_string());
+        format!("BooleanSubstitution('{}')", val_str)
+    }
+
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let val_str = Self::perform_obj(&self.value, py, context)?;
+        Ok(Self::to_boolean_string(&val_str))
+    }
+}
+
+impl BooleanSubstitution {
+    fn to_boolean_string(s: &str) -> String {
+        let lower = s.to_lowercase();
+        match lower.as_str() {
+            "true" | "1" | "yes" | "on" => "true".to_string(),
+            "false" | "0" | "no" | "off" | "" => "false".to_string(),
+            _ => "true".to_string(), // Non-empty strings are truthy
+        }
+    }
+
+    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+        Ok(obj.to_string())
+    }
+
+    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+        Self::pyobject_to_string(obj, py)
+    }
+}
+
+/// Mock FindExecutable substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import FindExecutable
+/// exec_path = FindExecutable('python3')
+/// ```
+///
+/// Searches PATH for an executable
+#[pyclass]
+#[derive(Clone)]
+pub struct FindExecutable {
+    name: PyObject,
+}
+
+#[pymethods]
+impl FindExecutable {
+    #[new]
+    fn new(name: PyObject) -> Self {
+        Self { name }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let name_str = Self::pyobject_to_string(&self.name, py)?;
+        // Return placeholder - can't actually search PATH in static analysis
+        Ok(format!("$(find-executable {})", name_str))
+    }
+
+    fn __repr__(&self, py: Python) -> String {
+        let name_str =
+            Self::pyobject_to_string(&self.name, py).unwrap_or_else(|_| "<name>".to_string());
+        format!("FindExecutable('{}')", name_str)
+    }
+
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let name_str = Self::perform_obj(&self.name, py, context)?;
+        Ok(format!("$(find-executable {})", name_str))
+    }
+}
+
+impl FindExecutable {
+    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+        Ok(obj.to_string())
+    }
+
+    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+        Self::pyobject_to_string(obj, py)
+    }
+}
+
+/// Mock LaunchLogDir substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import LaunchLogDir
+/// log_dir = LaunchLogDir()
+/// ```
+///
+/// Returns the launch log directory path
+#[pyclass]
+#[derive(Clone)]
+pub struct LaunchLogDir {}
+
+#[pymethods]
+impl LaunchLogDir {
+    #[new]
+    fn new() -> Self {
+        Self {}
+    }
+
+    fn __str__(&self) -> String {
+        // Return placeholder - can't determine actual log dir in static analysis
+        "$(launch-log-dir)".to_string()
+    }
+
+    fn __repr__(&self) -> String {
+        "LaunchLogDir()".to_string()
+    }
+
+    fn perform(&self, _py: Python, _context: &PyAny) -> PyResult<String> {
+        Ok("$(launch-log-dir)".to_string())
+    }
+}
+
+/// Mock ThisLaunchFile substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch.substitutions import ThisLaunchFile
+/// this_file = ThisLaunchFile()
+/// ```
+///
+/// Returns the full path to the current launch file
+#[pyclass]
+#[derive(Clone)]
+pub struct ThisLaunchFile {}
+
+#[pymethods]
+impl ThisLaunchFile {
+    #[new]
+    fn new() -> Self {
+        Self {}
+    }
+
+    fn __str__(&self) -> String {
+        // Return placeholder - actual path would be set during parsing
+        "$(this-launch-file)".to_string()
+    }
+
+    fn __repr__(&self) -> String {
+        "ThisLaunchFile()".to_string()
+    }
+
+    fn perform(&self, _py: Python, _context: &PyAny) -> PyResult<String> {
+        Ok("$(this-launch-file)".to_string())
+    }
+}
