@@ -903,3 +903,116 @@ impl AppendEnvironmentVariable {
         )
     }
 }
+
+/// Mock PushLaunchConfigurations action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import PushLaunchConfigurations
+/// PushLaunchConfigurations()
+/// ```
+///
+/// Pushes the current launch configurations onto a stack.
+/// This allows temporary configuration modifications that can be reverted with PopLaunchConfigurations.
+#[pyclass]
+#[derive(Clone)]
+pub struct PushLaunchConfigurations {}
+
+#[pymethods]
+impl PushLaunchConfigurations {
+    #[new]
+    #[pyo3(signature = (**_kwargs))]
+    fn new(_kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!("Python Launch PushLaunchConfigurations: pushing configuration state");
+        Self {}
+    }
+
+    fn __repr__(&self) -> String {
+        "PushLaunchConfigurations()".to_string()
+    }
+}
+
+/// Mock PopLaunchConfigurations action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import PopLaunchConfigurations
+/// PopLaunchConfigurations()
+/// ```
+///
+/// Pops the most recent launch configurations from the stack, restoring them.
+/// Must be paired with a previous PushLaunchConfigurations.
+#[pyclass]
+#[derive(Clone)]
+pub struct PopLaunchConfigurations {}
+
+#[pymethods]
+impl PopLaunchConfigurations {
+    #[new]
+    #[pyo3(signature = (**_kwargs))]
+    fn new(_kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!("Python Launch PopLaunchConfigurations: popping configuration state");
+        Self {}
+    }
+
+    fn __repr__(&self) -> String {
+        "PopLaunchConfigurations()".to_string()
+    }
+}
+
+/// Mock ResetLaunchConfigurations action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import ResetLaunchConfigurations
+/// ResetLaunchConfigurations()
+/// ```
+///
+/// Resets all launch configurations to their initial state (clearing any modifications).
+#[pyclass]
+#[derive(Clone)]
+pub struct ResetLaunchConfigurations {}
+
+#[pymethods]
+impl ResetLaunchConfigurations {
+    #[new]
+    #[pyo3(signature = (**_kwargs))]
+    fn new(_kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!(
+            "Python Launch ResetLaunchConfigurations: resetting configurations to initial state"
+        );
+        Self {}
+    }
+
+    fn __repr__(&self) -> String {
+        "ResetLaunchConfigurations()".to_string()
+    }
+}
+
+/// Mock UnsetLaunchConfiguration action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import UnsetLaunchConfiguration
+/// UnsetLaunchConfiguration('variable_name')
+/// ```
+///
+/// Removes a specific launch configuration variable.
+#[pyclass]
+#[derive(Clone)]
+pub struct UnsetLaunchConfiguration {
+    name: String,
+}
+
+#[pymethods]
+impl UnsetLaunchConfiguration {
+    #[new]
+    fn new(name: String) -> Self {
+        log::debug!("Python Launch UnsetLaunchConfiguration: {}", name);
+        Self { name }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("UnsetLaunchConfiguration('{}')", self.name)
+    }
+}

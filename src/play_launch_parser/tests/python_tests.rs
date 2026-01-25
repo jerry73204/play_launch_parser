@@ -1652,3 +1652,117 @@ fn test_environment_management() {
     // 2. All nodes are captured properly
     // 3. The parser doesn't crash on these actions
 }
+
+#[test]
+fn test_launch_config_management() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_launch_config_management.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing launch config management file should succeed: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Get nodes - should have 11 nodes from the launch config management test
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 11, "Should have 11 nodes");
+
+    // Test 1: Node with temporary config (inside push/pop)
+    let node_temp = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_temp_config")
+        .unwrap();
+    assert_eq!(node_temp["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_temp["executable"].as_str().unwrap(), "talker");
+
+    // Test 2: Node with restored config (after pop)
+    let node_restored = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_restored_config")
+        .unwrap();
+    assert_eq!(node_restored["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_restored["executable"].as_str().unwrap(), "listener");
+
+    // Test 3: Nested config test - level 2
+    let node_level_2 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_at_config_level_2")
+        .unwrap();
+    assert_eq!(node_level_2["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 4: Nested config test - level 1 (after first pop)
+    let node_level_1 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_at_config_level_1")
+        .unwrap();
+    assert_eq!(node_level_1["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 5: Nested config test - level 0 (after second pop)
+    let node_level_0 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_at_config_level_0")
+        .unwrap();
+    assert_eq!(node_level_0["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 6: Node with unset config (inside push/pop)
+    let node_unset = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_unset_config")
+        .unwrap();
+    assert_eq!(node_unset["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_unset["namespace"].as_str().unwrap(), "/unset_test");
+
+    // Test 7: Node with restored config3 (after pop)
+    let node_restored3 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_restored_config3")
+        .unwrap();
+    assert_eq!(
+        node_restored3["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+
+    // Test 8: Node after ResetLaunchConfigurations
+    let node_reset = nodes
+        .iter()
+        .find(|n| n["name"] == "node_after_reset")
+        .unwrap();
+    assert_eq!(node_reset["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 9: Node after multiple unsets
+    let node_unsets = nodes
+        .iter()
+        .find(|n| n["name"] == "node_after_unsets")
+        .unwrap();
+    assert_eq!(node_unsets["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_unsets["namespace"].as_str().unwrap(), "/after_unsets");
+
+    // Test 10: Node in inner scope
+    let node_inner = nodes
+        .iter()
+        .find(|n| n["name"] == "node_in_inner_scope")
+        .unwrap();
+    assert_eq!(node_inner["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 11: Node in outer scope (after pop)
+    let node_outer = nodes
+        .iter()
+        .find(|n| n["name"] == "node_in_outer_scope")
+        .unwrap();
+    assert_eq!(node_outer["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Note: Launch configuration management actions (PushLaunchConfigurations, etc.)
+    // don't produce output records in static analysis. They would affect the runtime
+    // launch configuration state but we're only doing static parsing. The test verifies that:
+    // 1. The actions parse correctly without errors
+    // 2. All nodes are captured properly
+    // 3. The parser doesn't crash on these actions
+}

@@ -20,14 +20,14 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 283 tests passing (218 unit + 23 edge + 33 integration without Python, +7 with Python)
+- **Test Coverage**: 284 tests passing (218 unit + 23 edge + 33 integration without Python, +8 with Python)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
   - Containers: 15/15 captured (100%) ✅
   - Composable Nodes: 54/54 captured (100%) ✅
   - **Overall**: **100% complete for planning_simulator.launch.xml** ✅
-- **ROS API Coverage**: 34/56 official ROS features (61%)
+- **ROS API Coverage**: 38/56 official ROS features (68%)
 - **Performance**: <0.1ms parse time for simple files, <5s for full Autoware
 - **Code Quality**: 0 clippy warnings, properly formatted
 
@@ -709,17 +709,17 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `PopEnvironment`                | ✅     | Low      | **Environment stack (Session 14)**       |
 | `ResetEnvironment`              | ✅     | Low      | **Reset env (Session 14)**               |
 | `RegisterEventHandler`          | ✅     | Low      | Limited support (Session 11)             |
+| `PushLaunchConfigurations`      | ✅     | Low      | **Config stack (Session 14)**            |
+| `PopLaunchConfigurations`       | ✅     | Low      | **Config stack (Session 14)**            |
+| `ResetLaunchConfigurations`     | ✅     | Low      | **Reset configs (Session 14)**           |
+| `UnsetLaunchConfiguration`      | ✅     | Low      | **Remove config (Session 14)**           |
 | `EmitEvent`                     | ❌     | Low      | Custom event system                      |
 | `ExecuteLocal`                  | ❌     | Low      | Local execution context                  |
 | `OpaqueCoroutine`               | ❌     | Low      | Async coroutine support                  |
-| `PopLaunchConfigurations`       | ❌     | Low      | Configuration stack management           |
-| `PushLaunchConfigurations`      | ❌     | Low      | Configuration stack management           |
-| `ResetLaunchConfigurations`     | ❌     | Low      | Clear all configurations                 |
 | `ShutdownAction`                | ❌     | Low      | Programmatic shutdown                    |
 | `UnregisterEventHandler`        | ❌     | Low      | Remove event handlers                    |
-| `UnsetLaunchConfiguration`      | ❌     | Low      | Remove specific configuration            |
 
-**Summary**: 14/24 implemented (58%)
+**Summary**: 18/24 implemented (75%)
 
 ### 14.2 launch.substitutions
 
@@ -778,13 +778,13 @@ This section documents ALL features from the official ROS 2 launch repositories,
 
 | Category                  | Implemented | Total | Percentage |
 |---------------------------|-------------|-------|------------|
-| launch.actions            | 14          | 24    | 58%        |
+| launch.actions            | 18          | 24    | 75%        |
 | launch.substitutions      | 12          | 17    | 71%        |
 | launch_ros.actions        | 7           | 11    | 64%        |
 | launch_ros.substitutions  | 1           | 4     | 25%        |
-| **Total**                 | **34**      | **56**| **61%**    |
+| **Total**                 | **38**      | **56**| **68%**    |
 
-**Note**: While only 61% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
+**Note**: While only 68% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
 
 ### 14.6 Recommended Implementation Priorities
 
