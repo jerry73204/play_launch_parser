@@ -1158,21 +1158,33 @@ impl LifecycleNode {
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python,
-        package: String,
-        executable: String,
-        name: Option<String>,
-        namespace: Option<String>,
+        package: PyObject,
+        executable: PyObject,
+        name: Option<PyObject>,
+        namespace: Option<PyObject>,
         parameters: Option<Vec<PyObject>>,
         remappings: Option<Vec<PyObject>>,
         arguments: Option<Vec<PyObject>>,
         output: Option<String>,
         _kwargs: Option<&PyDict>,
     ) -> PyResult<Self> {
+        // Convert PyObjects to strings (handles both strings and substitutions)
+        let package_str = Self::pyobject_to_string_static(py, &package)?;
+        let executable_str = Self::pyobject_to_string_static(py, &executable)?;
+
+        let name_str = name
+            .map(|obj| Self::pyobject_to_string_static(py, &obj))
+            .transpose()?;
+
+        let namespace_str = namespace
+            .map(|obj| Self::pyobject_to_string_static(py, &obj))
+            .transpose()?;
+
         let node = Self {
-            package: package.clone(),
-            executable: executable.clone(),
-            name: name.clone(),
-            namespace: namespace.clone(),
+            package: package_str,
+            executable: executable_str,
+            name: name_str,
+            namespace: namespace_str,
             parameters: parameters.unwrap_or_default(),
             remappings: remappings.unwrap_or_default(),
             arguments: arguments.unwrap_or_default(),
@@ -1196,6 +1208,24 @@ impl LifecycleNode {
 }
 
 impl LifecycleNode {
+    /// Convert PyObject to string (static version for use in constructor)
+    fn pyobject_to_string_static(py: Python, obj: &PyObject) -> PyResult<String> {
+        // Try direct string extraction
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+
+        // Try calling __str__ method (for substitutions)
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj.to_string())
+    }
+
     /// Capture the lifecycle node as a regular NodeCapture
     fn capture_node(&self, py: Python) -> PyResult<()> {
         use crate::python::bridge::{get_current_ros_namespace, NodeCapture, CAPTURED_NODES};
@@ -1384,6 +1414,73 @@ impl LifecycleNode {
 
         // Fallback to repr
         Ok(obj.to_string())
+    }
+}
+
+/// Mock LifecycleTransition action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import LifecycleTransition
+///
+/// LifecycleTransition(
+///     lifecycle_node_names=['my_lifecycle_node'],
+///     transition_id=3,  # e.g., configure, activate, etc.
+///     transition_label='activate'
+/// )
+/// ```
+///
+/// Triggers a lifecycle state transition for managed nodes.
+/// For static analysis, we just capture the intent without executing transitions.
+#[pyclass]
+#[derive(Clone)]
+pub struct LifecycleTransition {
+    #[allow(dead_code)] // Stored for API compatibility
+    lifecycle_node_names: Vec<String>,
+    #[allow(dead_code)] // Stored for API compatibility
+    transition_id: Option<i32>,
+    #[allow(dead_code)] // Stored for API compatibility
+    transition_label: Option<String>,
+}
+
+#[pymethods]
+impl LifecycleTransition {
+    #[new]
+    #[pyo3(signature = (*, lifecycle_node_names, transition_id=None, transition_label=None, **_kwargs))]
+    fn new(
+        lifecycle_node_names: Vec<String>,
+        transition_id: Option<i32>,
+        transition_label: Option<String>,
+        _kwargs: Option<&PyDict>,
+    ) -> Self {
+        log::debug!(
+            "Python Launch LifecycleTransition: nodes={:?}, transition={:?}",
+            lifecycle_node_names,
+            transition_label
+        );
+        // For static analysis, we just capture the action
+        // We don't actually trigger lifecycle transitions
+        Self {
+            lifecycle_node_names,
+            transition_id,
+            transition_label,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        if let Some(ref label) = self.transition_label {
+            format!(
+                "LifecycleTransition(nodes={:?}, transition='{}')",
+                self.lifecycle_node_names, label
+            )
+        } else if let Some(id) = self.transition_id {
+            format!(
+                "LifecycleTransition(nodes={:?}, transition_id={})",
+                self.lifecycle_node_names, id
+            )
+        } else {
+            format!("LifecycleTransition(nodes={:?})", self.lifecycle_node_names)
+        }
     }
 }
 

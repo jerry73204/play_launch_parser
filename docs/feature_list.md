@@ -20,13 +20,14 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 281 tests passing (218 unit + 23 edge + 33 integration without Python, +5 with Python)
+- **Test Coverage**: 282 tests passing (218 unit + 23 edge + 33 integration without Python, +6 with Python)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
   - Containers: 15/15 captured (100%) ✅
   - Composable Nodes: 54/54 captured (100%) ✅
   - **Overall**: **100% complete for planning_simulator.launch.xml** ✅
+- **ROS API Coverage**: 30/56 official ROS features (54%)
 - **Performance**: <0.1ms parse time for simple files, <5s for full Autoware
 - **Code Quality**: 0 clippy warnings, properly formatted
 
@@ -753,14 +754,14 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `LoadComposableNodes`        | ✅     | High     | Python implementation (Session 8)    |
 | `SetParameter`               | ✅     | Medium   | Python implementation (Session 10)   |
 | `SetRemap`                   | ✅     | Medium   | XML implementation (Session 11)      |
-| `LifecycleNode`              | ❌     | Medium   | Lifecycle management                 |
-| `LifecycleTransition`        | ❌     | Low      | State transitions                    |
+| `LifecycleNode`              | ✅     | Medium   | **Lifecycle management (Session 14)**|
+| `LifecycleTransition`        | ✅     | Low      | **State transitions (Session 14)**   |
 | `PushRosNamespace`           | ❌     | Low      | Python ROS namespace stack           |
 | `RosTimer`                   | ❌     | Low      | ROS time-based timer                 |
 | `SetParametersFromFile`      | ✅     | Medium   | **Load params from YAML (Session 14)**|
 | `SetUseSimTime`              | ❌     | Low      | Simulation time configuration        |
 
-**Summary**: 6/11 implemented (55%)
+**Summary**: 7/11 implemented (64%)
 
 ### 14.4 launch_ros.substitutions
 
@@ -779,24 +780,24 @@ This section documents ALL features from the official ROS 2 launch repositories,
 |---------------------------|-------------|-------|------------|
 | launch.actions            | 10          | 24    | 42%        |
 | launch.substitutions      | 12          | 17    | 71%        |
-| launch_ros.actions        | 6           | 11    | 55%        |
+| launch_ros.actions        | 7           | 11    | 64%        |
 | launch_ros.substitutions  | 1           | 4     | 25%        |
-| **Total**                 | **29**      | **56**| **52%**    |
+| **Total**                 | **30**      | **56**| **54%**    |
 
-**Note**: While only 52% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
+**Note**: While only 54% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
 
 ### 14.6 Recommended Implementation Priorities
 
 **High Priority** (would benefit real-world usage):
-1. `EqualsSubstitution` / `IfElseSubstitution` - Better conditional logic
-2. `SetParametersFromFile` - Common pattern for parameter management
-3. `LifecycleNode` - Managed node lifecycle support
+1. ~~`EqualsSubstitution` / `IfElseSubstitution`~~ - ✅ **Implemented in Session 14**
+2. ~~`SetParametersFromFile`~~ - ✅ **Implemented in Session 14**
+3. ~~`LifecycleNode`~~ - ✅ **Implemented in Session 14**
 4. `ExecutableInPackage` - Alternative to FindPackageShare for executables
 
 **Medium Priority** (occasionally useful):
 1. `AppendEnvironmentVariable` - Environment manipulation
 2. `RegisterEventHandler` / `EmitEvent` - Dynamic event handling
-3. `FileContent` - Read configuration from files
+3. ~~`FileContent`~~ - ✅ **Implemented in Session 14**
 
 **Low Priority** (rarely used):
 1. Stack management actions (Push/Pop/Reset)

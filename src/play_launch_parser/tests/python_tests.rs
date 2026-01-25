@@ -1432,3 +1432,108 @@ fn test_set_parameters_from_file() {
     // the node records in our static analysis. It would apply parameters at runtime.
     // The test verifies that the action doesn't break parsing and nodes are captured correctly.
 }
+
+#[test]
+fn test_lifecycle_nodes() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_lifecycle_nodes.launch.py");
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse lifecycle nodes test: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Get nodes - should have 4 lifecycle nodes
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 4, "Should have 4 lifecycle nodes");
+
+    // Test 1: Basic lifecycle node
+    let lifecycle_node_1 = nodes
+        .iter()
+        .find(|n| n["name"] == "lifecycle_node_1")
+        .unwrap();
+    assert_eq!(
+        lifecycle_node_1["package"].as_str().unwrap(),
+        "lifecycle_pkg"
+    );
+    assert_eq!(
+        lifecycle_node_1["executable"].as_str().unwrap(),
+        "lifecycle_node"
+    );
+    assert_eq!(lifecycle_node_1["namespace"].as_str().unwrap(), "/test");
+
+    // Test 2: Lifecycle node with parameters and remappings
+    let lifecycle_node_2 = nodes
+        .iter()
+        .find(|n| n["name"] == "lifecycle_node_2")
+        .unwrap();
+    assert_eq!(
+        lifecycle_node_2["package"].as_str().unwrap(),
+        "lifecycle_pkg"
+    );
+
+    // Check parameters
+    let params = lifecycle_node_2["params"].as_array().unwrap();
+    assert!(
+        params.len() >= 2,
+        "Should have at least 2 parameters (use_sim_time, param1, param2)"
+    );
+
+    // Check for specific parameters
+    let param_names: Vec<String> = params
+        .iter()
+        .map(|p| p[0].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        param_names.contains(&"param1".to_string()),
+        "Should have param1"
+    );
+    assert!(
+        param_names.contains(&"param2".to_string()),
+        "Should have param2"
+    );
+
+    // Check remappings
+    let remaps = lifecycle_node_2["remaps"].as_array().unwrap();
+    assert_eq!(remaps.len(), 2, "Should have 2 remappings");
+    assert_eq!(remaps[0][0].as_str().unwrap(), "/input");
+    assert_eq!(remaps[0][1].as_str().unwrap(), "/remapped_input");
+    assert_eq!(remaps[1][0].as_str().unwrap(), "/output");
+    assert_eq!(remaps[1][1].as_str().unwrap(), "/remapped_output");
+
+    // Test 3: Lifecycle node with LaunchConfiguration for name
+    // In static analysis, LaunchConfiguration converts to $(var ...) syntax
+    let lifecycle_node_dynamic = nodes
+        .iter()
+        .find(|n| n["name"] == "$(var node_name)")
+        .unwrap();
+    assert_eq!(
+        lifecycle_node_dynamic["package"].as_str().unwrap(),
+        "lifecycle_pkg"
+    );
+
+    // Check arguments
+    let args_array = lifecycle_node_dynamic["args"].as_array().unwrap();
+    assert!(args_array.len() >= 3, "Should have at least 3 arguments");
+
+    // Test 4: Lifecycle node with output specification
+    let lifecycle_node_3 = nodes
+        .iter()
+        .find(|n| n["name"] == "lifecycle_node_3")
+        .unwrap();
+    assert_eq!(
+        lifecycle_node_3["package"].as_str().unwrap(),
+        "lifecycle_pkg"
+    );
+
+    // Note: LifecycleTransition actions don't create node records in static analysis.
+    // They're just captured as actions that would trigger state transitions at runtime.
+    // The test verifies that the actions don't break parsing and lifecycle nodes are captured correctly.
+}
