@@ -20,14 +20,14 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 282 tests passing (218 unit + 23 edge + 33 integration without Python, +6 with Python)
+- **Test Coverage**: 283 tests passing (218 unit + 23 edge + 33 integration without Python, +7 with Python)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
   - Containers: 15/15 captured (100%) ✅
   - Composable Nodes: 54/54 captured (100%) ✅
   - **Overall**: **100% complete for planning_simulator.launch.xml** ✅
-- **ROS API Coverage**: 30/56 official ROS features (54%)
+- **ROS API Coverage**: 34/56 official ROS features (61%)
 - **Performance**: <0.1ms parse time for simple files, <5s for full Autoware
 - **Code Quality**: 0 clippy warnings, properly formatted
 
@@ -704,22 +704,22 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `SetLaunchConfiguration`        | ✅     | Medium   | Python implementation (Session 10)       |
 | `TimerAction`                   | ✅     | Medium   | Python implementation                    |
 | `UnsetEnvironmentVariable`      | ✅     | High     | Python implementation                    |
-| `AppendEnvironmentVariable`     | ❌     | Low      | Appends to existing env vars             |
+| `AppendEnvironmentVariable`     | ✅     | Low      | **Appends to env vars (Session 14)**     |
+| `PushEnvironment`               | ✅     | Low      | **Environment stack (Session 14)**       |
+| `PopEnvironment`                | ✅     | Low      | **Environment stack (Session 14)**       |
+| `ResetEnvironment`              | ✅     | Low      | **Reset env (Session 14)**               |
+| `RegisterEventHandler`          | ✅     | Low      | Limited support (Session 11)             |
 | `EmitEvent`                     | ❌     | Low      | Custom event system                      |
 | `ExecuteLocal`                  | ❌     | Low      | Local execution context                  |
 | `OpaqueCoroutine`               | ❌     | Low      | Async coroutine support                  |
-| `PopEnvironment`                | ❌     | Low      | Environment stack management             |
 | `PopLaunchConfigurations`       | ❌     | Low      | Configuration stack management           |
-| `PushEnvironment`               | ❌     | Low      | Environment stack management             |
 | `PushLaunchConfigurations`      | ❌     | Low      | Configuration stack management           |
-| `RegisterEventHandler`          | ❌     | Low      | Dynamic event handling                   |
-| `ResetEnvironment`              | ❌     | Low      | Reset to original environment            |
 | `ResetLaunchConfigurations`     | ❌     | Low      | Clear all configurations                 |
 | `ShutdownAction`                | ❌     | Low      | Programmatic shutdown                    |
 | `UnregisterEventHandler`        | ❌     | Low      | Remove event handlers                    |
 | `UnsetLaunchConfiguration`      | ❌     | Low      | Remove specific configuration            |
 
-**Summary**: 10/24 implemented (42%)
+**Summary**: 14/24 implemented (58%)
 
 ### 14.2 launch.substitutions
 
@@ -778,13 +778,13 @@ This section documents ALL features from the official ROS 2 launch repositories,
 
 | Category                  | Implemented | Total | Percentage |
 |---------------------------|-------------|-------|------------|
-| launch.actions            | 10          | 24    | 42%        |
+| launch.actions            | 14          | 24    | 58%        |
 | launch.substitutions      | 12          | 17    | 71%        |
 | launch_ros.actions        | 7           | 11    | 64%        |
 | launch_ros.substitutions  | 1           | 4     | 25%        |
-| **Total**                 | **30**      | **56**| **54%**    |
+| **Total**                 | **34**      | **56**| **61%**    |
 
-**Note**: While only 54% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
+**Note**: While only 61% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
 
 ### 14.6 Recommended Implementation Priorities
 

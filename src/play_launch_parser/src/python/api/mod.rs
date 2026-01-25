@@ -54,6 +54,10 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_actions.add_class::<actions::IncludeLaunchDescription>()?;
     launch_actions.add_class::<actions::SetLaunchConfiguration>()?;
     launch_actions.add_class::<actions::RegisterEventHandler>()?;
+    launch_actions.add_class::<actions::PushEnvironment>()?;
+    launch_actions.add_class::<actions::PopEnvironment>()?;
+    launch_actions.add_class::<actions::ResetEnvironment>()?;
+    launch_actions.add_class::<actions::AppendEnvironmentVariable>()?;
 
     // Create launch.substitutions submodule
     let launch_subs = PyModule::new(py, "launch.substitutions")?;

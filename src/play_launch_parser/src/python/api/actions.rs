@@ -735,3 +735,171 @@ impl RegisterEventHandler {
         "RegisterEventHandler(...)".to_string()
     }
 }
+
+/// Mock PushEnvironment action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import PushEnvironment
+/// PushEnvironment()
+/// ```
+///
+/// Pushes the current environment state onto a stack.
+/// This allows temporary environment modifications that can be reverted with PopEnvironment.
+#[pyclass]
+#[derive(Clone)]
+pub struct PushEnvironment {}
+
+#[pymethods]
+impl PushEnvironment {
+    #[new]
+    #[pyo3(signature = (**_kwargs))]
+    fn new(_kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!("Python Launch PushEnvironment: pushing environment state");
+        Self {}
+    }
+
+    fn __repr__(&self) -> String {
+        "PushEnvironment()".to_string()
+    }
+}
+
+/// Mock PopEnvironment action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import PopEnvironment
+/// PopEnvironment()
+/// ```
+///
+/// Pops the most recent environment state from the stack, restoring it.
+/// Must be paired with a previous PushEnvironment.
+#[pyclass]
+#[derive(Clone)]
+pub struct PopEnvironment {}
+
+#[pymethods]
+impl PopEnvironment {
+    #[new]
+    #[pyo3(signature = (**_kwargs))]
+    fn new(_kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!("Python Launch PopEnvironment: popping environment state");
+        Self {}
+    }
+
+    fn __repr__(&self) -> String {
+        "PopEnvironment()".to_string()
+    }
+}
+
+/// Mock ResetEnvironment action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import ResetEnvironment
+/// ResetEnvironment()
+/// ```
+///
+/// Resets the environment to its initial state (before any modifications).
+#[pyclass]
+#[derive(Clone)]
+pub struct ResetEnvironment {}
+
+#[pymethods]
+impl ResetEnvironment {
+    #[new]
+    #[pyo3(signature = (**_kwargs))]
+    fn new(_kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!("Python Launch ResetEnvironment: resetting environment to initial state");
+        Self {}
+    }
+
+    fn __repr__(&self) -> String {
+        "ResetEnvironment()".to_string()
+    }
+}
+
+/// Mock AppendEnvironmentVariable action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import AppendEnvironmentVariable
+/// AppendEnvironmentVariable('PATH', '/custom/path')
+/// AppendEnvironmentVariable('LD_LIBRARY_PATH', '/custom/lib', prepend=True, separator=':')
+/// ```
+///
+/// Appends (or prepends) a value to an existing environment variable.
+#[pyclass]
+#[derive(Clone)]
+pub struct AppendEnvironmentVariable {
+    name: String,
+    value: PyObject,
+    #[allow(dead_code)]
+    prepend: bool,
+    #[allow(dead_code)]
+    separator: String,
+}
+
+#[pymethods]
+impl AppendEnvironmentVariable {
+    #[new]
+    #[pyo3(signature = (name, value, *, prepend=false, separator=":", **_kwargs))]
+    fn new(
+        py: Python,
+        name: String,
+        value: PyObject,
+        prepend: Option<bool>,
+        separator: Option<&str>,
+        _kwargs: Option<&pyo3::types::PyDict>,
+    ) -> Self {
+        let prepend_val = prepend.unwrap_or(false);
+        let sep_val = separator.unwrap_or(":").to_string();
+
+        // Convert PyObject to string for logging
+        let value_str = if let Ok(s) = value.extract::<String>(py) {
+            s
+        } else if let Ok(str_result) = value.call_method0(py, "__str__") {
+            str_result
+                .extract::<String>(py)
+                .unwrap_or_else(|_| "<value>".to_string())
+        } else {
+            "<value>".to_string()
+        };
+
+        log::debug!(
+            "Python Launch AppendEnvironmentVariable: {}{}{}{}",
+            if prepend_val {
+                "prepending "
+            } else {
+                "appending "
+            },
+            value_str,
+            sep_val,
+            name
+        );
+
+        Self {
+            name,
+            value,
+            prepend: prepend_val,
+            separator: sep_val,
+        }
+    }
+
+    fn __repr__(&self, py: Python) -> String {
+        let value_str = if let Ok(s) = self.value.extract::<String>(py) {
+            s
+        } else if let Ok(str_result) = self.value.call_method0(py, "__str__") {
+            str_result
+                .extract::<String>(py)
+                .unwrap_or_else(|_| "<value>".to_string())
+        } else {
+            "<value>".to_string()
+        };
+
+        format!(
+            "AppendEnvironmentVariable('{}', '{}', prepend={}, separator='{}')",
+            self.name, value_str, self.prepend, self.separator
+        )
+    }
+}

@@ -1537,3 +1537,118 @@ fn test_lifecycle_nodes() {
     // They're just captured as actions that would trigger state transitions at runtime.
     // The test verifies that the actions don't break parsing and lifecycle nodes are captured correctly.
 }
+
+#[test]
+fn test_environment_management() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_environment_management.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing environment management launch file should succeed: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Get nodes - should have 11 nodes from the environment management test
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 11, "Should have 11 nodes");
+
+    // Test 1: Node with modified environment (after first SetEnvironmentVariable)
+    let node_modified = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_modified_env")
+        .unwrap();
+    assert_eq!(node_modified["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_modified["executable"].as_str().unwrap(), "talker");
+
+    // Test 2: Node with restored environment (after PopEnvironment)
+    let node_restored = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_restored_env")
+        .unwrap();
+    assert_eq!(node_restored["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_restored["executable"].as_str().unwrap(), "listener");
+
+    // Test 3: Node with appended PATH
+    let node_appended = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_appended_path")
+        .unwrap();
+    assert_eq!(node_appended["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 4: Node with prepended LD_LIBRARY_PATH
+    let node_prepended = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_prepended_lib")
+        .unwrap();
+    assert_eq!(
+        node_prepended["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+
+    // Test 5: Nested environment test - level 2
+    let node_level_2 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_at_level_2")
+        .unwrap();
+    assert_eq!(node_level_2["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 6: Nested environment test - level 1 (after first pop)
+    let node_level_1 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_at_level_1")
+        .unwrap();
+    assert_eq!(node_level_1["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 7: Nested environment test - level 0 (after second pop)
+    let node_level_0 = nodes
+        .iter()
+        .find(|n| n["name"] == "node_at_level_0")
+        .unwrap();
+    assert_eq!(node_level_0["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 8: Node after ResetEnvironment
+    let node_reset = nodes
+        .iter()
+        .find(|n| n["name"] == "node_after_reset")
+        .unwrap();
+    assert_eq!(node_reset["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 9: Node with custom list separator
+    let node_custom = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_custom_list")
+        .unwrap();
+    assert_eq!(node_custom["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 10: Node with unset variable (inside push/pop)
+    let node_unset = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_unset_var")
+        .unwrap();
+    assert_eq!(node_unset["package"].as_str().unwrap(), "demo_nodes_cpp");
+
+    // Test 11: Node with restored variable (after pop)
+    let node_var_restored = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_restored_var")
+        .unwrap();
+    assert_eq!(
+        node_var_restored["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+
+    // Note: Environment management actions (PushEnvironment, PopEnvironment, etc.)
+    // don't produce output records in static analysis. They would affect the runtime
+    // environment but we're only doing static parsing. The test verifies that:
+    // 1. The actions parse correctly without errors
+    // 2. All nodes are captured properly
+    // 3. The parser doesn't crash on these actions
+}

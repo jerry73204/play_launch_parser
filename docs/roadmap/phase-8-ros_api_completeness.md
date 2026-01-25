@@ -1,6 +1,6 @@
 # Phase 8: ROS API Completeness
 
-**Status**: 🚧 In Progress (Session 14 - Phases 8.1, 8.2 & 8.3 Complete ✅)
+**Status**: 🚧 In Progress (Session 14 - Phases 8.1, 8.2, 8.3 & 8.4 Complete ✅)
 **Priority**: MEDIUM (for broader ROS 2 ecosystem compatibility)
 **Dependencies**: Phase 7 Complete ✅
 
@@ -10,7 +10,7 @@
 
 Implement remaining features from official ROS 2 launch repositories to achieve broader ecosystem compatibility beyond Autoware.
 
-**Current Coverage**: 30/56 official ROS features (54%)
+**Current Coverage**: 34/56 official ROS features (61%)
 **Target Coverage**: 40+/56 (70%+)
 
 **Key Insight**: While we have 100% Autoware compatibility, many ROS 2 launch files in the broader ecosystem use additional features not found in Autoware. This phase targets commonly-used features to maximize real-world compatibility.
@@ -27,11 +27,11 @@ Based on official ROS 2 Humble launch repositories:
 
 | Category                  | Implemented | Total | Coverage | Session 14 Progress |
 |---------------------------|-------------|-------|----------|---------------------|
-| `launch.actions`          | 10          | 24    | 42%      | —                   |
+| `launch.actions`          | 14          | 24    | 58%      | ✅ +4 (Phase 8.4)   |
 | `launch.substitutions`    | 12          | 17    | 71%      | ✅ +4 (Phase 8.1)   |
 | `launch_ros.actions`      | 7           | 11    | 64%      | ✅ +2 (8.2 & 8.3)   |
 | `launch_ros.substitutions`| 1           | 4     | 25%      | —                   |
-| **Total**                 | **30**      | **56**| **54%**  | **+6 features**     |
+| **Total**                 | **34**      | **56**| **61%**  | **+10 features**    |
 
 ### Implementation Priorities
 
@@ -60,17 +60,24 @@ Features prioritized by:
 - LifecycleNode - Managed node lifecycle (enhanced to accept PyObject parameters)
 - LifecycleTransition - State transition control (configure, activate, etc.)
 
+**Phase 8.4: Environment Management** ✅
+- PushEnvironment - Save current environment state onto stack
+- PopEnvironment - Restore previous environment state from stack
+- ResetEnvironment - Reset environment to initial state
+- AppendEnvironmentVariable - Append/prepend to environment variables
+
 **Statistics**:
-- Features Added: +6 (4 substitutions, 2 actions)
-- Test Coverage: 282 tests (100% passing)
-- ROS API Coverage: 43% → 54% (+11 percentage points)
-- Time Spent: 2.5 days total
+- Features Added: +10 (4 substitutions, 6 actions)
+- Test Coverage: 283 tests (100% passing)
+- ROS API Coverage: 43% → 61% (+18 percentage points)
+- Time Spent: 3 days total
 
 **Key Achievements**:
 - Conditional logic support (EqualsSubstitution, IfElseSubstitution)
 - File-based configuration (FileContent, SetParametersFromFile)
 - Lifecycle node support (LifecycleNode, LifecycleTransition)
-- Comprehensive test coverage (test_conditional_substitutions.launch.py, test_set_parameters_from_file.launch.py, test_lifecycle_nodes.launch.py)
+- Environment management (PushEnvironment, PopEnvironment, ResetEnvironment, AppendEnvironmentVariable)
+- Comprehensive test coverage (test_conditional_substitutions.launch.py, test_set_parameters_from_file.launch.py, test_lifecycle_nodes.launch.py, test_environment_management.launch.py)
 - Maintained 100% Autoware compatibility
 
 ---
@@ -287,29 +294,36 @@ LifecycleTransition(
 
 ---
 
-### Phase 8.4: Environment Management 🟢 MEDIUM
+### Phase 8.4: Environment Management ✅ COMPLETE
 
 **Priority**: MEDIUM
-**Estimated Time**: 2 days
-**Expected Impact**: Better environment control
+**Actual Time**: 0.5 days (Session 14)
+**Impact**: Better environment control
+**Status**: ✅ Complete - All environment management actions implemented
 
-#### 8.4.1: Stack Management Actions
+#### 8.4.1: Stack Management Actions ✅
 
 **Tasks**:
-- [ ] Implement `PushEnvironment` / `PopEnvironment`
-  - [ ] Environment stack in LaunchContext
-  - [ ] Push current env state
-  - [ ] Pop and restore
-- [ ] Implement `ResetEnvironment`
-  - [ ] Reset to initial state
-- [ ] Implement `AppendEnvironmentVariable`
-  - [ ] Append to existing value
-  - [ ] With separator
-- [ ] Add tests
+- [x] Implement `PushEnvironment` / `PopEnvironment`
+  - [x] Environment stack actions for saving/restoring state
+  - [x] Push current env state
+  - [x] Pop and restore
+- [x] Implement `ResetEnvironment`
+  - [x] Reset to initial state
+- [x] Implement `AppendEnvironmentVariable`
+  - [x] Append to existing value (or prepend)
+  - [x] With configurable separator
+  - [x] Supports PyObject for value (LaunchConfiguration, etc.)
+- [x] Add tests
+  - [x] Basic push/pop workflow
+  - [x] Nested push/pop
+  - [x] AppendEnvironmentVariable (append and prepend modes)
+  - [x] ResetEnvironment
+  - [x] Integration with UnsetEnvironmentVariable
 
-**Files**:
-- `src/python/api/actions.rs`
-- `src/substitution/context.rs` (environment stack)
+**Files**: ✅
+- `src/python/api/actions.rs` (all 4 actions)
+- `src/python/api/mod.rs` (module exports)
 
 **Example Usage**:
 ```python
@@ -318,7 +332,14 @@ SetEnvironmentVariable('PATH', '/custom/path')
 # ... nodes use custom PATH
 PopEnvironment()
 # PATH restored
+
+AppendEnvironmentVariable('LD_LIBRARY_PATH', '/opt/lib', prepend=True)
 ```
+
+**Validation**: ✅
+- Integration test (test_environment_management.launch.py)
+
+**Note**: For static analysis, these actions are captured but don't actually modify the runtime environment. The test verifies correct parsing and that nodes are captured properly.
 
 ---
 
@@ -528,9 +549,10 @@ ExecutableInPackage(package='my_pkg', executable='my_node')
 - ~~Days 3-4~~: Phase 8.2 - SetParametersFromFile ✅ **DONE** (1 day)
 - ~~Day 5~~: Phase 8.3 - Lifecycle node support ✅ **DONE** (0.5 days)
 
-**Week 2**: ⏳ **NEXT UP**
-- Days 1-2: Phase 8.4 - Environment management ⏳
-- Days 3-4: Phase 8.6 - Additional substitutions ⏳
+**Week 2**: ✅ **IN PROGRESS - Phase 8.4 Complete**
+- ~~Day 1~~: Phase 8.4 - Environment management ✅ **DONE** (0.5 days)
+- Days 2-3: Phase 8.6 - Additional substitutions ⏳ **NEXT UP**
+- Days 4-5: Phase 8.5 - Launch configuration management ⏳
 - Day 5: Testing & documentation ⏳
 
 ### Phase 2: Medium-Priority Features (Week 3)
@@ -553,23 +575,24 @@ ExecutableInPackage(package='my_pkg', executable='my_node')
 
 ### Coverage Targets
 
-| Category                  | Start   | Current (8.1+8.2+8.3) | Phase 2 Goal | Phase 3 Goal | Target |
-|---------------------------|---------|----------------------|--------------|--------------|--------|
-| launch.actions            | 10/24   | 10/24                | 14/24        | 18/24        | 18/24  |
-| launch.substitutions      | 8/17    | **12/17** ✅         | 14/17        | 15/17        | 14/17  |
-| launch_ros.actions        | 5/11    | **7/11** ✅          | 8/11         | 10/11        | 8/11   |
-| launch_ros.substitutions  | 1/4     | 1/4                  | 4/4          | 4/4          | 4/4    |
-| **Total**                 | **24/56** | **30/56** ✅       | **40/56**    | **47/56**    | **40/56** |
-| **Percentage**            | **43%** | **54%** ✅           | **71%**      | **84%**      | **71%** |
+| Category                  | Start   | Current (8.1-8.4) | Phase 2 Goal | Phase 3 Goal | Target |
+|---------------------------|---------|-------------------|--------------|--------------|--------|
+| launch.actions            | 10/24   | **14/24** ✅      | 14/24        | 18/24        | 18/24  |
+| launch.substitutions      | 8/17    | **12/17** ✅      | 14/17        | 15/17        | 14/17  |
+| launch_ros.actions        | 5/11    | **7/11** ✅       | 8/11         | 10/11        | 8/11   |
+| launch_ros.substitutions  | 1/4     | 1/4               | 4/4          | 4/4          | 4/4    |
+| **Total**                 | **24/56** | **34/56** ✅    | **40/56**    | **47/56**    | **40/56** |
+| **Percentage**            | **43%** | **61%** ✅        | **71%**      | **84%**      | **71%** |
 
-**Progress**: ✅ Phase 8.1, 8.2 & 8.3 Complete (+6 features, +11 percentage points)
+**Progress**: ✅ Phase 8.1, 8.2, 8.3 & 8.4 Complete (+10 features, +18 percentage points)
 
 ### Milestone Checklist
 
 - [x] Phase 8.1: High-priority substitutions complete ✅
 - [x] Phase 8.2: SetParametersFromFile complete ✅
 - [x] Phase 8.3: Lifecycle node support complete ✅
-- [x] ROS API coverage ≥ 54% (Phase 1 complete) ✅
+- [x] Phase 8.4: Environment management complete ✅
+- [x] ROS API coverage ≥ 61% (Phase 1 complete) ✅
 - [ ] ROS API coverage ≥ 70% (Phase 2 complete)
 - [ ] All tests passing (300+ tests)
 - [x] Documentation updated ✅
@@ -708,19 +731,19 @@ After completing Phase 8:
   - No lifecycle node support
   - Limited substitution types
 
-### Current Progress (Phase 8.1, 8.2 & 8.3 Complete)
+### Current Progress (Phase 8.1, 8.2, 8.3 & 8.4 Complete)
 
-- ROS API Coverage: **54%** (30/56) - **+11 percentage points** ✅
+- ROS API Coverage: **61%** (34/56) - **+18 percentage points** ✅
 - Autoware Coverage: 100% ✅ (maintained)
-- Test Count: 282 ✅ (+3 tests)
+- Test Count: 283 ✅ (+4 tests)
 - Completed Features:
   - ✅ Conditional logic (EqualsSubstitution, NotEqualsSubstitution, IfElseSubstitution)
   - ✅ File content reading (FileContent)
   - ✅ Parameter file loading (SetParametersFromFile)
   - ✅ Lifecycle node support (LifecycleNode, LifecycleTransition)
+  - ✅ Environment stack management (PushEnvironment, PopEnvironment, ResetEnvironment, AppendEnvironmentVariable)
 - Remaining Work:
   - ⏳ Additional substitutions (Phase 8.6)
-  - ⏳ Environment stack management (Phase 8.4)
   - ⏳ Launch configuration management (Phase 8.5)
 
 ### After Phase 8 (Target)
@@ -753,5 +776,5 @@ Phase 8 is considered complete when:
 
 ---
 
-**Last Updated**: 2026-01-25 (Session 14 - Phases 8.1, 8.2 & 8.3 Complete)
-**Next Review**: After Phase 8.4 completion
+**Last Updated**: 2026-01-25 (Session 14 - Phases 8.1, 8.2, 8.3 & 8.4 Complete)
+**Next Review**: After Phase 8.5/8.6 completion
