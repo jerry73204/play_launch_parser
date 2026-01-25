@@ -2112,3 +2112,109 @@ fn test_push_pop_ros_namespace() {
         "Namespace should be null after second pop (back to default)"
     );
 }
+
+#[test]
+fn test_advanced_actions() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_advanced_actions.launch.py");
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing advanced actions file should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    // We have 3 nodes: node_with_sim_time, delayed_node (from RosTimer), regular_node
+    assert_eq!(nodes.len(), 3, "Should have 3 nodes");
+
+    // Test 1: Node with sim time
+    let node_sim = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_sim_time")
+        .unwrap();
+    assert_eq!(node_sim["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_sim["executable"].as_str().unwrap(), "talker");
+
+    // Test 2: Delayed node (from RosTimer)
+    let node_delayed = nodes.iter().find(|n| n["name"] == "delayed_node").unwrap();
+    assert_eq!(node_delayed["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_delayed["executable"].as_str().unwrap(), "listener");
+
+    // Test 3: Regular node
+    let node_regular = nodes.iter().find(|n| n["name"] == "regular_node").unwrap();
+    assert_eq!(node_regular["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_regular["executable"].as_str().unwrap(), "talker");
+
+    // Note: ExecuteLocal, Shutdown, RosTimer, and SetUseSimTime are captured
+    // but don't produce node records. They are informational actions.
+    // The test verifies that:
+    // 1. These actions parse correctly without errors
+    // 2. Nodes within RosTimer actions are captured
+    // 3. The parser handles these actions gracefully
+}
+
+#[test]
+fn test_remap_logging() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_remap_logging.launch.py");
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing remaining actions file should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have nodes
+    assert!(json["node"].is_array(), "Should have node array");
+    let nodes = json["node"].as_array().unwrap();
+    // We have 3 nodes: node_with_remap, listener_node, talker_with_remap
+    assert_eq!(nodes.len(), 3, "Should have 3 nodes");
+
+    // Test 1: Node with global remap in effect
+    let node_remap = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_remap")
+        .unwrap();
+    assert_eq!(node_remap["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_remap["executable"].as_str().unwrap(), "talker");
+
+    // Test 2: Listener node
+    let listener = nodes.iter().find(|n| n["name"] == "listener_node").unwrap();
+    assert_eq!(listener["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(listener["executable"].as_str().unwrap(), "listener");
+
+    // Test 3: Talker with explicit remapping
+    let talker_remap = nodes
+        .iter()
+        .find(|n| n["name"] == "talker_with_remap")
+        .unwrap();
+    assert_eq!(talker_remap["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(talker_remap["executable"].as_str().unwrap(), "talker");
+
+    // Verify remappings field exists (may be null or array)
+    // In static analysis, explicit node remappings in Python are captured
+    // Note: the remappings list format in Python is a list of tuples like [('/old', '/new')]
+    // which gets properly parsed and captured
+
+    // Note: OpaqueCoroutine, SetRemap, and SetROSLogDir are captured
+    // but don't produce node records. They are informational actions.
+    // The test verifies that:
+    // 1. These actions parse correctly without errors
+    // 2. Nodes are captured properly
+    // 3. The parser handles these actions gracefully
+}

@@ -49,7 +49,10 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_actions.add_class::<actions::UnsetEnvironmentVariable>()?;
     launch_actions.add_class::<actions::GroupAction>()?;
     launch_actions.add_class::<actions::ExecuteProcess>()?;
+    launch_actions.add_class::<actions::ExecuteLocal>()?;
     launch_actions.add_class::<actions::TimerAction>()?;
+    launch_actions.add_class::<actions::OpaqueCoroutine>()?;
+    launch_actions.add_class::<actions::Shutdown>()?;
     launch_actions.add_class::<actions::OpaqueFunction>()?;
     launch_actions.add_class::<actions::IncludeLaunchDescription>()?;
     launch_actions.add_class::<actions::SetLaunchConfiguration>()?;
@@ -187,6 +190,10 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_ros_actions.add_class::<launch_ros::PushRosNamespace>()?;
     launch_ros_actions.add_class::<launch_ros::PopRosNamespace>()?;
     launch_ros_actions.add_class::<launch_ros::LoadComposableNodes>()?;
+    launch_ros_actions.add_class::<launch_ros::RosTimer>()?;
+    launch_ros_actions.add_class::<launch_ros::SetUseSimTime>()?;
+    launch_ros_actions.add_class::<launch_ros::SetRemap>()?;
+    launch_ros_actions.add_class::<launch_ros::SetROSLogDir>()?;
 
     // Create launch_ros.descriptions submodule
     let launch_ros_desc = PyModule::new(py, "launch_ros.descriptions")?;

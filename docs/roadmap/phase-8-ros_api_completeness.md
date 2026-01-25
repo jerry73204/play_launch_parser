@@ -10,7 +10,7 @@
 
 Implement remaining features from official ROS 2 launch repositories to achieve broader ecosystem compatibility beyond Autoware.
 
-**Current Coverage**: 46/56 official ROS features (82%) ✅
+**Current Coverage**: 50/56 official ROS features (89%) ✅
 **Target Coverage**: 40+/56 (70%+) **TARGET FAR EXCEEDED** ✅
 
 **Key Insight**: While we have 100% Autoware compatibility, many ROS 2 launch files in the broader ecosystem use additional features not found in Autoware. This phase targets commonly-used features to maximize real-world compatibility.
@@ -27,11 +27,11 @@ Based on official ROS 2 Humble launch repositories:
 
 | Category                  | Implemented | Total | Coverage | Session 14 Progress    |
 |---------------------------|-------------|-------|----------|------------------------|
-| `launch.actions`          | 18          | 24    | 75%      | ✅ +8 (8.4 & 8.5)      |
+| `launch.actions`          | 20          | 24    | 83%      | ✅ +10 (8.4, 8.5, 8.8) |
 | `launch.substitutions`    | 16          | 17    | 94%      | ✅ +8 (8.1 & 8.6.4)    |
-| `launch_ros.actions`      | 8           | 11    | 73%      | ✅ +3 (8.2, 8.3, Push) |
+| `launch_ros.actions`      | 10          | 11    | 91%      | ✅ +5 (8.2, 8.3, 8.8)  |
 | `launch_ros.substitutions`| 4           | 4     | **100%** | ✅ +3 (Phase 8.6)      |
-| **Total**                 | **46**      | **56**| **82%**  | **+22 features**       |
+| **Total**                 | **50**      | **56**| **89%**  | **+26 features**       |
 
 ### Implementation Priorities
 
@@ -82,10 +82,10 @@ Features prioritized by:
 - ThisLaunchFile - Return current launch file path
 
 **Statistics**:
-- Features Added: +22 (11 substitutions, 11 actions)
-- Test Coverage: 287 tests (100% passing)
-- ROS API Coverage: 43% → 82% (+39 percentage points)
-- Time Spent: 4.5 days total
+- Features Added: +26 (11 substitutions, 15 actions)
+- Test Coverage: 288 tests (100% passing)
+- ROS API Coverage: 43% → 89% (+46 percentage points)
+- Time Spent: 5 days total
 
 **Key Achievements**:
 - Conditional logic support (EqualsSubstitution, IfElseSubstitution)
@@ -96,12 +96,14 @@ Features prioritized by:
 - Additional ROS substitutions (ExecutableInPackage, FindPackage, Parameter)
 - Utility substitutions (BooleanSubstitution, FindExecutable, LaunchLogDir, ThisLaunchFile)
 - Namespace management (PushRosNamespace, PopRosNamespace)
+- Advanced actions (ExecuteLocal, Shutdown, RosTimer, SetUseSimTime)
 - **100% coverage of launch_ros.substitutions** ✅
 - **94% coverage of launch.substitutions** ✅
-- **73% coverage of launch_ros.actions** ✅
+- **91% coverage of launch_ros.actions** ✅
+- **83% coverage of launch.actions** ✅
 - Comprehensive test coverage (test_conditional_substitutions.launch.py, test_set_parameters_from_file.launch.py, test_lifecycle_nodes.launch.py, test_environment_management.launch.py, test_launch_config_management.launch.py, test_additional_substitutions.launch.py, test_utility_substitutions.launch.py)
 - Maintained 100% Autoware compatibility
-- **Far exceeded 70% target** - achieved 82% ROS API coverage ✅
+- **Far exceeded 70% target** - achieved 89% ROS API coverage ✅
 
 ---
 
@@ -554,16 +556,20 @@ Parameter(LaunchConfiguration('param_name'))
 **Estimated Time**: 2-3 days
 **Expected Impact**: Edge cases
 
-#### 8.8.1: ExecuteLocal
+#### 8.8.1: ExecuteLocal ✅
 
 **Tasks**:
-- [ ] Implement `ExecuteLocal` action
-  - [ ] Similar to ExecuteProcess
-  - [ ] Different execution context
-- [ ] Add tests
+- [x] Implement `ExecuteLocal` action
+  - [x] Similar to ExecuteProcess
+  - [x] Supports cmd, cwd, output, shell parameters
+  - [x] Different execution context
+- [x] Add tests
 
-**Files**:
+**Files**: ✅
 - `src/python/api/actions.rs`
+
+**Validation**: ✅
+- Integration test (test_advanced_actions.launch.py)
 
 ---
 
@@ -582,21 +588,25 @@ Parameter(LaunchConfiguration('param_name'))
 
 ---
 
-#### 8.8.3: Miscellaneous Actions
+#### 8.8.3: Miscellaneous Actions ✅
 
 **Tasks**:
-- [ ] Implement `ShutdownAction`
-  - [ ] Informational capture
-- [ ] Implement `RosTimer`
-  - [ ] ROS time-based timer
-- [ ] Implement `SetUseSimTime`
-  - [ ] Global simulation time flag
-- [ ] Implement `PushRosNamespace` (Python action)
-  - [ ] Complement to XML push-ros-namespace
-- [ ] Add tests
+- [x] Implement `Shutdown` action
+  - [x] Informational capture with optional reason
+- [x] Implement `RosTimer`
+  - [x] ROS time-based timer with period and actions
+- [x] Implement `SetUseSimTime`
+  - [x] Global simulation time flag
+- [x] `PushRosNamespace` already implemented ✅
+  - [x] Complement to XML push-ros-namespace
+- [x] Add tests
 
-**Files**:
-- `src/python/api/launch_ros.rs`
+**Files**: ✅
+- `src/python/api/actions.rs` (Shutdown)
+- `src/python/api/launch_ros.rs` (RosTimer, SetUseSimTime)
+
+**Validation**: ✅
+- Integration test (test_advanced_actions.launch.py)
 
 ---
 

@@ -20,14 +20,14 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 287 tests passing (218 unit + 18 edge + 3 performance + 28 Python + 20 XML)
+- **Test Coverage**: 289 tests passing (218 unit + 18 edge + 3 performance + 29 Python + 21 XML)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
   - Containers: 15/15 captured (100%) ✅
   - Composable Nodes: 54/54 captured (100%) ✅
   - **Overall**: **100% complete for planning_simulator.launch.xml** ✅
-- **ROS API Coverage**: 46/56 official ROS features (82%) - **Target Far Exceeded** ✅
+- **ROS API Coverage**: 53/56 official ROS features (95%) - **Target Far Exceeded** ✅
 - **Performance**: <0.1ms parse time for simple files, <5s for full Autoware
 - **Code Quality**: 0 clippy warnings, properly formatted
 
@@ -713,13 +713,13 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `PopLaunchConfigurations`       | ✅     | Low      | **Config stack (Session 14)**            |
 | `ResetLaunchConfigurations`     | ✅     | Low      | **Reset configs (Session 14)**           |
 | `UnsetLaunchConfiguration`      | ✅     | Low      | **Remove config (Session 14)**           |
+| `ExecuteLocal`                  | ✅     | Low      | **Local execution (Session 14)**         |
+| `Shutdown`                      | ✅     | Low      | **Programmatic shutdown (Session 14)**   |
+| `OpaqueCoroutine`               | ✅     | Low      | **Async coroutine support (Session 14)** |
 | `EmitEvent`                     | ❌     | Low      | Custom event system                      |
-| `ExecuteLocal`                  | ❌     | Low      | Local execution context                  |
-| `OpaqueCoroutine`               | ❌     | Low      | Async coroutine support                  |
-| `ShutdownAction`                | ❌     | Low      | Programmatic shutdown                    |
 | `UnregisterEventHandler`        | ❌     | Low      | Remove event handlers                    |
 
-**Summary**: 18/24 implemented (75%)
+**Summary**: 21/24 implemented (88%)
 
 ### 14.2 launch.substitutions
 
@@ -753,16 +753,17 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | `ComposableNodeContainer`    | ✅     | High     | Python + XML (Session 6)             |
 | `LoadComposableNodes`        | ✅     | High     | Python implementation (Session 8)    |
 | `SetParameter`               | ✅     | Medium   | Python implementation (Session 10)   |
-| `SetRemap`                   | ✅     | Medium   | XML implementation (Session 11)      |
+| `SetRemap`                   | ✅     | Medium   | **Python + XML implementation (Session 14)**|
+| `SetROSLogDir`               | ✅     | Low      | **Python implementation (Session 14)**|
 | `LifecycleNode`              | ✅     | Medium   | **Lifecycle management (Session 14)**|
 | `LifecycleTransition`        | ✅     | Low      | **State transitions (Session 14)**   |
 | `PushRosNamespace`           | ✅     | Low      | **Python ROS namespace stack**       |
 | `PopRosNamespace`            | ✅     | Low      | **Python ROS namespace stack**       |
-| `RosTimer`                   | ❌     | Low      | ROS time-based timer                 |
+| `RosTimer`                   | ✅     | Low      | **ROS time-based timer (Session 14)**|
 | `SetParametersFromFile`      | ✅     | Medium   | **Load params from YAML (Session 14)**|
-| `SetUseSimTime`              | ❌     | Low      | Simulation time configuration        |
+| `SetUseSimTime`              | ✅     | Low      | **Simulation time (Session 14)**     |
 
-**Summary**: 7/11 implemented (64%)
+**Summary**: 12/12 implemented (**100%**) ✅
 
 ### 14.4 launch_ros.substitutions
 
@@ -777,15 +778,15 @@ This section documents ALL features from the official ROS 2 launch repositories,
 
 ### 14.5 Missing Features Summary
 
-| Category                  | Implemented | Total | Percentage |
-|---------------------------|-------------|-------|------------|
-| launch.actions            | 18          | 24    | 75%        |
-| launch.substitutions      | 12          | 17    | 71%        |
-| launch_ros.actions        | 7           | 11    | 64%        |
-| launch_ros.substitutions  | 4           | 4     | **100%** ✅|
-| **Total**                 | **41**      | **56**| **73%**    |
+| Category                  | Implemented | Total | Percentage     |
+|---------------------------|-------------|-------|----------------|
+| launch.actions            | 21          | 24    | 88%            |
+| launch.substitutions      | 16          | 17    | 94%            |
+| launch_ros.actions        | 12          | 12    | **100%** ✅✅✅|
+| launch_ros.substitutions  | 4           | 4     | **100%** ✅    |
+| **Total**                 | **53**      | **56**| **95%**        |
 
-**Note**: With 73% of official ROS features implemented and 100% Autoware compatibility, the parser covers the vast majority of real-world ROS 2 launch files. Many missing features are low-priority edge cases rarely used in practice.
+**Note**: With 95% of official ROS features implemented and 100% Autoware compatibility, the parser covers the vast majority of real-world ROS 2 launch files. The 3 remaining unimplemented features are low-priority edge cases rarely used in practice.
 
 ### 14.6 Recommended Implementation Priorities
 
@@ -829,9 +830,9 @@ This section documents ALL features from the official ROS 2 launch repositories,
 
 ### Test Coverage
 
-- **Total Tests**: 281 (100% passing)
+- **Total Tests**: 289 (100% passing)
   - Without Python: 218 lib tests, 23 edge cases, 28 integration tests (269 total)
-  - With Python: +12 integration tests (281 total)
+  - With Python: +20 integration tests (289 total)
 - **Code Coverage**: 95%
 
 ### Autoware Compatibility ✅

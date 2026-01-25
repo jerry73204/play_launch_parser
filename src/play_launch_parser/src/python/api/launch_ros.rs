@@ -1945,3 +1945,139 @@ impl LoadComposableNodes {
         Ok(obj.to_string())
     }
 }
+
+/// Mock RosTimer action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import RosTimer
+/// RosTimer(period=10.0, actions=[action1, action2])
+/// ```
+///
+/// Timer that uses ROS time instead of wall clock time.
+/// Requires use_sim_time to be set for simulation time support.
+#[pyclass]
+#[derive(Clone)]
+pub struct RosTimer {
+    #[allow(dead_code)] // Keep for future use
+    period: PyObject,
+    #[allow(dead_code)] // Keep for future use
+    actions: Option<PyObject>,
+}
+
+#[pymethods]
+impl RosTimer {
+    #[new]
+    #[pyo3(signature = (*, period, actions=None, **_kwargs))]
+    fn new(
+        py: Python,
+        period: PyObject,
+        actions: Option<PyObject>,
+        _kwargs: Option<&pyo3::types::PyDict>,
+    ) -> PyResult<Self> {
+        // Convert period to string for logging
+        let period_str = if let Ok(f) = period.extract::<f64>(py) {
+            f.to_string()
+        } else if let Ok(i) = period.extract::<i64>(py) {
+            i.to_string()
+        } else {
+            period.to_string()
+        };
+
+        log::debug!("Python Launch RosTimer: period={}", period_str);
+
+        Ok(Self { period, actions })
+    }
+
+    fn __repr__(&self) -> String {
+        "RosTimer(...)".to_string()
+    }
+}
+
+/// Mock SetUseSimTime action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import SetUseSimTime
+/// SetUseSimTime(True)
+/// ```
+///
+/// Sets the 'use_sim_time' parameter in the current context.
+/// This enables simulation time for ROS nodes.
+#[pyclass]
+#[derive(Clone)]
+pub struct SetUseSimTime {
+    value: bool,
+}
+
+#[pymethods]
+impl SetUseSimTime {
+    #[new]
+    fn new(value: bool) -> Self {
+        log::debug!("Python Launch SetUseSimTime: {}", value);
+        Self { value }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("SetUseSimTime({})", self.value)
+    }
+}
+
+/// Mock SetRemap action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import SetRemap
+/// SetRemap(src='old_topic', dst='new_topic')
+/// ```
+///
+/// Sets a remapping rule in the current context for nodes in the same scope.
+#[pyclass]
+#[derive(Clone)]
+pub struct SetRemap {
+    src: String,
+    dst: String,
+}
+
+#[pymethods]
+impl SetRemap {
+    #[new]
+    #[pyo3(signature = (src, dst, **_kwargs))]
+    fn new(src: String, dst: String, _kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        log::debug!("Python Launch SetRemap: {} -> {}", src, dst);
+        Self { src, dst }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("SetRemap(src='{}', dst='{}')", self.src, self.dst)
+    }
+}
+
+/// Mock SetROSLogDir action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import SetROSLogDir
+/// SetROSLogDir('/path/to/log/dir')
+/// ```
+///
+/// Sets the ROS log directory for nodes launched in the same scope.
+#[pyclass]
+#[derive(Clone)]
+pub struct SetROSLogDir {
+    #[allow(dead_code)] // Keep for future use
+    log_dir: PyObject,
+}
+
+#[pymethods]
+impl SetROSLogDir {
+    #[new]
+    fn new(log_dir: PyObject) -> Self {
+        log::debug!("Python Launch SetROSLogDir: log directory provided");
+        Self { log_dir }
+    }
+
+    fn __repr__(&self) -> String {
+        "SetROSLogDir(...)".to_string()
+    }
+}

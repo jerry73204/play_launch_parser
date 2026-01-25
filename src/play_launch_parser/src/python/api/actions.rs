@@ -450,6 +450,71 @@ impl ExecuteProcess {
     }
 }
 
+/// Mock ExecuteLocal action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import ExecuteLocal
+/// ExecuteLocal(
+///     process_description=Executable(cmd=['ls', '-la']),
+///     output='screen'
+/// )
+/// ```
+///
+/// Executes a process on the local system with more control than ExecuteProcess
+#[pyclass]
+#[derive(Clone)]
+pub struct ExecuteLocal {
+    #[allow(dead_code)] // Keep for future use
+    process_description: Option<PyObject>,
+    #[allow(dead_code)] // Keep for future use
+    cmd: Option<Vec<String>>,
+    #[allow(dead_code)] // Keep for future use
+    cwd: Option<String>,
+    #[allow(dead_code)] // Keep for future use
+    output: String,
+}
+
+#[pymethods]
+impl ExecuteLocal {
+    #[new]
+    #[pyo3(signature = (*, process_description=None, cmd=None, cwd=None, output=None, shell=None, **_kwargs))]
+    fn new(
+        process_description: Option<PyObject>,
+        cmd: Option<Vec<String>>,
+        cwd: Option<String>,
+        output: Option<String>,
+        shell: Option<bool>,
+        _kwargs: Option<&pyo3::types::PyDict>,
+    ) -> Self {
+        // Log what we're executing
+        if let Some(ref c) = cmd {
+            log::debug!("Python Launch ExecuteLocal: cmd={:?}", c);
+        } else {
+            log::debug!("Python Launch ExecuteLocal: process_description provided");
+        }
+
+        if let Some(s) = shell {
+            log::debug!("  shell={}", s);
+        }
+
+        Self {
+            process_description,
+            cmd,
+            cwd,
+            output: output.unwrap_or_else(|| "log".to_string()),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        if let Some(ref cmd) = self.cmd {
+            format!("ExecuteLocal(cmd={:?})", cmd)
+        } else {
+            "ExecuteLocal(process_description=...)".to_string()
+        }
+    }
+}
+
 /// Mock TimerAction
 ///
 /// Python equivalent:
@@ -483,6 +548,53 @@ impl TimerAction {
             self.period,
             self.actions.len()
         )
+    }
+}
+
+/// Mock OpaqueCoroutine action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import OpaqueCoroutine
+/// async def my_coroutine(context):
+///     # async operations
+///     pass
+/// OpaqueCoroutine(coroutine=my_coroutine)
+/// ```
+///
+/// Adds a Python coroutine function to the launch run loop.
+/// For static analysis, we just capture that it was called.
+#[pyclass]
+#[derive(Clone)]
+pub struct OpaqueCoroutine {
+    #[allow(dead_code)] // Keep for future use
+    coroutine: PyObject,
+    #[allow(dead_code)] // Keep for future use
+    args: Vec<PyObject>,
+    #[allow(dead_code)] // Keep for future use
+    func_kwargs: Option<PyObject>,
+}
+
+#[pymethods]
+impl OpaqueCoroutine {
+    #[new]
+    #[pyo3(signature = (*, coroutine, args=None, kwargs=None, **_extra_kwargs))]
+    fn new(
+        coroutine: PyObject,
+        args: Option<Vec<PyObject>>,
+        kwargs: Option<PyObject>,
+        _extra_kwargs: Option<&pyo3::types::PyDict>,
+    ) -> Self {
+        log::debug!("Python Launch OpaqueCoroutine: coroutine provided");
+        Self {
+            coroutine,
+            args: args.unwrap_or_default(),
+            func_kwargs: kwargs,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        "OpaqueCoroutine(...)".to_string()
     }
 }
 
@@ -1014,5 +1126,44 @@ impl UnsetLaunchConfiguration {
 
     fn __repr__(&self) -> String {
         format!("UnsetLaunchConfiguration('{}')", self.name)
+    }
+}
+
+/// Mock Shutdown action
+///
+/// Python equivalent:
+/// ```python
+/// from launch.actions import Shutdown
+/// Shutdown()
+/// ```
+///
+/// Triggers a shutdown of the launch system when executed.
+/// For static analysis, this is purely informational.
+#[pyclass]
+#[derive(Clone)]
+pub struct Shutdown {
+    #[allow(dead_code)] // Keep for future use
+    reason: Option<String>,
+}
+
+#[pymethods]
+impl Shutdown {
+    #[new]
+    #[pyo3(signature = (*, reason=None, **_kwargs))]
+    fn new(reason: Option<String>, _kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        if let Some(ref r) = reason {
+            log::debug!("Python Launch Shutdown: reason={}", r);
+        } else {
+            log::debug!("Python Launch Shutdown");
+        }
+        Self { reason }
+    }
+
+    fn __repr__(&self) -> String {
+        if let Some(ref r) = self.reason {
+            format!("Shutdown(reason='{}')", r)
+        } else {
+            "Shutdown()".to_string()
+        }
     }
 }
