@@ -191,6 +191,9 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     // Create launch_ros.substitutions submodule
     let launch_ros_subs = PyModule::new(py, "launch_ros.substitutions")?;
     launch_ros_subs.add_class::<substitutions::FindPackageShare>()?;
+    launch_ros_subs.add_class::<substitutions::ExecutableInPackage>()?;
+    launch_ros_subs.add_class::<substitutions::FindPackage>()?;
+    launch_ros_subs.add_class::<substitutions::Parameter>()?;
 
     // Create launch_ros.parameter_descriptions submodule
     let launch_ros_param_desc = PyModule::new(py, "launch_ros.parameter_descriptions")?;

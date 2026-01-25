@@ -1057,3 +1057,206 @@ impl AnonName {
         format!("AnonName('{}')", self.name)
     }
 }
+
+/// Mock ExecutableInPackage substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.substitutions import ExecutableInPackage
+/// exec_path = ExecutableInPackage(package='my_pkg', executable='my_node')
+/// ```
+///
+/// Finds the full path to an executable within a ROS package
+#[pyclass]
+#[derive(Clone)]
+pub struct ExecutableInPackage {
+    package: PyObject,
+    executable: PyObject,
+}
+
+#[pymethods]
+impl ExecutableInPackage {
+    #[new]
+    #[pyo3(signature = (package, executable, **_kwargs))]
+    fn new(package: PyObject, executable: PyObject, _kwargs: Option<&pyo3::types::PyDict>) -> Self {
+        Self {
+            package,
+            executable,
+        }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let pkg_str = Self::pyobject_to_string(&self.package, py)?;
+        let exec_str = Self::pyobject_to_string(&self.executable, py)?;
+
+        // Return a placeholder path that represents the executable location
+        // In static analysis, we can't actually find the executable
+        Ok(format!("$(find-exec {} {})", pkg_str, exec_str))
+    }
+
+    fn __repr__(&self, py: Python) -> String {
+        let pkg_str =
+            Self::pyobject_to_string(&self.package, py).unwrap_or_else(|_| "<package>".to_string());
+        let exec_str = Self::pyobject_to_string(&self.executable, py)
+            .unwrap_or_else(|_| "<executable>".to_string());
+        format!("ExecutableInPackage('{}', '{}')", pkg_str, exec_str)
+    }
+
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let pkg_str = Self::perform_obj(&self.package, py, context)?;
+        let exec_str = Self::perform_obj(&self.executable, py, context)?;
+
+        // Return a placeholder path
+        Ok(format!("$(find-exec {} {})", pkg_str, exec_str))
+    }
+}
+
+impl ExecutableInPackage {
+    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+        Ok(obj.to_string())
+    }
+
+    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+        Self::pyobject_to_string(obj, py)
+    }
+}
+
+/// Mock FindPackage substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.substitutions import FindPackage
+/// pkg_prefix = FindPackage('my_pkg')
+/// ```
+///
+/// Finds the install prefix path of a ROS package (different from FindPackageShare)
+#[pyclass]
+#[derive(Clone)]
+pub struct FindPackage {
+    package: PyObject,
+}
+
+#[pymethods]
+impl FindPackage {
+    #[new]
+    fn new(package: PyObject) -> Self {
+        Self { package }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let pkg_str = Self::pyobject_to_string(&self.package, py)?;
+        Ok(format!("$(find-pkg-prefix {})", pkg_str))
+    }
+
+    fn __repr__(&self, py: Python) -> String {
+        let pkg_str =
+            Self::pyobject_to_string(&self.package, py).unwrap_or_else(|_| "<package>".to_string());
+        format!("FindPackage('{}')", pkg_str)
+    }
+
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let pkg_str = Self::perform_obj(&self.package, py, context)?;
+        Ok(format!("$(find-pkg-prefix {})", pkg_str))
+    }
+}
+
+impl FindPackage {
+    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+        Ok(obj.to_string())
+    }
+
+    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+        Self::pyobject_to_string(obj, py)
+    }
+}
+
+/// Mock Parameter substitution
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.substitutions import Parameter
+/// param_value = Parameter('my_parameter')
+/// ```
+///
+/// Reads a ROS parameter value and returns it as a string
+#[pyclass]
+#[derive(Clone)]
+pub struct Parameter {
+    name: PyObject,
+}
+
+#[pymethods]
+impl Parameter {
+    #[new]
+    fn new(name: PyObject) -> Self {
+        Self { name }
+    }
+
+    fn __str__(&self, py: Python) -> PyResult<String> {
+        let name_str = Self::pyobject_to_string(&self.name, py)?;
+        Ok(format!("$(param {})", name_str))
+    }
+
+    fn __repr__(&self, py: Python) -> String {
+        let name_str =
+            Self::pyobject_to_string(&self.name, py).unwrap_or_else(|_| "<name>".to_string());
+        format!("Parameter('{}')", name_str)
+    }
+
+    fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
+        let name_str = Self::perform_obj(&self.name, py, context)?;
+        Ok(format!("$(param {})", name_str))
+    }
+}
+
+impl Parameter {
+    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
+        if let Ok(s) = obj.extract::<String>(py) {
+            return Ok(s);
+        }
+        if let Ok(str_result) = obj.call_method0(py, "__str__") {
+            if let Ok(s) = str_result.extract::<String>(py) {
+                return Ok(s);
+            }
+        }
+        Ok(obj.to_string())
+    }
+
+    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+        let obj_ref = obj.as_ref(py);
+        if obj_ref.hasattr("perform")? {
+            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                return result.extract::<String>();
+            }
+        }
+        Self::pyobject_to_string(obj, py)
+    }
+}

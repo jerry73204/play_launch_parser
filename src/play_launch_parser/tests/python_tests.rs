@@ -1766,3 +1766,119 @@ fn test_launch_config_management() {
     // 2. All nodes are captured properly
     // 3. The parser doesn't crash on these actions
 }
+
+#[test]
+fn test_additional_substitutions() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_additional_substitutions.launch.py");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing additional substitutions file should succeed: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Get nodes - should have 8 nodes from the additional substitutions test
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 8, "Should have 8 nodes");
+
+    // Test 1: Node with ExecutableInPackage (static)
+    let node_exec_static = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_exec_in_pkg_static")
+        .unwrap();
+    assert_eq!(
+        node_exec_static["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+
+    // Test 2: Node with ExecutableInPackage (dynamic)
+    let node_exec_dynamic = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_exec_in_pkg_dynamic")
+        .unwrap();
+    assert_eq!(
+        node_exec_dynamic["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+
+    // Test 3: Node with FindPackage (static)
+    let node_find_static = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_find_pkg_static")
+        .unwrap();
+    assert_eq!(
+        node_find_static["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_find_static["executable"].as_str().unwrap(), "listener");
+
+    // Test 4: Node with FindPackage (dynamic)
+    let node_find_dynamic = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_find_pkg_dynamic")
+        .unwrap();
+    assert_eq!(
+        node_find_dynamic["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_find_dynamic["executable"].as_str().unwrap(), "talker");
+
+    // Test 5: Node with Parameter (static)
+    let node_param_static = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_param_static")
+        .unwrap();
+    assert_eq!(
+        node_param_static["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(
+        node_param_static["executable"].as_str().unwrap(),
+        "listener"
+    );
+
+    // Test 6: Node with Parameter (dynamic)
+    let node_param_dynamic = nodes
+        .iter()
+        .find(|n| n["name"] == "node_with_param_dynamic")
+        .unwrap();
+    assert_eq!(
+        node_param_dynamic["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+    assert_eq!(node_param_dynamic["executable"].as_str().unwrap(), "talker");
+
+    // Test 7: Node with combined ExecutableInPackage
+    let node_combined_exec = nodes
+        .iter()
+        .find(|n| n["name"] == "node_combined_exec")
+        .unwrap();
+    assert_eq!(
+        node_combined_exec["package"].as_str().unwrap(),
+        "demo_nodes_cpp"
+    );
+
+    // Test 8: Node with combined FindPackage and Parameter
+    let node_combined = nodes
+        .iter()
+        .find(|n| n["name"] == "node_combined_pkg_param")
+        .unwrap();
+    assert_eq!(node_combined["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node_combined["executable"].as_str().unwrap(), "listener");
+
+    // Note: ExecutableInPackage, FindPackage, and Parameter substitutions
+    // return placeholder values in static analysis since we can't resolve
+    // actual package paths or parameter values without runtime context.
+    // The test verifies that:
+    // 1. The substitutions parse correctly without errors
+    // 2. All nodes are captured properly
+    // 3. The parser handles these substitutions gracefully
+}

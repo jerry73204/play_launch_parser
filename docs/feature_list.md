@@ -20,14 +20,14 @@ Comprehensive feature list for the play_launch_parser project.
 ## Current Status Summary
 
 ### Overall Progress
-- **Test Coverage**: 284 tests passing (218 unit + 23 edge + 33 integration without Python, +8 with Python)
+- **Test Coverage**: 285 tests passing (218 unit + 23 edge + 33 integration without Python, +9 with Python)
   - Includes comprehensive edge case testing from Autoware
 - **Autoware Compatibility**:
   - Nodes: 46/46 captured (100%) ✅
   - Containers: 15/15 captured (100%) ✅
   - Composable Nodes: 54/54 captured (100%) ✅
   - **Overall**: **100% complete for planning_simulator.launch.xml** ✅
-- **ROS API Coverage**: 38/56 official ROS features (68%)
+- **ROS API Coverage**: 41/56 official ROS features (73%) - **Target Exceeded** ✅
 - **Performance**: <0.1ms parse time for simple files, <5s for full Autoware
 - **Code Quality**: 0 clippy warnings, properly formatted
 
@@ -765,14 +765,14 @@ This section documents ALL features from the official ROS 2 launch repositories,
 
 ### 14.4 launch_ros.substitutions
 
-| Substitution Class      | Status | Priority | Notes                          |
-|-------------------------|--------|----------|--------------------------------|
-| `FindPackageShare`      | ✅     | Critical | Python + XML (find-pkg-share)  |
-| `ExecutableInPackage`   | ❌     | Low      | Find executable in ROS package |
-| `FindPackage` (prefix)  | ❌     | Low      | Package install prefix path    |
-| `Parameter`             | ❌     | Low      | Parameter value substitution   |
+| Substitution Class      | Status | Priority | Notes                                    |
+|-------------------------|--------|----------|------------------------------------------|
+| `FindPackageShare`      | ✅     | Critical | Python + XML (find-pkg-share)            |
+| `ExecutableInPackage`   | ✅     | Low      | **Find exec in package (Session 14)**    |
+| `FindPackage` (prefix)  | ✅     | Low      | **Package prefix path (Session 14)**     |
+| `Parameter`             | ✅     | Low      | **Parameter value sub (Session 14)**     |
 
-**Summary**: 1/4 implemented (25%)
+**Summary**: 4/4 implemented (**100%**) ✅✅
 
 ### 14.5 Missing Features Summary
 
@@ -781,10 +781,10 @@ This section documents ALL features from the official ROS 2 launch repositories,
 | launch.actions            | 18          | 24    | 75%        |
 | launch.substitutions      | 12          | 17    | 71%        |
 | launch_ros.actions        | 7           | 11    | 64%        |
-| launch_ros.substitutions  | 1           | 4     | 25%        |
-| **Total**                 | **38**      | **56**| **68%**    |
+| launch_ros.substitutions  | 4           | 4     | **100%** ✅|
+| **Total**                 | **41**      | **56**| **73%**    |
 
-**Note**: While only 68% of official ROS features are implemented, we have 100% Autoware compatibility. Many missing features are low-priority edge cases not commonly used in real-world launch files.
+**Note**: With 73% of official ROS features implemented and 100% Autoware compatibility, the parser covers the vast majority of real-world ROS 2 launch files. Many missing features are low-priority edge cases rarely used in practice.
 
 ### 14.6 Recommended Implementation Priorities
 
@@ -792,7 +792,7 @@ This section documents ALL features from the official ROS 2 launch repositories,
 1. ~~`EqualsSubstitution` / `IfElseSubstitution`~~ - ✅ **Implemented in Session 14**
 2. ~~`SetParametersFromFile`~~ - ✅ **Implemented in Session 14**
 3. ~~`LifecycleNode`~~ - ✅ **Implemented in Session 14**
-4. `ExecutableInPackage` - Alternative to FindPackageShare for executables
+4. ~~`ExecutableInPackage`~~ - ✅ **Implemented in Session 14**
 
 **Medium Priority** (occasionally useful):
 1. `AppendEnvironmentVariable` - Environment manipulation
