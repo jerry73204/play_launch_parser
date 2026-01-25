@@ -1060,6 +1060,55 @@ impl SetParameter {
     }
 }
 
+/// Mock SetParametersFromFile action
+///
+/// Python equivalent:
+/// ```python
+/// from launch_ros.actions import SetParametersFromFile
+///
+/// SetParametersFromFile(
+///     PathJoinSubstitution([FindPackageShare('my_pkg'), 'config', 'params.yaml']),
+///     node_name='my_node'  # Optional - if not specified, applies to all nodes
+/// )
+/// ```
+///
+/// Loads parameters from a YAML file and applies them to nodes.
+/// For static analysis, we just capture the intent without loading the file.
+#[pyclass]
+#[derive(Clone)]
+pub struct SetParametersFromFile {
+    #[allow(dead_code)] // Stored for API compatibility
+    filename: PyObject,
+    #[allow(dead_code)] // Stored for API compatibility
+    node_name: Option<String>,
+}
+
+#[pymethods]
+impl SetParametersFromFile {
+    #[new]
+    #[pyo3(signature = (filename, *, node_name=None, **_kwargs))]
+    fn new(filename: PyObject, node_name: Option<String>, _kwargs: Option<&PyDict>) -> Self {
+        log::debug!(
+            "Python Launch SetParametersFromFile: node_name={:?}",
+            node_name
+        );
+        // For static analysis, we just capture the action
+        // We don't actually load the YAML file since we're parsing structure, not executing
+        Self {
+            filename,
+            node_name,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        if let Some(ref name) = self.node_name {
+            format!("SetParametersFromFile(node_name='{}')", name)
+        } else {
+            "SetParametersFromFile(for all nodes)".to_string()
+        }
+    }
+}
+
 /// Mock LifecycleNode class
 ///
 /// Python equivalent:

@@ -1390,3 +1390,45 @@ fn test_conditional_substitutions() {
         "FileContent should work with PathJoinSubstitution"
     );
 }
+
+#[test]
+fn test_set_parameters_from_file() {
+    let _guard = python_test_guard();
+    let fixture = get_fixture_path("python/test_set_parameters_from_file.launch.py");
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Should parse SetParametersFromFile test: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Get nodes - should have 3 nodes
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 3, "Should have 3 nodes");
+
+    // Verify all nodes are created correctly
+    let node1 = nodes.iter().find(|n| n["name"] == "node1").unwrap();
+    assert_eq!(node1["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node1["executable"].as_str().unwrap(), "talker");
+    assert_eq!(node1["namespace"].as_str().unwrap(), "/test");
+
+    let node2 = nodes.iter().find(|n| n["name"] == "node2").unwrap();
+    assert_eq!(node2["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node2["executable"].as_str().unwrap(), "listener");
+    assert_eq!(node2["namespace"].as_str().unwrap(), "/test");
+
+    let node3 = nodes.iter().find(|n| n["name"] == "node3").unwrap();
+    assert_eq!(node3["package"].as_str().unwrap(), "demo_nodes_cpp");
+    assert_eq!(node3["executable"].as_str().unwrap(), "talker");
+    assert_eq!(node3["namespace"].as_str().unwrap(), "/test");
+
+    // Note: SetParametersFromFile is a launch action that doesn't directly affect
+    // the node records in our static analysis. It would apply parameters at runtime.
+    // The test verifies that the action doesn't break parsing and nodes are captured correctly.
+}

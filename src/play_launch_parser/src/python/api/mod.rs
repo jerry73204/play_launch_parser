@@ -169,6 +169,7 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     launch_ros_actions.add_class::<launch_ros::Node>()?;
     launch_ros_actions.add_class::<launch_ros::ComposableNodeContainer>()?;
     launch_ros_actions.add_class::<launch_ros::SetParameter>()?;
+    launch_ros_actions.add_class::<launch_ros::SetParametersFromFile>()?;
     launch_ros_actions.add_class::<launch_ros::LifecycleNode>()?;
     launch_ros_actions.add_class::<launch_ros::PushRosNamespace>()?;
     launch_ros_actions.add_class::<launch_ros::PopRosNamespace>()?;
