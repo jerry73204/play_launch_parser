@@ -31,21 +31,30 @@ pub struct NodeCapture {
 }
 
 impl NodeCapture {
-    /// Convert to NodeRecord
+    /// Convert to NodeRecord and generate command line
     pub fn to_record(&self) -> Result<NodeRecord> {
+        // Generate ROS command line
+        let cmd = self.generate_command();
+
+        // Extract ROS args (everything after --ros-args)
+        let ros_args = cmd
+            .iter()
+            .position(|s| s == "--ros-args")
+            .map(|pos| cmd[pos + 1..].to_vec());
+
         Ok(NodeRecord {
             args: if self.arguments.is_empty() {
                 None
             } else {
                 Some(self.arguments.clone())
             },
-            cmd: Vec::new(), // Will be generated later
+            cmd,
             env: if self.env_vars.is_empty() {
                 None
             } else {
                 Some(self.env_vars.clone())
             },
-            exec_name: None,
+            exec_name: self.name.clone(), // Match Python: exec_name = node name
             executable: self.executable.clone(),
             global_params: None,
             name: self.name.clone(),
@@ -56,8 +65,55 @@ impl NodeCapture {
             remaps: self.remappings.clone(),
             respawn: None,
             respawn_delay: None,
-            ros_args: None,
+            ros_args,
         })
+    }
+
+    /// Generate ROS 2 command line
+    fn generate_command(&self) -> Vec<String> {
+        // 1. Base command: ros2 run <package> <executable>
+        let mut cmd = vec![
+            "ros2".to_string(),
+            "run".to_string(),
+            self.package.clone(),
+            self.executable.clone(),
+        ];
+
+        // 2. Add custom arguments if any
+        if !self.arguments.is_empty() {
+            cmd.extend(self.arguments.clone());
+        }
+
+        // 3. ROS args delimiter
+        cmd.push("--ros-args".to_string());
+
+        // 4. Node name
+        if let Some(ref name) = self.name {
+            cmd.push("-r".to_string());
+            cmd.push(format!("__node:={}", name));
+        }
+
+        // 5. Namespace
+        if let Some(ref ns) = self.namespace {
+            if !ns.is_empty() && ns != "/" {
+                cmd.push("-r".to_string());
+                cmd.push(format!("__ns:={}", ns));
+            }
+        }
+
+        // 6. Remappings
+        for (from, to) in &self.remappings {
+            cmd.push("-r".to_string());
+            cmd.push(format!("{}:={}", from, to));
+        }
+
+        // 7. Parameters
+        for (name, value) in &self.parameters {
+            cmd.push("-p".to_string());
+            cmd.push(format!("{}:={}", name, value));
+        }
+
+        cmd
     }
 }
 
