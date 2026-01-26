@@ -111,7 +111,7 @@ impl CommandGenerator {
             args: None,
             cmd,
             env,
-            exec_name: None, // TODO: Generate exec_name-1, exec_name-2, etc.
+            exec_name: name.clone().or_else(|| Some(executable.clone())),
             executable,
             global_params,
             name,
@@ -269,7 +269,7 @@ impl CommandGenerator {
             },
             cmd,
             env,
-            exec_name: None,
+            exec_name: name.clone(),
             executable: cmd_str,
             global_params: None,
             name,
