@@ -2,8 +2,7 @@
 
 use crate::error::ParseError;
 use serde_yaml::Value;
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 /// Load parameters from a YAML file
 pub fn load_param_file(path: &Path) -> Result<Vec<(String, String)>, ParseError> {

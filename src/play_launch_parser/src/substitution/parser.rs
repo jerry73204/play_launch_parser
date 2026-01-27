@@ -1,10 +1,11 @@
 //! Substitution parser
 
-use crate::error::{ParseError, Result};
-use crate::substitution::types::{CommandErrorMode, Substitution};
+use crate::{
+    error::{ParseError, Result},
+    substitution::types::{CommandErrorMode, Substitution},
+};
 use lru::LruCache;
-use std::cell::RefCell;
-use std::num::NonZeroUsize;
+use std::{cell::RefCell, num::NonZeroUsize};
 
 // Thread-local LRU cache for substitution parsing (Phase 7.4.1)
 //

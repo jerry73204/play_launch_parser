@@ -1,11 +1,10 @@
 //! Launch context for managing configurations
 
-use crate::substitution::parser::parse_substitutions;
-use crate::substitution::types::{resolve_substitutions, Substitution};
-use std::cell::Cell;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::substitution::{
+    parser::parse_substitutions,
+    types::{resolve_substitutions, Substitution},
+};
+use std::{cell::Cell, collections::HashMap, path::PathBuf, sync::Arc};
 
 /// Maximum recursion depth for variable resolution to prevent stack overflow
 const MAX_RESOLUTION_DEPTH: usize = 20;

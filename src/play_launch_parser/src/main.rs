@@ -2,9 +2,11 @@
 
 use clap::{Parser, Subcommand};
 use play_launch_parser::parse_launch_file;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::process;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    process,
+};
 
 #[derive(Parser)]
 #[command(name = "play_launch_parser")]

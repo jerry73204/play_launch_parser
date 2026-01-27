@@ -1,8 +1,10 @@
 //! Topic remapping actions
 
-use crate::error::{ParseError, Result};
-use crate::substitution::{parse_substitutions, Substitution};
-use crate::xml::Entity;
+use crate::{
+    error::{ParseError, Result},
+    substitution::{parse_substitutions, Substitution},
+    xml::Entity,
+};
 
 /// Set topic remapping action
 ///

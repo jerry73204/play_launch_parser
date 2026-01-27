@@ -1,8 +1,10 @@
 //! Declare argument action for argument metadata and validation
 
-use crate::error::{ParseError, Result};
-use crate::substitution::{parse_substitutions, Substitution};
-use crate::xml::Entity;
+use crate::{
+    error::{ParseError, Result},
+    substitution::{parse_substitutions, Substitution},
+    xml::Entity,
+};
 
 /// Declare argument action with metadata
 #[derive(Debug, Clone, PartialEq)]

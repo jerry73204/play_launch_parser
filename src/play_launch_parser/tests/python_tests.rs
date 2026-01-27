@@ -1,6 +1,5 @@
 use play_launch_parser::parse_launch_file;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use std::sync::{Mutex, MutexGuard};
 

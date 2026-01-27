@@ -1,11 +1,12 @@
 //! Bridge between Python and Rust types
 
-use crate::error::Result;
-use crate::record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord};
+use crate::{
+    error::Result,
+    record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord},
+};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 /// Global storage for launch configurations (arguments passed to the launch file)
 /// This allows conditions to access and resolve LaunchConfiguration substitutions

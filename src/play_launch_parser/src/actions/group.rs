@@ -1,8 +1,10 @@
 //! Group action implementation
 
-use crate::error::Result;
-use crate::substitution::{parse_substitutions, Substitution};
-use crate::xml::{Entity, XmlEntity};
+use crate::{
+    error::Result,
+    substitution::{parse_substitutions, Substitution},
+    xml::{Entity, XmlEntity},
+};
 
 /// Group action for scoping namespaces and parameters
 #[derive(Debug, Clone)]

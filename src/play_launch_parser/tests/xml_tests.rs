@@ -1,7 +1,5 @@
 use play_launch_parser::parse_launch_file;
-use std::collections::HashMap;
-use std::io::Write;
-use std::path::PathBuf;
+use std::{collections::HashMap, io::Write, path::PathBuf};
 use tempfile::NamedTempFile;
 
 /// Helper to get fixture path from crate tests directory

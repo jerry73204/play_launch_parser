@@ -1,8 +1,10 @@
 //! Condition evaluation for if/unless attributes
 
-use crate::error::Result;
-use crate::substitution::{parse_substitutions, resolve_substitutions, LaunchContext};
-use crate::xml::{Entity, XmlEntity};
+use crate::{
+    error::Result,
+    substitution::{parse_substitutions, resolve_substitutions, LaunchContext},
+    xml::{Entity, XmlEntity},
+};
 
 /// Evaluate whether an entity should be processed based on if/unless conditions
 pub fn should_process_entity(entity: &XmlEntity, context: &LaunchContext) -> Result<bool> {

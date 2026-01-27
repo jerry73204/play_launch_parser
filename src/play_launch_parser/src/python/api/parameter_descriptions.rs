@@ -4,8 +4,7 @@
 
 #![allow(non_local_definitions)]
 
-use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::{prelude::*, types::PyDict};
 
 /// Mock ParameterFile class
 ///

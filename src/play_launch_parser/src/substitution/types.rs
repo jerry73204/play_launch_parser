@@ -1,7 +1,6 @@
 //! Substitution types
 
-use crate::error::SubstitutionError;
-use crate::substitution::context::LaunchContext;
+use crate::{error::SubstitutionError, substitution::context::LaunchContext};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 

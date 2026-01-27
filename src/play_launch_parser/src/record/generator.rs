@@ -1,10 +1,12 @@
 //! Command-line and record generation
 
-use crate::actions::{ExecutableAction, NodeAction};
-use crate::error::GenerationError;
-use crate::params::load_param_file;
-use crate::record::types::NodeRecord;
-use crate::substitution::{resolve_substitutions, LaunchContext};
+use crate::{
+    actions::{ExecutableAction, NodeAction},
+    error::GenerationError,
+    params::load_param_file,
+    record::types::NodeRecord,
+    substitution::{resolve_substitutions, LaunchContext},
+};
 use std::path::Path;
 
 pub struct CommandGenerator;

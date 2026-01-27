@@ -1,8 +1,10 @@
 //! Arg action implementation
 
-use crate::error::{ParseError, Result};
-use crate::substitution::LaunchContext;
-use crate::xml::{EntityExt, XmlEntity};
+use crate::{
+    error::{ParseError, Result},
+    substitution::LaunchContext,
+    xml::{EntityExt, XmlEntity},
+};
 use std::collections::HashMap;
 
 /// Arg action representing a launch argument declaration

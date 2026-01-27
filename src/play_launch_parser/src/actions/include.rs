@@ -1,8 +1,10 @@
 //! Include action implementation
 
-use crate::error::{ParseError, Result};
-use crate::substitution::{parse_substitutions, Substitution};
-use crate::xml::{Entity, EntityExt, XmlEntity};
+use crate::{
+    error::{ParseError, Result},
+    substitution::{parse_substitutions, Substitution},
+    xml::{Entity, EntityExt, XmlEntity},
+};
 
 /// Include action representing a nested launch file
 #[derive(Debug, Clone)]

@@ -1,9 +1,11 @@
 //! Container action for composable nodes
 
-use crate::error::{ParseError, Result};
-use crate::record::{ComposableNodeContainerRecord, LoadNodeRecord};
-use crate::substitution::{parse_substitutions, resolve_substitutions, LaunchContext};
-use crate::xml::{Entity, XmlEntity};
+use crate::{
+    error::{ParseError, Result},
+    record::{ComposableNodeContainerRecord, LoadNodeRecord},
+    substitution::{parse_substitutions, resolve_substitutions, LaunchContext},
+    xml::{Entity, XmlEntity},
+};
 use std::collections::HashMap;
 
 /// Container action representing a composable node container

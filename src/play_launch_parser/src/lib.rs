@@ -20,9 +20,11 @@ use error::{ParseError, Result};
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use record::{CommandGenerator, RecordJson};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 use substitution::{parse_substitutions, resolve_substitutions, ArgumentMetadata, LaunchContext};
 use xml::{Entity, XmlEntity};
 

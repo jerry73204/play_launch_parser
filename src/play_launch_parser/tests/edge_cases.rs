@@ -1,6 +1,5 @@
 use play_launch_parser::parse_launch_file;
-use std::collections::HashMap;
-use std::io::Write;
+use std::{collections::HashMap, io::Write};
 use tempfile::NamedTempFile;
 
 #[test]

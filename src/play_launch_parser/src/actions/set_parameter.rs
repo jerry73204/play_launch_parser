@@ -1,8 +1,10 @@
 //! Set parameter action for global parameter setting
 
-use crate::error::{ParseError, Result};
-use crate::substitution::{parse_substitutions, Substitution};
-use crate::xml::Entity;
+use crate::{
+    error::{ParseError, Result},
+    substitution::{parse_substitutions, Substitution},
+    xml::Entity,
+};
 
 /// Set parameter action
 #[derive(Debug, Clone, PartialEq)]

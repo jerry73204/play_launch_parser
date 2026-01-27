@@ -1,8 +1,7 @@
 // Performance tests
 
 use play_launch_parser::parse_launch_file;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 /// Helper to get fixture path from crate tests directory
 fn get_fixture_path(filename: &str) -> PathBuf {

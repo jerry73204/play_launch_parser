@@ -6,8 +6,10 @@ use crate::python::bridge::{
     ContainerCapture, LoadNodeCapture, NodeCapture, CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES,
     CAPTURED_NODES,
 };
-use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::{
+    prelude::*,
+    types::{PyAny, PyDict, PyList},
+};
 
 /// Mock Node class
 ///

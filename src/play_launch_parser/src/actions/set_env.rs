@@ -1,8 +1,10 @@
 //! Environment variable manipulation actions
 
-use crate::error::{ParseError, Result};
-use crate::substitution::{parse_substitutions, Substitution};
-use crate::xml::Entity;
+use crate::{
+    error::{ParseError, Result},
+    substitution::{parse_substitutions, Substitution},
+    xml::Entity,
+};
 
 /// Set environment variable action
 #[derive(Debug, Clone, PartialEq)]

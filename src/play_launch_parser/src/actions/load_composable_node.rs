@@ -1,12 +1,12 @@
 //! Load composable node action
 
-use crate::actions::ComposableNodeAction;
-use crate::error::{ParseError, Result};
-use crate::record::LoadNodeRecord;
-use crate::substitution::{
-    parse_substitutions, resolve_substitutions, LaunchContext, Substitution,
+use crate::{
+    actions::ComposableNodeAction,
+    error::{ParseError, Result},
+    record::LoadNodeRecord,
+    substitution::{parse_substitutions, resolve_substitutions, LaunchContext, Substitution},
+    xml::{Entity, XmlEntity},
 };
-use crate::xml::{Entity, XmlEntity};
 
 /// Load composable node action - loads composable nodes into an existing container
 #[derive(Debug, Clone)]

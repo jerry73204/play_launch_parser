@@ -1,7 +1,9 @@
 //! Let action implementation
 
-use crate::error::{ParseError, Result};
-use crate::xml::{Entity, XmlEntity};
+use crate::{
+    error::{ParseError, Result},
+    xml::{Entity, XmlEntity},
+};
 
 /// Let action for defining scoped variables
 #[derive(Debug, Clone)]
