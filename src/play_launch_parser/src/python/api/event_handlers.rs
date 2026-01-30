@@ -19,7 +19,7 @@ use pyo3::prelude::*;
 /// ```
 ///
 /// Triggers actions when a target process starts
-#[pyclass]
+#[pyclass(module = "launch.event_handlers")]
 #[derive(Clone)]
 pub struct OnProcessStart {
     #[allow(dead_code)] // Keep for API compatibility
@@ -71,7 +71,7 @@ impl OnProcessStart {
 /// ```
 ///
 /// Triggers actions when a target process exits
-#[pyclass]
+#[pyclass(module = "launch.event_handlers")]
 #[derive(Clone)]
 pub struct OnProcessExit {
     #[allow(dead_code)] // Keep for API compatibility
@@ -125,7 +125,7 @@ impl OnProcessExit {
 /// ```
 ///
 /// Triggers actions when a lifecycle node transitions to a target state
-#[pyclass]
+#[pyclass(module = "launch.event_handlers")]
 #[derive(Clone)]
 pub struct OnStateTransition {
     #[allow(dead_code)] // Keep for API compatibility
@@ -182,7 +182,7 @@ impl OnStateTransition {
 /// ```
 ///
 /// Triggers actions when the launch system shuts down
-#[pyclass]
+#[pyclass(module = "launch.event_handlers")]
 #[derive(Clone)]
 pub struct OnShutdown {
     #[allow(dead_code)] // Keep for API compatibility

@@ -31,6 +31,85 @@ impl PythonLaunchExecutor {
             // Register PyO3 mock modules in sys.modules
             crate::python::api::register_modules(py)?;
 
+            // CRITICAL: Aggressively isolate Python environment to prevent real ROS packages from loading
+            let isolation_code = r#"
+import sys
+import types
+
+# STEP 0: Disable bytecode caching to prevent stale imports
+sys.dont_write_bytecode = True
+
+# STEP 1: Install import hook to block only launch.* filesystem searches
+# This allows other ROS packages (ament_index_python, etc.) to load normally
+import sys
+import importlib.util
+import importlib.machinery
+
+class LaunchModuleBlocker:
+    """Blocks filesystem imports of launch.* modules while allowing sys.modules"""
+    def find_spec(self, fullname, path, target=None):
+        # Only intercept launch.* module imports
+        if fullname.startswith(('launch', 'launch_ros', 'launch_xml')):
+            # If it's already in sys.modules (our mock), let default machinery handle it
+            if fullname in sys.modules:
+                return None  # Continue with default import machinery
+            # Block filesystem search by returning a failing spec
+            # This prevents real ROS launch modules from being found on sys.path
+            raise ImportError(f"Blocked filesystem import of {fullname} (use mocks only)")
+        # Allow all other imports to proceed normally
+        return None
+
+# Install at beginning of sys.meta_path to intercept before filesystem finders
+if not any(isinstance(f, LaunchModuleBlocker) for f in sys.meta_path):
+    sys.meta_path.insert(0, LaunchModuleBlocker())
+
+# STEP 2: Remove existing launch* submodules from sys.modules that aren't our mocks
+# This clears any cached imports from real ROS packages
+# Keep our registered top-level and submodule mocks
+our_mocks = {
+    'launch', 'launch.actions', 'launch.substitutions', 'launch.conditions',
+    'launch.event_handlers', 'launch.launch_description_sources', 'launch.frontend',
+    'launch.frontend.type_utils', 'launch.utilities', 'launch.utilities.type_utils',
+    'launch.some_substitutions_type',
+    'launch_ros', 'launch_ros.actions', 'launch_ros.descriptions',
+    'launch_ros.substitutions', 'launch_ros.parameter_descriptions', 'launch_ros.utilities',
+    'launch_xml', 'launch_xml.launch_description_sources',
+}
+
+to_delete = [k for k in list(sys.modules.keys())
+             if k.startswith(('launch.', 'launch_ros.', 'launch_xml.'))
+             and k not in our_mocks]
+
+for key in to_delete:
+    del sys.modules[key]
+
+# STEP 4: Clear import caches to force fresh lookups
+import importlib
+importlib.invalidate_caches()
+
+# STEP 5: Verify our mocks are properly registered and accessible
+def _verify_mocks():
+    """Verify that our mocks are accessible and have correct attributes"""
+    try:
+        from launch.actions import GroupAction
+        # Test that actions attribute exists
+        ga = GroupAction([])
+        if hasattr(ga, 'actions'):
+            return True, f"OK: GroupAction.actions exists, module={GroupAction.__module__}"
+        else:
+            return False, f"ERROR: GroupAction missing .actions, module={GroupAction.__module__}"
+    except Exception as e:
+        return False, f"ERROR: {e}"
+
+_ok, _msg = _verify_mocks()
+if not _ok:
+    raise RuntimeError(f"Mock verification failed: {_msg}")
+"#;
+
+            // IMPORTANT: Run isolation in the GLOBAL context first so sys.modules is clean
+            py.run(isolation_code, None, None)?;
+            log::debug!("Installed aggressive Python environment isolation for launch* mocks");
+
             // Clear entity capture storage before execution
             // Note: Don't clear ROS_NAMESPACE_STACK as it may have been set by XML context
             CAPTURED_NODES.lock().clear();

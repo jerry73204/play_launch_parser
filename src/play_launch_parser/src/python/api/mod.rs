@@ -25,6 +25,19 @@ use pyo3::prelude::*;
 /// - `launch_ros.descriptions`
 /// - `launch_ros.parameter_descriptions`
 pub fn register_modules(py: Python) -> PyResult<()> {
+    // CRITICAL: Clear any existing launch.* modules from sys.modules first
+    // This prevents stale module objects from being cached
+    py.run(
+        r#"
+import sys
+for key in list(sys.modules.keys()):
+    if key.startswith(('launch', 'launch_ros', 'launch_xml')):
+        del sys.modules[key]
+"#,
+        None,
+        None,
+    )?;
+
     // Create launch module
     let launch_mod = PyModule::new(py, "launch")?;
     launch_mod.add_class::<launch::LaunchDescription>()?;
@@ -239,6 +252,39 @@ pub fn register_modules(py: Python) -> PyResult<()> {
     // Register in sys.modules
     let sys = py.import("sys")?;
     let modules = sys.getattr("modules")?;
+
+    // IMPORTANT: Remove any existing launch modules to prevent conflicts with real ROS packages
+    // Our mocks must take precedence over any installed launch packages
+    let module_names_to_remove = vec![
+        "launch",
+        "launch.actions",
+        "launch.substitutions",
+        "launch.conditions",
+        "launch.event_handlers",
+        "launch.launch_description_sources",
+        "launch.frontend",
+        "launch.frontend.type_utils",
+        "launch.utilities",
+        "launch.utilities.type_utils",
+        "launch.some_substitutions_type",
+        "launch_ros",
+        "launch_ros.actions",
+        "launch_ros.descriptions",
+        "launch_ros.substitutions",
+        "launch_ros.parameter_descriptions",
+        "launch_ros.utilities",
+        "launch_xml",
+        "launch_xml.launch_description_sources",
+        // Also remove internal modules
+        "launch.actions.group_action",
+        "launch.actions.opaque_function",
+    ];
+
+    for name in &module_names_to_remove {
+        if let Ok(true) = modules.contains(name) {
+            modules.del_item(name).ok(); // Ignore errors if module doesn't exist
+        }
+    }
 
     modules.set_item("launch", launch_mod)?;
     modules.set_item("launch.actions", launch_actions)?;

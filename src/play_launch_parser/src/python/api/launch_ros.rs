@@ -28,7 +28,7 @@ use pyo3::{
 /// ```
 ///
 /// When constructed, automatically captures the node definition.
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct Node {
     package: String,
@@ -504,7 +504,7 @@ impl Node {
 ///     ]
 /// )
 /// ```
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct ComposableNodeContainer {
     name: String,
@@ -787,7 +787,7 @@ impl ComposableNodeContainer {
 ///     remappings=[...],
 /// )
 /// ```
-#[pyclass]
+#[pyclass(module = "launch_ros.descriptions")]
 #[derive(Clone)]
 pub struct ComposableNode {
     package: String,
@@ -1072,7 +1072,7 @@ impl ComposableNode {
 /// ```
 ///
 /// Sets a global ROS parameter that applies to all nodes
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct SetParameter {
     #[allow(dead_code)] // Stored for API compatibility
@@ -1111,7 +1111,7 @@ impl SetParameter {
 ///
 /// Loads parameters from a YAML file and applies them to nodes.
 /// For static analysis, we just capture the intent without loading the file.
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct SetParametersFromFile {
     #[allow(dead_code)] // Stored for API compatibility
@@ -1163,7 +1163,7 @@ impl SetParametersFromFile {
 ///
 /// LifecycleNode is similar to Node but adds lifecycle management support
 /// For now, we treat it the same as a regular Node
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct LifecycleNode {
     package: String,
@@ -1483,7 +1483,7 @@ impl LifecycleNode {
 ///
 /// Triggers a lifecycle state transition for managed nodes.
 /// For static analysis, we just capture the intent without executing transitions.
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct LifecycleTransition {
     #[allow(dead_code)] // Stored for API compatibility
@@ -1544,7 +1544,7 @@ impl LifecycleTransition {
 /// ```
 ///
 /// Pushes a namespace onto the namespace stack
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct PushRosNamespace {
     #[allow(dead_code)] // Stored for API compatibility
@@ -1587,7 +1587,7 @@ impl PushRosNamespace {
 /// ```
 ///
 /// Pops a namespace from the namespace stack
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct PopRosNamespace {}
 
@@ -1629,7 +1629,7 @@ impl PopRosNamespace {
 /// ```
 ///
 /// Loads composable nodes into an existing container
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct LoadComposableNodes {
     #[allow(dead_code)] // Keep for API compatibility
@@ -2007,7 +2007,7 @@ impl LoadComposableNodes {
 ///
 /// Timer that uses ROS time instead of wall clock time.
 /// Requires use_sim_time to be set for simulation time support.
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct RosTimer {
     #[allow(dead_code)] // Keep for future use
@@ -2055,7 +2055,7 @@ impl RosTimer {
 ///
 /// Sets the 'use_sim_time' parameter in the current context.
 /// This enables simulation time for ROS nodes.
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct SetUseSimTime {
     value: bool,
@@ -2083,7 +2083,7 @@ impl SetUseSimTime {
 /// ```
 ///
 /// Sets a remapping rule in the current context for nodes in the same scope.
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct SetRemap {
     src: String,
@@ -2113,7 +2113,7 @@ impl SetRemap {
 /// ```
 ///
 /// Sets the ROS log directory for nodes launched in the same scope.
-#[pyclass]
+#[pyclass(module = "launch_ros.actions")]
 #[derive(Clone)]
 pub struct SetROSLogDir {
     #[allow(dead_code)] // Keep for future use

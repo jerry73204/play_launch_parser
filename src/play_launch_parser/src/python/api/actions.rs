@@ -19,7 +19,7 @@ use pyo3::prelude::*;
 ///
 /// For now, this is a placeholder. Launch arguments are typically
 /// passed via command line, not captured from Python files.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct DeclareLaunchArgument {
     name: String,
@@ -173,7 +173,7 @@ impl DeclareLaunchArgument {
 /// ```
 ///
 /// This action executes a Python function and captures the returned actions.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct OpaqueFunction {
     function: Option<PyObject>,
@@ -222,6 +222,8 @@ class MockLaunchContext:
 context = MockLaunchContext(launch_configurations, ros_namespace)
 "#;
 
+            // Use __main__.dict() as namespace - this is the same namespace used by exec()
+            // and has access to the isolated sys.modules with our mocks
             let main_module = py.import("__main__")?;
             let namespace = main_module.dict();
 
@@ -274,7 +276,7 @@ context = MockLaunchContext(launch_configurations, ros_namespace)
 /// ```
 ///
 /// Logs an information message when the action is executed
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct LogInfo {
     msg: String,
@@ -304,7 +306,7 @@ impl LogInfo {
 /// ```
 ///
 /// Sets an environment variable
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct SetEnvironmentVariable {
     name: String,
@@ -334,7 +336,7 @@ impl SetEnvironmentVariable {
 /// ```
 ///
 /// Unsets an environment variable
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct UnsetEnvironmentVariable {
     name: String,
@@ -366,10 +368,11 @@ impl UnsetEnvironmentVariable {
 /// ```
 ///
 /// Groups actions together with optional scoping
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct GroupAction {
-    actions: Vec<PyObject>,
+    #[pyo3(get)] // Make actions directly accessible as an attribute (like LaunchDescription)
+    pub actions: Vec<PyObject>,
     #[allow(dead_code)] // Keep for API compatibility
     scoped: bool,
     #[allow(dead_code)] // Keep for API compatibility
@@ -412,7 +415,7 @@ impl GroupAction {
 /// ```
 ///
 /// Executes a non-ROS process
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct ExecuteProcess {
     cmd: Vec<String>,
@@ -462,7 +465,7 @@ impl ExecuteProcess {
 /// ```
 ///
 /// Executes a process on the local system with more control than ExecuteProcess
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct ExecuteLocal {
     #[allow(dead_code)] // Keep for future use
@@ -524,7 +527,7 @@ impl ExecuteLocal {
 /// ```
 ///
 /// Executes actions after a delay
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct TimerAction {
     #[allow(dead_code)] // Keep for future use
@@ -564,7 +567,7 @@ impl TimerAction {
 ///
 /// Adds a Python coroutine function to the launch run loop.
 /// For static analysis, we just capture that it was called.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct OpaqueCoroutine {
     #[allow(dead_code)] // Keep for future use
@@ -612,7 +615,7 @@ impl OpaqueCoroutine {
 /// ```
 ///
 /// Includes another launch file (Python, XML, or YAML)
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct IncludeLaunchDescription {
     #[allow(dead_code)] // Stored for API compatibility, used during construction
@@ -774,7 +777,7 @@ impl IncludeLaunchDescription {
 /// ```
 ///
 /// Sets a launch configuration value
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct SetLaunchConfiguration {
     #[allow(dead_code)] // Stored for API compatibility
@@ -827,7 +830,7 @@ impl SetLaunchConfiguration {
 /// ```
 ///
 /// Event handlers allow actions to be triggered in response to events
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct RegisterEventHandler {
     #[allow(dead_code)] // Keep for API compatibility
@@ -858,7 +861,7 @@ impl RegisterEventHandler {
 ///
 /// Pushes the current environment state onto a stack.
 /// This allows temporary environment modifications that can be reverted with PopEnvironment.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct PushEnvironment {}
 
@@ -886,7 +889,7 @@ impl PushEnvironment {
 ///
 /// Pops the most recent environment state from the stack, restoring it.
 /// Must be paired with a previous PushEnvironment.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct PopEnvironment {}
 
@@ -913,7 +916,7 @@ impl PopEnvironment {
 /// ```
 ///
 /// Resets the environment to its initial state (before any modifications).
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct ResetEnvironment {}
 
@@ -941,7 +944,7 @@ impl ResetEnvironment {
 /// ```
 ///
 /// Appends (or prepends) a value to an existing environment variable.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct AppendEnvironmentVariable {
     name: String,
@@ -1026,7 +1029,7 @@ impl AppendEnvironmentVariable {
 ///
 /// Pushes the current launch configurations onto a stack.
 /// This allows temporary configuration modifications that can be reverted with PopLaunchConfigurations.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct PushLaunchConfigurations {}
 
@@ -1054,7 +1057,7 @@ impl PushLaunchConfigurations {
 ///
 /// Pops the most recent launch configurations from the stack, restoring them.
 /// Must be paired with a previous PushLaunchConfigurations.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct PopLaunchConfigurations {}
 
@@ -1081,7 +1084,7 @@ impl PopLaunchConfigurations {
 /// ```
 ///
 /// Resets all launch configurations to their initial state (clearing any modifications).
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct ResetLaunchConfigurations {}
 
@@ -1110,7 +1113,7 @@ impl ResetLaunchConfigurations {
 /// ```
 ///
 /// Removes a specific launch configuration variable.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct UnsetLaunchConfiguration {
     name: String,
@@ -1139,7 +1142,7 @@ impl UnsetLaunchConfiguration {
 ///
 /// Triggers a shutdown of the launch system when executed.
 /// For static analysis, this is purely informational.
-#[pyclass]
+#[pyclass(module = "launch.actions")]
 #[derive(Clone)]
 pub struct Shutdown {
     #[allow(dead_code)] // Keep for future use

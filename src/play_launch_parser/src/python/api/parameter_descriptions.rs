@@ -18,7 +18,7 @@ use pyo3::{prelude::*, types::PyDict};
 /// ```
 ///
 /// Wraps a parameter file path (which can be a substitution)
-#[pyclass]
+#[pyclass(module = "launch_ros.parameter_descriptions")]
 #[derive(Clone)]
 pub struct ParameterFile {
     param_file: PyObject,
@@ -82,7 +82,7 @@ impl ParameterFile {
 /// ```
 ///
 /// Wraps a parameter value with optional type information
-#[pyclass]
+#[pyclass(module = "launch_ros.parameter_descriptions")]
 #[derive(Clone)]
 pub struct ParameterValue {
     value: PyObject,

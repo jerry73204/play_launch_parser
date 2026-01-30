@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 /// ```
 ///
 /// Evaluates to true if the predicate evaluates to a truthy value
-#[pyclass]
+#[pyclass(module = "launch.conditions")]
 #[derive(Clone)]
 pub struct IfCondition {
     predicate: PyObject,
@@ -125,7 +125,7 @@ impl IfCondition {
 /// ```
 ///
 /// Evaluates to true if the predicate evaluates to a falsy value (inverted IfCondition)
-#[pyclass]
+#[pyclass(module = "launch.conditions")]
 #[derive(Clone)]
 pub struct UnlessCondition {
     predicate: PyObject,
@@ -194,7 +194,7 @@ impl UnlessCondition {
 ///
 /// condition = LaunchConfigurationEquals('variable_name', 'expected_value')
 /// ```
-#[pyclass]
+#[pyclass(module = "launch.conditions")]
 #[derive(Clone)]
 pub struct LaunchConfigurationEquals {
     variable_name: String,
@@ -235,7 +235,7 @@ impl LaunchConfigurationEquals {
 ///
 /// condition = LaunchConfigurationNotEquals('variable_name', 'expected_value')
 /// ```
-#[pyclass]
+#[pyclass(module = "launch.conditions")]
 #[derive(Clone)]
 pub struct LaunchConfigurationNotEquals {
     variable_name: String,

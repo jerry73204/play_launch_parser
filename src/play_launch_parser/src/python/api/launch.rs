@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 /// from launch import LaunchDescription
 /// launch_desc = LaunchDescription([action1, action2, ...])
 /// ```
-#[pyclass]
+#[pyclass(module = "launch")]
 #[derive(Clone)]
 pub struct LaunchDescription {
     #[pyo3(get)]

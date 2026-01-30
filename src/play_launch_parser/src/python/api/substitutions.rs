@@ -13,7 +13,7 @@ use pyo3::prelude::*;
 /// ```
 ///
 /// When converted to string, returns substitution format: `$(var variable_name)`
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct LaunchConfiguration {
     variable_name: String,
@@ -78,7 +78,7 @@ impl LaunchConfiguration {
 /// from launch.substitutions import TextSubstitution
 /// text = TextSubstitution(text='literal text')
 /// ```
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct TextSubstitution {
     text: String,
@@ -110,7 +110,7 @@ impl TextSubstitution {
 /// ```
 ///
 /// Joins path components using '/' separator
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct PathJoinSubstitution {
     substitutions: Vec<PyObject>,
@@ -174,7 +174,7 @@ impl PathJoinSubstitution {
 /// ```
 ///
 /// Returns substitution format: `$(find-pkg-share package_name)`
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct FindPackageShare {
     package_name: PyObject,
@@ -334,7 +334,7 @@ impl FindPackageShare {
 /// ```
 ///
 /// Returns substitution format: `$(env VAR_NAME)` or `$(optenv VAR_NAME default)`
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct EnvironmentVariable {
     name: String,
@@ -374,7 +374,7 @@ impl EnvironmentVariable {
 /// ```
 ///
 /// Returns substitution format: `$(dirname)`
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct ThisLaunchFileDir {}
 
@@ -403,7 +403,7 @@ impl ThisLaunchFileDir {
 /// ```
 ///
 /// Note: Limited support - we just return the expression as-is for now
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct PythonExpression {
     expression: Vec<String>,
@@ -436,7 +436,7 @@ impl PythonExpression {
 /// ```
 ///
 /// Executes a shell command and returns its output
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct Command {
     command: Vec<PyObject>,
@@ -484,7 +484,7 @@ impl Command {
 /// ```
 ///
 /// Returns the boolean NOT of the input
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct NotSubstitution {
     condition: PyObject,
@@ -533,7 +533,7 @@ impl NotSubstitution {
 /// ```
 ///
 /// Returns the boolean AND of two inputs
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct AndSubstitution {
     left: PyObject,
@@ -592,7 +592,7 @@ impl AndSubstitution {
 /// ```
 ///
 /// Returns the boolean OR of two inputs
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct OrSubstitution {
     left: PyObject,
@@ -651,7 +651,7 @@ impl OrSubstitution {
 /// ```
 ///
 /// Returns true if two values are equal
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct EqualsSubstitution {
     left: PyObject,
@@ -732,7 +732,7 @@ impl EqualsSubstitution {
 /// ```
 ///
 /// Returns if_value if condition is true, else returns else_value
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct IfElseSubstitution {
     condition: PyObject,
@@ -867,7 +867,7 @@ impl IfElseSubstitution {
 /// ```
 ///
 /// Returns true if two values are NOT equal
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct NotEqualsSubstitution {
     left: PyObject,
@@ -948,7 +948,7 @@ impl NotEqualsSubstitution {
 /// ```
 ///
 /// Reads file contents and returns as string
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct FileContent {
     path: PyObject,
@@ -1036,7 +1036,7 @@ impl FileContent {
 /// ```
 ///
 /// Generates an anonymous name with a random suffix
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct AnonName {
     name: String,
@@ -1067,7 +1067,7 @@ impl AnonName {
 /// ```
 ///
 /// Finds the full path to an executable within a ROS package
-#[pyclass]
+#[pyclass(module = "launch_ros.substitutions")]
 #[derive(Clone)]
 pub struct ExecutableInPackage {
     package: PyObject,
@@ -1144,7 +1144,7 @@ impl ExecutableInPackage {
 /// ```
 ///
 /// Finds the install prefix path of a ROS package (different from FindPackageShare)
-#[pyclass]
+#[pyclass(module = "launch_ros.substitutions")]
 #[derive(Clone)]
 pub struct FindPackage {
     package: PyObject,
@@ -1207,7 +1207,7 @@ impl FindPackage {
 /// ```
 ///
 /// Reads a ROS parameter value and returns it as a string
-#[pyclass]
+#[pyclass(module = "launch_ros.substitutions")]
 #[derive(Clone)]
 pub struct Parameter {
     name: PyObject,
@@ -1270,7 +1270,7 @@ impl Parameter {
 /// ```
 ///
 /// Converts a value to a boolean string representation ("true" or "false")
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct BooleanSubstitution {
     value: PyObject,
@@ -1342,7 +1342,7 @@ impl BooleanSubstitution {
 /// ```
 ///
 /// Searches PATH for an executable
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct FindExecutable {
     name: PyObject,
@@ -1406,7 +1406,7 @@ impl FindExecutable {
 /// ```
 ///
 /// Returns the launch log directory path
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct LaunchLogDir {}
 
@@ -1440,7 +1440,7 @@ impl LaunchLogDir {
 /// ```
 ///
 /// Returns the full path to the current launch file
-#[pyclass]
+#[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct ThisLaunchFile {}
 

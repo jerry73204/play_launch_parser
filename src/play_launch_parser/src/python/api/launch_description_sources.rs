@@ -21,7 +21,7 @@ use pyo3::prelude::*;
 /// ```
 ///
 /// Represents a Python launch file source for IncludeLaunchDescription
-#[pyclass]
+#[pyclass(module = "launch.launch_description_sources")]
 #[derive(Clone)]
 pub struct PythonLaunchDescriptionSource {
     launch_file_path: PyObject,
@@ -110,7 +110,7 @@ fn resolve_path(py: Python, path_obj: &PyObject) -> PyResult<String> {
 /// ```
 ///
 /// Represents an XML launch file source for IncludeLaunchDescription
-#[pyclass]
+#[pyclass(module = "launch.launch_description_sources")]
 #[derive(Clone)]
 pub struct XMLLaunchDescriptionSource {
     launch_file_path: PyObject,
@@ -143,7 +143,7 @@ impl XMLLaunchDescriptionSource {
 /// ```
 ///
 /// Represents a YAML launch file source for IncludeLaunchDescription
-#[pyclass]
+#[pyclass(module = "launch.launch_description_sources")]
 #[derive(Clone)]
 pub struct YAMLLaunchDescriptionSource {
     launch_file_path: PyObject,
@@ -176,7 +176,7 @@ impl YAMLLaunchDescriptionSource {
 /// ```
 ///
 /// Automatically detects the launch file type based on extension
-#[pyclass]
+#[pyclass(module = "launch.launch_description_sources")]
 #[derive(Clone)]
 pub struct FrontendLaunchDescriptionSource {
     launch_file_path: PyObject,
@@ -209,7 +209,7 @@ impl FrontendLaunchDescriptionSource {
 /// ```
 ///
 /// Automatically detects the launch file type
-#[pyclass]
+#[pyclass(module = "launch.launch_description_sources")]
 #[derive(Clone)]
 pub struct AnyLaunchDescriptionSource {
     launch_file_path: PyObject,
