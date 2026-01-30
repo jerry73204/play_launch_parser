@@ -258,6 +258,19 @@ impl CommandGenerator {
             Some(merged_env.into_iter().collect::<Vec<_>>())
         };
 
+        // Get global parameters from context
+        let global_params = if context.global_parameters().is_empty() {
+            None
+        } else {
+            Some(
+                context
+                    .global_parameters()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        };
+
         Ok(NodeRecord {
             args: if exec.arguments.is_empty() {
                 None
@@ -273,7 +286,7 @@ impl CommandGenerator {
             env,
             exec_name: name.clone(),
             executable: cmd_str,
-            global_params: None,
+            global_params,
             name,
             namespace: Some("/".to_string()),
             package: None, // Executables don't have packages
@@ -290,8 +303,10 @@ impl CommandGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actions::{Parameter, Remapping};
-    use crate::substitution::{LaunchContext, Substitution};
+    use crate::{
+        actions::{Parameter, Remapping},
+        substitution::{LaunchContext, Substitution},
+    };
 
     #[test]
     fn test_generate_simple_command() {

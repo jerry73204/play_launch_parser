@@ -159,7 +159,13 @@ impl LaunchTraverser {
     }
 
     fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
-        use crate::python::PythonLaunchExecutor;
+        use crate::python::{
+            bridge::{
+                get_current_ros_namespace, pop_ros_namespace, push_ros_namespace,
+                CAPTURED_CONTAINERS, CAPTURED_INCLUDES, CAPTURED_LOAD_NODES, CAPTURED_NODES,
+            },
+            PythonLaunchExecutor,
+        };
 
         log::debug!("Executing Python file: {}", path.display());
         log::trace!("Python file arguments: {} args", args.len());
@@ -167,9 +173,86 @@ impl LaunchTraverser {
             log::trace!("  {} = {}", k, v);
         }
 
-        let executor =
-            PythonLaunchExecutor::new().map_err(|e| ParseError::PythonError(e.to_string()))?;
-        let (nodes, containers, load_nodes, includes) = executor.execute_launch_file(path, args)?;
+        // Extract global parameters from context and merge with include args
+        let mut global_params = self.context.global_parameters();
+        for (k, v) in args {
+            global_params.insert(k.clone(), v.clone());
+        }
+
+        // Add current ROS namespace for OpaqueFunction to access
+        let current_ns = self.context.current_namespace();
+        if !current_ns.is_empty() && current_ns != "/" {
+            global_params.insert("ros_namespace".to_string(), current_ns.clone());
+            log::debug!("Added ros_namespace='{}' to global parameters", current_ns);
+        }
+
+        log::debug!("Executing with {} global parameters", global_params.len());
+
+        // Clear capture storage before execution
+        CAPTURED_NODES.lock().clear();
+        CAPTURED_CONTAINERS.lock().clear();
+        CAPTURED_LOAD_NODES.lock().clear();
+        CAPTURED_INCLUDES.lock().clear();
+
+        // Push current XML namespace onto ROS_NAMESPACE_STACK so Python code can see it
+        // IMPORTANT: Only push if it's not already on the stack (to avoid double-pushing
+        // when <push-ros-namespace> was already used in XML)
+        let need_pop = if !current_ns.is_empty() && current_ns != "/" {
+            // Check if the current namespace is already reflected in ROS_NAMESPACE_STACK
+            let stack_ns = get_current_ros_namespace();
+            if stack_ns == current_ns {
+                log::debug!(
+                    "XML namespace '{}' is already on ROS_NAMESPACE_STACK (from <push-ros-namespace>), skipping push",
+                    current_ns
+                );
+                false // Don't need to pop since we didn't push
+            } else {
+                log::debug!(
+                    "Pushing XML namespace '{}' onto ROS_NAMESPACE_STACK (current stack ns: '{}')",
+                    current_ns,
+                    stack_ns
+                );
+                push_ros_namespace(current_ns.clone());
+                log::trace!("ROS_NAMESPACE_STACK after push: {:?}", {
+                    use crate::python::bridge::ROS_NAMESPACE_STACK;
+                    ROS_NAMESPACE_STACK.lock().clone()
+                });
+                true
+            }
+        } else {
+            log::debug!("Not pushing namespace (empty or root): '{}'", current_ns);
+            false
+        };
+
+        // Execute Python file with new executor
+        let executor = PythonLaunchExecutor::new(global_params);
+        let path_str = path.to_str().ok_or_else(|| {
+            ParseError::PythonError(format!("Invalid UTF-8 in path: {}", path.display()))
+        })?;
+        executor
+            .execute(path_str)
+            .map_err(|e| ParseError::PythonError(e.to_string()))?;
+
+        // Collect captured entities
+        let nodes: Vec<_> = CAPTURED_NODES
+            .lock()
+            .iter()
+            .map(|n| n.to_record())
+            .collect::<Result<Vec<_>>>()?;
+
+        let containers: Vec<_> = CAPTURED_CONTAINERS
+            .lock()
+            .iter()
+            .map(|c| c.to_record())
+            .collect::<Result<Vec<_>>>()?;
+
+        let load_nodes: Vec<_> = CAPTURED_LOAD_NODES
+            .lock()
+            .iter()
+            .map(|ln| ln.to_record())
+            .collect::<Result<Vec<_>>>()?;
+
+        let includes = CAPTURED_INCLUDES.lock().clone();
 
         log::debug!(
             "Python file '{}' generated {} nodes, {} containers, {} load_nodes",
@@ -179,15 +262,30 @@ impl LaunchTraverser {
             load_nodes.len()
         );
 
+        // Log captured container namespaces for debugging
+        for container in &containers {
+            log::trace!(
+                "Captured container: name='{}', namespace='{}'",
+                container.name,
+                container.namespace
+            );
+        }
+
         // Apply the current namespace context to all entities from Python
-        // (Python launch files don't know about the XML namespace context they're included in)
+        // Note: If we pushed the namespace onto ROS_NAMESPACE_STACK (need_pop=true),
+        // then Python code already saw and applied it, so we skip re-application here
+        // to avoid double-namespacing.
         let current_ns = self.context.current_namespace();
+        let should_apply_namespace = !need_pop && current_ns != "/";
+
         log::debug!(
-            "Python file executed with XML context namespace: '{}' (will {} apply)",
+            "Python file executed with XML context namespace: '{}' (will {} apply prefix), need_pop={}",
             current_ns,
-            if current_ns != "/" { "YES" } else { "NO" }
+            if should_apply_namespace { "YES" } else { "NO" },
+            need_pop
         );
-        if current_ns != "/" {
+
+        if should_apply_namespace {
             log::debug!(
                 "Applying namespace '{}' to Python-generated entities",
                 current_ns
@@ -284,6 +382,14 @@ impl LaunchTraverser {
             self.containers.extend(namespaced_containers);
             self.load_nodes.extend(namespaced_load_nodes);
         } else {
+            // Log container namespaces before extending (no prefix applied)
+            for container in &containers {
+                log::debug!(
+                    "Adding container without namespace prefix: name='{}', namespace='{}'",
+                    container.name,
+                    container.namespace
+                );
+            }
             self.records.extend(nodes);
             self.containers.extend(containers);
             self.load_nodes.extend(load_nodes);
@@ -389,6 +495,12 @@ impl LaunchTraverser {
 
             // Propagate any errors
             result?;
+        }
+
+        // Pop the XML namespace if we pushed it
+        if need_pop {
+            log::debug!("Popping XML namespace from ROS_NAMESPACE_STACK");
+            pop_ros_namespace();
         }
 
         Ok(())
@@ -945,7 +1057,8 @@ impl LaunchTraverser {
                 let container_action = ContainerAction::from_entity(entity, &self.context)?;
 
                 // Add container record
-                self.containers.push(container_action.to_container_record());
+                self.containers
+                    .push(container_action.to_container_record(&self.context)?);
 
                 // Add load_node records for each composable node
                 self.load_nodes

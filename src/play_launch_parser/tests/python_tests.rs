@@ -431,14 +431,17 @@ fn test_parse_python_parameters() {
     let params = node["params"].as_array().unwrap();
     assert!(!params.is_empty(), "Should have parameters");
 
-    // Verify parameter file marker
-    let param_file = params.iter().find(|p| {
-        p.as_array()
-            .and_then(|arr| arr.first())
-            .and_then(|v| v.as_str())
-            == Some("__param_file")
-    });
-    assert!(param_file.is_some(), "Should have parameter file marker");
+    // Verify parameter files are in params_files field (not in params)
+    let params_files = node["params_files"].as_array().unwrap();
+    assert!(!params_files.is_empty(), "Should have parameter files");
+
+    // Verify parameter file path
+    let param_file_path = params_files.first().and_then(|v| v.as_str());
+    assert!(param_file_path.is_some(), "Should have parameter file path");
+    assert!(
+        param_file_path.unwrap().ends_with(".yaml"),
+        "Parameter file should be a YAML file"
+    );
 
     // Check fifth node with array parameters
     let node = &nodes[4];

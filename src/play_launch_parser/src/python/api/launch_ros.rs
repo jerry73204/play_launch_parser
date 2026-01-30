@@ -232,8 +232,19 @@ impl Node {
         use crate::python::bridge::get_current_ros_namespace;
 
         // Parse parameters and remappings from Python objects
-        let parameters = Python::with_gil(|py| node.parse_parameters(py).unwrap_or_default());
+        let all_params = Python::with_gil(|py| node.parse_parameters(py).unwrap_or_default());
         let remappings = Python::with_gil(|py| node.parse_remappings(py).unwrap_or_default());
+
+        // Separate regular parameters from parameter files
+        let mut parameters = Vec::new();
+        let mut params_files = Vec::new();
+        for (key, value) in all_params {
+            if key == "__param_file" {
+                params_files.push(value);
+            } else {
+                parameters.push((key, value));
+            }
+        }
 
         // Get current ROS namespace and combine with node's namespace
         let ros_namespace = get_current_ros_namespace();
@@ -270,22 +281,26 @@ impl Node {
             }
         };
 
+        let params_files_count = params_files.len();
         let capture = NodeCapture {
             package: node.package.clone(),
             executable: node.executable.clone(),
             name: node.name.clone(),
-            namespace: full_namespace,
+            namespace: full_namespace.clone(),
             parameters,
+            params_files,
             remappings,
             arguments: node.arguments.clone(),
             env_vars: node.env_vars.clone(),
         };
 
         log::debug!(
-            "Captured Python node: {} / {} (ros_namespace: {})",
+            "Captured Python node: {} / {} (ros_namespace: {}, full_namespace: {:?}, params_files: {})",
             capture.package,
             capture.executable,
-            ros_namespace
+            ros_namespace,
+            full_namespace,
+            params_files_count
         );
 
         CAPTURED_NODES.lock().push(capture);
@@ -612,6 +627,14 @@ impl ComposableNodeContainer {
 
         // Get current ROS namespace from the stack
         let ros_namespace = get_current_ros_namespace();
+        log::trace!(
+            "Container capture: ros_namespace from stack: '{}'",
+            ros_namespace
+        );
+        log::trace!(
+            "Container capture: container.namespace: {:?}",
+            container.namespace
+        );
 
         // Normalize container's namespace
         let container_ns = container
@@ -628,6 +651,11 @@ impl ComposableNodeContainer {
             })
             .unwrap_or_default();
 
+        log::trace!(
+            "Container capture: normalized container_ns: '{}'",
+            container_ns
+        );
+
         // Combine ROS namespace with container namespace
         let full_namespace = if ros_namespace == "/" {
             if container_ns.is_empty() {
@@ -641,15 +669,22 @@ impl ComposableNodeContainer {
             format!("{}{}", ros_namespace, container_ns)
         };
 
+        log::trace!("Container capture: full_namespace: '{}'", full_namespace);
+
         let capture = ContainerCapture {
             name: container.name.clone(),
             namespace: full_namespace.clone(),
+            package: Some(container.package.clone()),
+            executable: Some(container.executable.clone()),
+            cmd: Vec::new(), // Will be generated in to_record()
         };
 
         log::debug!(
-            "Captured Python container: {} (namespace: {}, ros_namespace: {})",
+            "Captured Python container: {} (namespace: {}, pkg: {}, exec: {}, ros_namespace: {})",
             capture.name,
             capture.namespace,
+            container.package,
+            container.executable,
             ros_namespace
         );
 
@@ -1233,7 +1268,18 @@ impl LifecycleNode {
         use crate::python::bridge::{get_current_ros_namespace, NodeCapture, CAPTURED_NODES};
 
         // Parse parameters (same logic as regular Node)
-        let parsed_params = self.parse_parameters(py)?;
+        let all_params = self.parse_parameters(py)?;
+
+        // Separate regular parameters from parameter files
+        let mut parsed_params = Vec::new();
+        let mut params_files = Vec::new();
+        for (key, value) in all_params {
+            if key == "__param_file" {
+                params_files.push(value);
+            } else {
+                parsed_params.push((key, value));
+            }
+        }
 
         // Parse remappings
         let parsed_remaps = self.parse_remappings(py)?;
@@ -1276,22 +1322,25 @@ impl LifecycleNode {
             }
         };
 
+        let params_files_count = params_files.len();
         let capture = NodeCapture {
             package: self.package.clone(),
             executable: self.executable.clone(),
             name: self.name.clone(),
             namespace: full_namespace,
             parameters: parsed_params,
+            params_files,
             remappings: parsed_remaps,
             arguments: parsed_args,
             env_vars: Vec::new(),
         };
 
         log::debug!(
-            "Captured Python lifecycle node: {} / {} (ros_namespace: {})",
+            "Captured Python lifecycle node: {} / {} (ros_namespace: {}, params_files: {})",
             capture.package,
             capture.executable,
-            ros_namespace
+            ros_namespace,
+            params_files_count
         );
 
         CAPTURED_NODES.lock().push(capture);

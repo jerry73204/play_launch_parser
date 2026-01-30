@@ -52,12 +52,54 @@ impl PythonLaunchExecutor {
                 }
             }
 
-            // Execute the Python file to load its globals
-            let runpy = py.import("runpy")?;
-            let globals = runpy.call_method1("run_path", (launch_file_path,))?;
+            // Execute the Python file directly with exec() instead of runpy
+            // This gives us complete control over the execution environment
+            use std::fs;
+            let code = fs::read_to_string(launch_file_path).map_err(|e| {
+                crate::error::ParseError::PythonError(format!("Failed to read Python file: {}", e))
+            })?;
+
+            // CRITICAL: Create a FRESH namespace for each Python file execution
+            // This prevents imports from one file polluting another file's namespace
+            // We use a new empty dict but set __builtins__ to maintain access to built-in functions
+            let globals = pyo3::types::PyDict::new(py);
+            let builtins = py.import("builtins")?;
+            globals.set_item("__builtins__", builtins)?;
+
+            // Set __file__ and __name__
+            globals.set_item("__file__", launch_file_path)?;
+            globals.set_item("__name__", "__main__")?;
+
+            // CRITICAL: Run isolation AGAIN right before executing the file
+            // This ensures any modifications to sys.modules/sys.path by previous files are reset
+            py.run(isolation_code, None, None)?;
+            log::debug!("Re-applied isolation right before file execution");
+
+            // Add debug logging to catch Python execution errors
+            log::debug!("Executing Python code from: {}", launch_file_path);
+            log::trace!("Python code length: {} bytes", code.len());
+
+            // Execute the file
+            if let Err(e) = py.run(&code, Some(globals), None) {
+                log::error!("Python execution failed: {}", e);
+                // Log the Python traceback if available
+                if let Some(traceback) = e.traceback(py) {
+                    if let Ok(tb_str) = traceback.format() {
+                        log::error!("Python traceback:\n{}", tb_str);
+                    }
+                }
+                return Err(e.into());
+            }
 
             // Get and call generate_launch_description()
-            let gen_fn = globals.get_item("generate_launch_description")?;
+            let gen_fn = globals
+                .get_item("generate_launch_description")?
+                .ok_or_else(|| {
+                    crate::error::ParseError::PythonError(
+                        "No generate_launch_description() function found".to_string(),
+                    )
+                })?;
+
             let launch_desc: PyObject = gen_fn.call0()?.into();
 
             // Visit all entities in the launch description
@@ -75,11 +117,14 @@ fn visit_launch_description(py: Python, launch_desc: &PyObject) -> PyResult<()> 
     let entities = launch_desc.getattr(py, "actions")?;
     let entities_list: Vec<PyObject> = entities.extract(py)?;
 
-    log::debug!("Visiting {} entities", entities_list.len());
+    log::debug!(
+        "Visiting {} entities in launch description",
+        entities_list.len()
+    );
 
     // Visit each entity
-    for entity in entities_list {
-        visit_entity(py, &entity)?;
+    for entity in entities_list.iter() {
+        visit_entity(py, entity)?;
     }
 
     Ok(())
@@ -93,7 +138,7 @@ fn visit_entity(py: Python, entity: &PyObject) -> PyResult<()> {
         .getattr(py, "__name__")?
         .extract::<String>(py)?;
 
-    log::trace!("Visiting entity type: {}", entity_type);
+    log::debug!("Visiting entity: {}", entity_type);
 
     match entity_type.as_str() {
         "Node" | "LifecycleNode" | "ComposableNodeContainer" | "LoadComposableNodes" => {
@@ -123,9 +168,10 @@ fn visit_entity(py: Python, entity: &PyObject) -> PyResult<()> {
 
         "GroupAction" => {
             log::debug!("Processing GroupAction");
-            // Get sub-entities
+            // Get nested actions and visit them
             let sub_entities = entity.getattr(py, "actions")?;
             let sub_list: Vec<PyObject> = sub_entities.extract(py)?;
+            log::debug!("GroupAction contains {} sub-actions", sub_list.len());
             for sub in sub_list {
                 visit_entity(py, &sub)?;
             }

@@ -58,10 +58,24 @@ pub struct NodeRecord {
 }
 
 /// Composable node container record
+/// Contains all information needed to spawn the container process
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposableNodeContainerRecord {
+    pub args: Option<Vec<String>>,
+    pub cmd: Vec<String>,
+    pub env: Option<Vec<(String, String)>>,
+    pub exec_name: Option<String>,
+    pub executable: String,
+    pub global_params: Option<Vec<(String, String)>>,
     pub name: String,
     pub namespace: String,
+    pub package: String,
+    pub params: Vec<(String, String)>,
+    pub params_files: Vec<String>,
+    pub remaps: Vec<(String, String)>,
+    pub respawn: Option<bool>,
+    pub respawn_delay: Option<f64>,
+    pub ros_args: Option<Vec<String>>,
 }
 
 /// Load node record (for composable nodes)

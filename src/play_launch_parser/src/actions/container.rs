@@ -114,11 +114,58 @@ impl ContainerAction {
         })
     }
 
-    pub fn to_container_record(&self) -> ComposableNodeContainerRecord {
-        ComposableNodeContainerRecord {
+    pub fn to_container_record(
+        &self,
+        context: &LaunchContext,
+    ) -> Result<ComposableNodeContainerRecord> {
+        // Generate the command line for the container executable
+        let mut cmd = vec![
+            format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable),
+            "--ros-args".to_string(),
+            "-r".to_string(),
+            format!("__node:={}", self.name),
+            "-r".to_string(),
+            format!("__ns:={}", self.namespace),
+        ];
+
+        // Add global parameters to the command
+        for (key, value) in context.global_parameters() {
+            cmd.push("-p".to_string());
+            cmd.push(format!("{}:={}", key, value));
+        }
+
+        // Generate exec_name (container_name-1 following Python parser convention)
+        let exec_name = Some(format!("{}-1", self.executable));
+
+        // Collect global parameters
+        let global_params_vec: Vec<(String, String)> = context
+            .global_parameters()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let global_params = if global_params_vec.is_empty() {
+            None
+        } else {
+            Some(global_params_vec)
+        };
+
+        Ok(ComposableNodeContainerRecord {
+            args: None,
+            cmd,
+            env: None,
+            exec_name,
+            executable: self.executable.clone(),
+            global_params,
             name: self.name.clone(),
             namespace: self.namespace.clone(),
-        }
+            package: self.package.clone(),
+            params: Vec::new(),
+            params_files: Vec::new(),
+            remaps: Vec::new(),
+            respawn: Some(false),
+            respawn_delay: None,
+            ros_args: None,
+        })
     }
 
     pub fn to_load_node_records(&self) -> Vec<LoadNodeRecord> {

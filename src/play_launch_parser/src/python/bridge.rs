@@ -26,6 +26,7 @@ pub struct NodeCapture {
     pub name: Option<String>,
     pub namespace: Option<String>,
     pub parameters: Vec<(String, String)>,
+    pub params_files: Vec<String>,
     pub remappings: Vec<(String, String)>,
     pub arguments: Vec<String>,
     pub env_vars: Vec<(String, String)>,
@@ -34,14 +35,48 @@ pub struct NodeCapture {
 impl NodeCapture {
     /// Convert to NodeRecord and generate command line
     pub fn to_record(&self) -> Result<NodeRecord> {
-        // Generate ROS command line
-        let cmd = self.generate_command();
+        // Extract global parameters from LAUNCH_CONFIGURATIONS
+        let global_params = {
+            let configs = LAUNCH_CONFIGURATIONS.lock();
+            let mut params = Vec::new();
+
+            // Common global parameters to check
+            for key in [
+                "use_sim_time",
+                "wheel_radius",
+                "wheel_width",
+                "wheel_base",
+                "wheel_tread",
+                "front_overhang",
+                "rear_overhang",
+                "left_overhang",
+                "right_overhang",
+                "vehicle_height",
+                "max_steer_angle",
+            ] {
+                if let Some(value) = configs.get(key) {
+                    params.push((key.to_string(), value.clone()));
+                }
+            }
+
+            if params.is_empty() {
+                None
+            } else {
+                Some(params)
+            }
+        };
+
+        // Generate ROS command line (now includes global params)
+        let cmd = self.generate_command(&global_params);
 
         // Extract ROS args (everything after --ros-args)
         let ros_args = cmd
             .iter()
             .position(|s| s == "--ros-args")
             .map(|pos| cmd[pos + 1..].to_vec());
+
+        // Extract parameter files from command (--params-file arguments)
+        let params_files = self.extract_params_files_from_cmd(&cmd);
 
         Ok(NodeRecord {
             args: if self.arguments.is_empty() {
@@ -57,12 +92,12 @@ impl NodeCapture {
             },
             exec_name: self.name.clone(), // Match Python: exec_name = node name
             executable: self.executable.clone(),
-            global_params: None,
+            global_params,
             name: self.name.clone(),
             namespace: self.namespace.clone(),
             package: Some(self.package.clone()),
             params: self.parameters.clone(),
-            params_files: Vec::new(),
+            params_files,
             remaps: self.remappings.clone(),
             respawn: None,
             respawn_delay: None,
@@ -70,8 +105,23 @@ impl NodeCapture {
         })
     }
 
+    /// Extract parameter file paths from command line
+    fn extract_params_files_from_cmd(&self, cmd: &[String]) -> Vec<String> {
+        let mut params_files = Vec::new();
+        let mut i = 0;
+        while i < cmd.len() {
+            if cmd[i] == "--params-file" && i + 1 < cmd.len() {
+                params_files.push(cmd[i + 1].clone());
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+        params_files
+    }
+
     /// Generate ROS 2 command line
-    fn generate_command(&self) -> Vec<String> {
+    fn generate_command(&self, global_params: &Option<Vec<(String, String)>>) -> Vec<String> {
         // 1. Base command: ros2 run <package> <executable>
         let mut cmd = vec![
             "ros2".to_string(),
@@ -114,6 +164,20 @@ impl NodeCapture {
             cmd.push(format!("{}:={}", name, value));
         }
 
+        // 8. Global parameters
+        if let Some(ref params) = global_params {
+            for (key, value) in params {
+                cmd.push("-p".to_string());
+                cmd.push(format!("{}:={}", key, value));
+            }
+        }
+
+        // 9. Parameter files
+        for params_file in &self.params_files {
+            cmd.push("--params-file".to_string());
+            cmd.push(params_file.clone());
+        }
+
         cmd
     }
 }
@@ -127,14 +191,94 @@ pub static CAPTURED_NODES: Lazy<Arc<Mutex<Vec<NodeCapture>>>> =
 pub struct ContainerCapture {
     pub name: String,
     pub namespace: String,
+    pub package: Option<String>,
+    pub executable: Option<String>,
+    pub cmd: Vec<String>,
 }
 
 impl ContainerCapture {
     /// Convert to ComposableNodeContainerRecord
     pub fn to_record(&self) -> Result<ComposableNodeContainerRecord> {
+        let package = self
+            .package
+            .clone()
+            .unwrap_or_else(|| "rclcpp_components".to_string());
+        let executable = self
+            .executable
+            .clone()
+            .unwrap_or_else(|| "component_container".to_string());
+
+        // Extract global parameters from LAUNCH_CONFIGURATIONS
+        let global_params = {
+            let configs = LAUNCH_CONFIGURATIONS.lock();
+            let mut params = Vec::new();
+
+            // Common global parameters to check
+            for key in [
+                "use_sim_time",
+                "wheel_radius",
+                "wheel_width",
+                "wheel_base",
+                "wheel_tread",
+                "front_overhang",
+                "rear_overhang",
+                "left_overhang",
+                "right_overhang",
+                "vehicle_height",
+                "max_steer_angle",
+            ] {
+                if let Some(value) = configs.get(key) {
+                    params.push((key.to_string(), value.clone()));
+                }
+            }
+
+            if params.is_empty() {
+                None
+            } else {
+                Some(params)
+            }
+        };
+
+        // Generate command if not provided
+        let cmd = if self.cmd.is_empty() {
+            let mut cmd = vec![
+                format!("/opt/ros/humble/lib/{}/{}", package, executable),
+                "--ros-args".to_string(),
+                "-r".to_string(),
+                format!("__node:={}", self.name),
+                "-r".to_string(),
+                format!("__ns:={}", self.namespace),
+            ];
+
+            // Add global parameters to command
+            if let Some(ref params) = global_params {
+                for (key, value) in params {
+                    cmd.push("-p".to_string());
+                    cmd.push(format!("{}:={}", key, value));
+                }
+            }
+
+            cmd
+        } else {
+            self.cmd.clone()
+        };
+
         Ok(ComposableNodeContainerRecord {
+            args: None,
+            cmd,
+            env: None,
+            exec_name: Some(format!("{}-1", executable)),
+            executable,
+            global_params,
             name: self.name.clone(),
             namespace: self.namespace.clone(),
+            package,
+            params: Vec::new(),
+            params_files: Vec::new(),
+            remaps: Vec::new(),
+            respawn: Some(false),
+            respawn_delay: None,
+            ros_args: None,
         })
     }
 }
@@ -218,6 +362,11 @@ pub fn pop_ros_namespace() {
 pub fn get_current_ros_namespace() -> String {
     let stack = ROS_NAMESPACE_STACK.lock();
     let result = stack.join("");
+    log::trace!(
+        "get_current_ros_namespace: stack={:?}, result='{}'",
+        *stack,
+        result
+    );
     if result.is_empty() {
         "/".to_string()
     } else {
