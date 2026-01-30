@@ -259,11 +259,7 @@ def run_python_dump(launch_file: Path, paths: Dict, extra_args: Dict[str, str] =
         return None
 
 def compare_counts(rust_data: Dict, python_data: Dict) -> bool:
-    """Compare counts of different entity types.
-
-    Note: Python includes containers as nodes, so we adjust the comparison
-    to account for this implementation detail.
-    """
+    """Compare counts of different entity types between Rust and Python parsers."""
     print(f"\n{Colors.BOLD}{'=' * 80}{Colors.END}")
     print(f"{Colors.BOLD}COUNT COMPARISON{Colors.END}")
     print(f"{Colors.BOLD}{'=' * 80}{Colors.END}\n")
@@ -278,13 +274,8 @@ def compare_counts(rust_data: Dict, python_data: Dict) -> bool:
         rust_count = len(rust_data.get(metric, []))
         python_count = len(python_data.get(metric, []))
 
-        # For nodes: Python includes containers as nodes, so subtract them for fair comparison
-        if metric == 'node':
-            python_container_count = len(python_data.get('container', []))
-            python_count_adjusted = python_count - python_container_count
-            diff = rust_count - python_count_adjusted
-        else:
-            diff = rust_count - python_count
+        # Both parsers now count things the same way (containers are separate from nodes)
+        diff = rust_count - python_count
 
         if diff == 0:
             status = f"{Colors.GREEN}✓{Colors.END}"
@@ -559,16 +550,6 @@ Examples:
     if all_match:
         print(f"{Colors.GREEN}{Colors.BOLD}✓ ALL CHECKS PASSED{Colors.END}")
         print(f"{Colors.GREEN}Rust and Python implementations produce identical outputs!{Colors.END}")
-
-        # Note about expected differences
-        python_container_count = len(python_data.get('container', []))
-        python_node_count = len(python_data.get('node', []))
-        rust_node_count = len(rust_data.get('node', []))
-
-        if python_container_count > 0 and python_node_count > rust_node_count:
-            print(f"\n{Colors.BLUE}Note:{Colors.END} Python includes containers as nodes (implementation detail).")
-            print(f"  This causes node count difference but is functionally equivalent.")
-
         sys.exit(0)
     else:
         print(f"{Colors.YELLOW}{Colors.BOLD}⚠ SOME DIFFERENCES FOUND{Colors.END}")
