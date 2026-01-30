@@ -8,8 +8,9 @@ use std::sync::{Mutex, MutexGuard};
 static PYTHON_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Helper to get a lock for Python tests to ensure they run serially
+/// Recovers from poisoned mutex if a previous test panicked
 fn python_test_guard() -> MutexGuard<'static, ()> {
-    PYTHON_TEST_LOCK.lock().unwrap()
+    PYTHON_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Helper to get fixture path from crate tests directory
