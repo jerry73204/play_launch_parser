@@ -431,6 +431,28 @@ impl PythonExpression {
     fn __repr__(&self) -> String {
         "PythonExpression(...)".to_string()
     }
+
+    /// Perform the substitution - evaluate the Python expression
+    fn perform(&self, py: Python, _context: &PyAny) -> PyResult<String> {
+        // Evaluate the Python expression
+        // Safety: This evaluates arbitrary Python code, but it comes from the launch file
+        // which is already trusted (user-provided configuration)
+        let result = py.eval(&self.expression, None, None)?;
+
+        // Convert result to string
+        if let Ok(s) = result.extract::<String>() {
+            Ok(s)
+        } else if let Ok(b) = result.extract::<bool>() {
+            Ok(if b { "true" } else { "false" }.to_string())
+        } else if let Ok(i) = result.extract::<i64>() {
+            Ok(i.to_string())
+        } else if let Ok(f) = result.extract::<f64>() {
+            Ok(f.to_string())
+        } else {
+            // Fallback to __str__
+            result.call_method0("__str__")?.extract::<String>()
+        }
+    }
 }
 
 impl PythonExpression {

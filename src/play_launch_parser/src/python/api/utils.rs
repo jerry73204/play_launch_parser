@@ -156,11 +156,13 @@ pub fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
 ///   AndSubstitution, OrSubstitution, NotSubstitution (evaluate to "true"/"false")
 /// - **Content substitutions**: FileContent (reads file and resolves nested substitutions),
 ///   PathJoinSubstitution (joins paths and resolves nested substitutions)
+/// - **Expression substitutions**: PythonExpression (evaluates Python code)
 ///
 /// These need to call perform() with real context during parsing to:
 /// - Evaluate conditional logic (for conditionals)
 /// - Resolve nested substitutions (for FileContent, PathJoinSubstitution)
 /// - Read external content (for FileContent)
+/// - Execute Python expressions (for PythonExpression)
 ///
 /// LaunchConfiguration is NOT in this list - it should be preserved as "$(var name)"
 /// for replay-time resolution.
@@ -178,6 +180,8 @@ fn is_evaluating_substitution(obj: &PyAny) -> PyResult<bool> {
             // Content substitutions that need evaluation
             | "FileContent"
             | "PathJoinSubstitution"
+            // Expression substitutions
+            | "PythonExpression"
     ))
 }
 
