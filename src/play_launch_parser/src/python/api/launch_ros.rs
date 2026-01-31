@@ -370,7 +370,14 @@ impl Node {
 
         // Try float
         if let Ok(f) = value.extract::<f64>() {
-            return Ok(f.to_string());
+            // Always format floats with decimal point to preserve type information
+            // This ensures ROS interprets them as floats, not integers
+            // e.g., "0.0" not "0", "1.0" not "1"
+            if f.fract() == 0.0 && f.is_finite() {
+                return Ok(format!("{:.1}", f));
+            } else {
+                return Ok(f.to_string());
+            }
         }
 
         // Try list (convert to YAML-like string)
