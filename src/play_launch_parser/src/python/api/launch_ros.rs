@@ -822,19 +822,20 @@ impl ComposableNode {
             }
         };
 
-        // Normalize namespace to ensure it starts with '/'
+        // Use namespace from composable node if provided, otherwise inherit from container
+        // Don't normalize - preserve namespace as-is from list concatenation
         let node_namespace = self
             .namespace
             .clone()
             .or_else(|| container_namespace.clone())
             .unwrap_or_else(|| "/".to_string());
 
+        // Only add leading slash if namespace is empty (not if it just doesn't start with '/')
+        // This preserves the namespace format from list concatenation
         let normalized_namespace = if node_namespace.is_empty() {
             "/".to_string()
-        } else if node_namespace.starts_with('/') {
-            node_namespace
         } else {
-            format!("/{}", node_namespace)
+            node_namespace
         };
 
         let capture = LoadNodeCapture {
@@ -1342,46 +1343,9 @@ impl LifecycleNode {
 
     /// Convert PyObject to string (handles substitutions)
     fn pyobject_to_string(obj: &PyAny) -> PyResult<String> {
-        // Try direct string extraction
-        if let Ok(s) = obj.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Try calling perform() method first (for LaunchConfiguration substitutions)
-        if obj.hasattr("perform")? {
-            if let Ok(context) = obj.py().eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method (for substitutions)
-        if let Ok(str_result) = obj.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Try bool conversion
-        if let Ok(b) = obj.extract::<bool>() {
-            return Ok(if b { "true" } else { "false" }.to_string());
-        }
-
-        // Try integer
-        if let Ok(i) = obj.extract::<i64>() {
-            return Ok(i.to_string());
-        }
-
-        // Try float
-        if let Ok(f) = obj.extract::<f64>() {
-            return Ok(f.to_string());
-        }
-
-        // Fallback to repr
-        Ok(obj.to_string())
+        let py = obj.py();
+        let py_obj = obj.into();
+        crate::python::api::utils::pyobject_to_string(py, &py_obj)
     }
 }
 
@@ -1757,7 +1721,7 @@ impl LoadComposableNodes {
         }
 
         // Try as string, LaunchConfiguration, or other substitution
-        // Use pyobject_to_string which handles perform() for LaunchConfiguration
+        // Use pyobject_to_string to get the substitution string for output
         let name = Self::pyobject_to_string(target_ref)?;
 
         log::debug!(
@@ -1765,18 +1729,39 @@ impl LoadComposableNodes {
             name
         );
 
-        // When target_container is a simple string/LaunchConfiguration, use the name as-is
-        // Python's behavior: just use the string value directly without modification
-        // But extract the namespace from the path for composable nodes to inherit
-        let namespace = if name.contains('/') {
+        // For namespace extraction, we need the resolved value (not the substitution string)
+        // If this is a substitution, try to resolve it using perform() with real context
+        let resolved_value = if target_ref.hasattr("perform")? {
+            // Import create_launch_context helper
+            use crate::python::api::utils::create_launch_context;
+
+            // Try to resolve using real context
+            if let Ok(context) = create_launch_context(py) {
+                if let Ok(result) = target_ref.call_method1("perform", (context,)) {
+                    result.extract::<String>().ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Use resolved value for namespace extraction if available, otherwise use name as-is
+        let value_for_namespace = resolved_value.as_ref().unwrap_or(&name);
+
+        // Extract the namespace from the path for composable nodes to inherit
+        let namespace = if value_for_namespace.contains('/') {
             // Extract namespace from the path (everything before the last /)
-            if let Some(last_slash_idx) = name.rfind('/') {
+            if let Some(last_slash_idx) = value_for_namespace.rfind('/') {
                 if last_slash_idx == 0 {
                     // Path like "/container_name" -> namespace is "/"
                     Some("/".to_string())
                 } else {
                     // Path like "/ns/container_name" -> namespace is "/ns"
-                    Some(name[..last_slash_idx].to_string())
+                    Some(value_for_namespace[..last_slash_idx].to_string())
                 }
             } else {
                 None
@@ -1787,8 +1772,9 @@ impl LoadComposableNodes {
         };
 
         log::debug!(
-            "Target container: '{}', extracted namespace: {:?}",
+            "Target container: '{}' (resolved: {:?}), extracted namespace: {:?}",
             name,
+            resolved_value,
             namespace
         );
 
@@ -1871,46 +1857,9 @@ impl LoadComposableNodes {
 
     /// Convert PyObject to string (handles substitutions)
     fn pyobject_to_string(obj: &PyAny) -> PyResult<String> {
-        // Try direct string extraction
-        if let Ok(s) = obj.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Try calling perform() method first (for LaunchConfiguration substitutions)
-        if obj.hasattr("perform")? {
-            if let Ok(context) = obj.py().eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method (for substitutions)
-        if let Ok(str_result) = obj.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Try bool conversion
-        if let Ok(b) = obj.extract::<bool>() {
-            return Ok(if b { "true" } else { "false" }.to_string());
-        }
-
-        // Try integer
-        if let Ok(i) = obj.extract::<i64>() {
-            return Ok(i.to_string());
-        }
-
-        // Try float
-        if let Ok(f) = obj.extract::<f64>() {
-            return Ok(f.to_string());
-        }
-
-        // Fallback to repr
-        Ok(obj.to_string())
+        let py = obj.py();
+        let py_obj = obj.into();
+        crate::python::api::utils::pyobject_to_string(py, &py_obj)
     }
 }
 

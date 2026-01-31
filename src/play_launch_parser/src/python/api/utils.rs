@@ -4,7 +4,38 @@
 //! Python types and Rust types, particularly for handling ROS 2's
 //! SomeSubstitutionsType pattern.
 
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
+
+/// Create a LaunchContext-like object with access to LAUNCH_CONFIGURATIONS
+/// This allows substitutions to resolve LaunchConfiguration values during perform()
+pub fn create_launch_context(py: Python) -> PyResult<PyObject> {
+    // Import the launch configuration storage
+    use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+
+    // Get the launch configurations
+    let configs = LAUNCH_CONFIGURATIONS.lock();
+
+    // Create a simple context object that has a launch_configurations dict
+    let context_class = py.eval(
+        "type('Context', (), {
+            'launch_configurations': None,
+            '__init__': lambda self, configs: setattr(self, 'launch_configurations', configs)
+        })",
+        None,
+        None,
+    )?;
+
+    // Create a Python dict from our LAUNCH_CONFIGURATIONS
+    let py_configs = PyDict::new(py);
+    for (key, value) in configs.iter() {
+        py_configs.set_item(key, value)?;
+    }
+
+    // Instantiate the context with our configs
+    let context = context_class.call1((py_configs,))?;
+
+    Ok(context.into())
+}
 
 /// Convert a PyObject to String, handling ROS 2's SomeSubstitutionsType pattern.
 ///
@@ -22,6 +53,18 @@ use pyo3::prelude::*;
 /// ]
 /// ```
 ///
+/// # Conditional Substitutions
+///
+/// Conditional substitutions (EqualsSubstitution, IfElseSubstitution, NotEqualsSubstitution, etc.)
+/// need to evaluate during parsing to determine which path to take. These are handled specially:
+/// - They call `perform()` with a real LaunchContext containing LAUNCH_CONFIGURATIONS values
+/// - This allows them to resolve LaunchConfiguration values and evaluate to "true"/"false"
+///
+/// # LaunchConfiguration Preservation
+///
+/// LaunchConfiguration substitutions are preserved as strings like "$(var node_name)" in the output.
+/// This allows play_launch to re-resolve them at replay time with different values if needed.
+///
 /// # Examples
 ///
 /// ```ignore
@@ -30,7 +73,11 @@ use pyo3::prelude::*;
 ///
 /// // LaunchConfiguration substitution
 /// let result = pyobject_to_string(py, &launch_config)?;
-/// // Result: "$(var variable_name)" or resolved value
+/// // Result: "$(var variable_name)"
+///
+/// // Conditional substitution
+/// let result = pyobject_to_string(py, &equals_sub)?;
+/// // Result: "true" or "false" (evaluated with real context)
 ///
 /// // List with mixed types
 /// let result = pyobject_to_string(py, &py_list)?;
@@ -42,8 +89,8 @@ use pyo3::prelude::*;
 /// The function tries multiple approaches in order:
 /// 1. Direct string extraction (`extract::<String>()`)
 /// 2. List handling (recursively convert and concatenate elements)
-/// 3. Call `perform()` method (for LaunchConfiguration with context)
-/// 4. Call `__str__()` method (for substitution objects)
+/// 3. Conditional substitutions: Call `perform()` with real context
+/// 4. Other substitutions: Call `__str__()` to preserve substitution format
 /// 5. Fallback to `to_string()` (Python repr)
 ///
 /// # Errors
@@ -75,28 +122,63 @@ pub fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
         return Ok(result);
     }
 
-    // Try calling __str__ method first (for substitutions)
-    // This preserves substitution format like "$(var node_name)" instead of resolving it
+    // Check if this is a substitution that needs to be evaluated during parsing
+    // These substitutions need to call perform() to resolve their content/logic
+    if is_evaluating_substitution(obj_ref)? {
+        // Create a real launch context with access to LAUNCH_CONFIGURATIONS
+        let context = create_launch_context(py)?;
+
+        // Call perform() to evaluate the condition
+        if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+            if let Ok(s) = result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+    }
+
+    // For other substitution objects (LaunchConfiguration, etc.), use __str__()
+    // This preserves substitutions like "$(var node_name)" in the record.json output
+    // The substitutions will be resolved later during actual launch execution
     if let Ok(str_result) = obj_ref.call_method0("__str__") {
         if let Ok(s) = str_result.extract::<String>() {
             return Ok(s);
         }
     }
 
-    // Try calling perform() method as fallback (for LaunchConfiguration)
-    // This resolves the substitution to its actual value
-    if obj_ref.hasattr("perform")? {
-        if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                if let Ok(s) = result.extract::<String>() {
-                    return Ok(s);
-                }
-            }
-        }
-    }
-
     // Fallback to Python repr
     Ok(obj_ref.to_string())
+}
+
+/// Check if a PyObject is a substitution that needs evaluation during parsing.
+///
+/// Substitutions that need evaluation include:
+/// - **Conditional substitutions**: EqualsSubstitution, NotEqualsSubstitution, IfElseSubstitution,
+///   AndSubstitution, OrSubstitution, NotSubstitution (evaluate to "true"/"false")
+/// - **Content substitutions**: FileContent (reads file and resolves nested substitutions),
+///   PathJoinSubstitution (joins paths and resolves nested substitutions)
+///
+/// These need to call perform() with real context during parsing to:
+/// - Evaluate conditional logic (for conditionals)
+/// - Resolve nested substitutions (for FileContent, PathJoinSubstitution)
+/// - Read external content (for FileContent)
+///
+/// LaunchConfiguration is NOT in this list - it should be preserved as "$(var name)"
+/// for replay-time resolution.
+fn is_evaluating_substitution(obj: &PyAny) -> PyResult<bool> {
+    let type_name = obj.get_type().name()?;
+    Ok(matches!(
+        type_name,
+        // Conditional substitutions
+        "EqualsSubstitution"
+            | "NotEqualsSubstitution"
+            | "IfElseSubstitution"
+            | "AndSubstitution"
+            | "OrSubstitution"
+            | "NotSubstitution"
+            // Content substitutions that need evaluation
+            | "FileContent"
+            | "PathJoinSubstitution"
+    ))
 }
 
 #[cfg(test)]
