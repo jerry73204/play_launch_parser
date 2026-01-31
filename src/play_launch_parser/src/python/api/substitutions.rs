@@ -436,44 +436,7 @@ impl PythonExpression {
 impl PythonExpression {
     /// Convert a PyObject to a string (handles strings and substitutions)
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        use pyo3::types::PyList;
-        let obj_ref = obj.as_ref(py);
-
-        // Try direct string extraction
-        if let Ok(s) = obj_ref.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Handle lists (concatenate)
-        if let Ok(list) = obj_ref.downcast::<PyList>() {
-            let mut result = String::new();
-            for item in list.iter() {
-                let item_str = Self::pyobject_to_string(py, &item.into())?;
-                result.push_str(&item_str);
-            }
-            return Ok(result);
-        }
-
-        // Try perform() for LaunchConfiguration
-        if obj_ref.hasattr("perform")? {
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try __str__
-        if let Ok(str_result) = obj_ref.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        Ok(obj_ref.to_string())
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 

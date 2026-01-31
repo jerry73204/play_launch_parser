@@ -176,64 +176,7 @@ impl Node {
 
     /// Convert a PyObject to a string (handles both strings and substitutions)
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-
-        // Debug: log the type of object we're trying to convert
-        let obj_type = obj_ref.get_type().name().unwrap_or("unknown");
-        log::debug!(
-            "pyobject_to_string: converting type '{}', repr: {}",
-            obj_type,
-            obj_ref
-        );
-
-        // Try direct string extraction first
-        if let Ok(s) = obj_ref.extract::<String>() {
-            log::debug!("pyobject_to_string: successfully extracted string: '{}'", s);
-            return Ok(s);
-        }
-
-        // Handle lists (concatenate elements) - common in ROS 2 Python launch files
-        if let Ok(list) = obj_ref.downcast::<PyList>() {
-            log::debug!(
-                "pyobject_to_string: handling list with {} elements",
-                list.len()
-            );
-            let mut result = String::new();
-            for item in list.iter() {
-                let item_str = Self::pyobject_to_string(py, &item.into())?;
-                result.push_str(&item_str);
-            }
-            log::debug!("pyobject_to_string: concatenated list to: '{}'", result);
-            return Ok(result);
-        }
-
-        // Try calling perform() method first (for LaunchConfiguration substitutions)
-        // This resolves the substitution to its actual value
-        if obj_ref.hasattr("perform")? {
-            log::debug!("pyobject_to_string: object has perform() method, calling it");
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        log::debug!("pyobject_to_string: perform() returned string: '{}'", s);
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method (for other substitutions)
-        log::debug!("pyobject_to_string: trying __str__ method");
-        if let Ok(str_result) = obj_ref.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                log::debug!("pyobject_to_string: __str__() returned: '{}'", s);
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        let repr = obj_ref.to_string();
-        log::debug!("pyobject_to_string: using repr fallback: '{}'", repr);
-        Ok(repr)
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 
     /// Capture node to global storage
@@ -732,52 +675,7 @@ impl ComposableNodeContainer {
 
     /// Convert PyObject to string (handles both strings and substitutions)
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-
-        // Try direct string extraction
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-
-        // Handle lists (concatenate elements) - common in ROS 2 Python launch files
-        // Example: namespace=["/", "my_container"]
-        if let Ok(list) = obj_ref.downcast::<pyo3::types::PyList>() {
-            log::debug!(
-                "ComposableNodeContainer: handling list with {} elements for concatenation",
-                list.len()
-            );
-            let mut result = String::new();
-            for item in list.iter() {
-                let item_str = Self::pyobject_to_string(py, &item.into())?;
-                result.push_str(&item_str);
-            }
-            log::debug!(
-                "ComposableNodeContainer: concatenated list to: '{}'",
-                result
-            );
-            return Ok(result);
-        }
-
-        // Try calling perform() method first (for LaunchConfiguration substitutions)
-        if obj_ref.hasattr("perform")? {
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method (for substitutions)
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        Ok(obj.to_string())
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
@@ -903,8 +801,7 @@ impl ComposableNode {
 impl ComposableNode {
     /// Convert a PyObject to a string (handles both strings and substitutions)
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        // Reuse the same logic as Node::pyobject_to_string
-        Node::pyobject_to_string(py, obj)
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 
     fn capture_as_load_node(&self, container_name: &str, container_namespace: &Option<String>) {

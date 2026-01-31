@@ -10,6 +10,7 @@ pub mod parameter_descriptions;
 pub mod some_substitutions_type;
 pub mod substitutions;
 pub mod utilities;
+pub mod utils;
 
 use pyo3::prelude::*;
 

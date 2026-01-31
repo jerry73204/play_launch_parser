@@ -84,81 +84,7 @@ impl DeclareLaunchArgument {
     /// Convert PyObject to string (handles strings, substitutions, and lists)
     /// For substitutions, this will call perform() to resolve them
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        use pyo3::types::PyList;
-
-        // Try direct string extraction
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-
-        // Try list (concatenate all elements after performing them)
-        if let Ok(list) = obj.downcast::<PyList>(py) {
-            log::trace!(
-                "pyobject_to_string: processing list with {} items",
-                list.len()
-            );
-            let mut result = String::new();
-            for item in list.iter() {
-                // Try to extract as string
-                if let Ok(s) = item.extract::<String>() {
-                    result.push_str(&s);
-                }
-                // Try calling perform() if it exists (for substitutions)
-                else if item.hasattr("perform")? {
-                    // Create a mock context for perform()
-                    if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                        match item.call_method1("perform", (context,)) {
-                            Ok(performed) => {
-                                if let Ok(s) = performed.extract::<String>() {
-                                    result.push_str(&s);
-                                    continue;
-                                }
-                            }
-                            Err(e) => {
-                                log::trace!("perform() failed: {}", e);
-                            }
-                        }
-                    }
-                    // Fallback to __str__ if perform fails
-                    if let Ok(str_result) = item.call_method0("__str__") {
-                        if let Ok(s) = str_result.extract::<String>() {
-                            result.push_str(&s);
-                        }
-                    }
-                }
-                // Try calling __str__
-                else if let Ok(str_result) = item.call_method0("__str__") {
-                    if let Ok(s) = str_result.extract::<String>() {
-                        result.push_str(&s);
-                    }
-                }
-            }
-            log::trace!("pyobject_to_string: concatenated to '{}'", result);
-            return Ok(result);
-        }
-
-        // For single substitution objects, try perform() first
-        let obj_ref = obj.as_ref(py);
-        if obj_ref.hasattr("perform")? {
-            // Create a mock context for perform()
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(performed) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = performed.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method (for substitutions)
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        Ok(obj.to_string())
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
@@ -305,44 +231,7 @@ impl LogInfo {
     /// Convert a PyObject to a string (handles both strings and substitutions)
     /// Same logic as Node::pyobject_to_string
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        use pyo3::types::PyList;
-        let obj_ref = obj.as_ref(py);
-
-        // Try direct string extraction first
-        if let Ok(s) = obj_ref.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Handle lists (concatenate elements)
-        if let Ok(list) = obj_ref.downcast::<PyList>() {
-            let mut result = String::new();
-            for item in list.iter() {
-                let item_str = Self::pyobject_to_string(py, &item.into())?;
-                result.push_str(&item_str);
-            }
-            return Ok(result);
-        }
-
-        // Try calling perform() method (for LaunchConfiguration)
-        if obj_ref.hasattr("perform")? {
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method
-        if let Ok(str_result) = obj_ref.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        Ok(obj_ref.to_string())
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
@@ -392,44 +281,7 @@ impl SetEnvironmentVariable {
     /// Convert a PyObject to a string (handles strings, substitutions, and lists)
     /// Reuses the same pattern as LogInfo
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        use pyo3::types::PyList;
-        let obj_ref = obj.as_ref(py);
-
-        // Try direct string extraction first
-        if let Ok(s) = obj_ref.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Handle lists (concatenate elements)
-        if let Ok(list) = obj_ref.downcast::<PyList>() {
-            let mut result = String::new();
-            for item in list.iter() {
-                let item_str = Self::pyobject_to_string(py, &item.into())?;
-                result.push_str(&item_str);
-            }
-            return Ok(result);
-        }
-
-        // Try calling perform() method (for LaunchConfiguration)
-        if obj_ref.hasattr("perform")? {
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method
-        if let Ok(str_result) = obj_ref.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        Ok(obj_ref.to_string())
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
@@ -584,44 +436,7 @@ impl ExecuteProcess {
     /// Convert a PyObject to a string (handles strings, substitutions, and lists)
     /// Reuses the same pattern as SetEnvironmentVariable
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        use pyo3::types::PyList;
-        let obj_ref = obj.as_ref(py);
-
-        // Try direct string extraction first
-        if let Ok(s) = obj_ref.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Handle lists (concatenate elements)
-        if let Ok(list) = obj_ref.downcast::<PyList>() {
-            let mut result = String::new();
-            for item in list.iter() {
-                let item_str = Self::pyobject_to_string(py, &item.into())?;
-                result.push_str(&item_str);
-            }
-            return Ok(result);
-        }
-
-        // Try calling perform() method (for LaunchConfiguration)
-        if obj_ref.hasattr("perform")? {
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method
-        if let Ok(str_result) = obj_ref.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        Ok(obj_ref.to_string())
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
@@ -1217,44 +1032,7 @@ impl AppendEnvironmentVariable {
     /// Convert a PyObject to a string (handles strings, substitutions, and lists)
     /// Reuses the same pattern as SetEnvironmentVariable
     fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        use pyo3::types::PyList;
-        let obj_ref = obj.as_ref(py);
-
-        // Try direct string extraction first
-        if let Ok(s) = obj_ref.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Handle lists (concatenate elements)
-        if let Ok(list) = obj_ref.downcast::<PyList>() {
-            let mut result = String::new();
-            for item in list.iter() {
-                let item_str = Self::pyobject_to_string(py, &item.into())?;
-                result.push_str(&item_str);
-            }
-            return Ok(result);
-        }
-
-        // Try calling perform() method (for LaunchConfiguration)
-        if obj_ref.hasattr("perform")? {
-            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
-                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                    if let Ok(s) = result.extract::<String>() {
-                        return Ok(s);
-                    }
-                }
-            }
-        }
-
-        // Try calling __str__ method
-        if let Ok(str_result) = obj_ref.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Fallback to repr
-        Ok(obj_ref.to_string())
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
