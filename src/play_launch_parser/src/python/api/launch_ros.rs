@@ -916,16 +916,27 @@ impl ComposableNode {
             }
         };
 
+        // Normalize namespace to ensure it starts with '/'
+        let node_namespace = self
+            .namespace
+            .clone()
+            .or_else(|| container_namespace.clone())
+            .unwrap_or_else(|| "/".to_string());
+
+        let normalized_namespace = if node_namespace.is_empty() {
+            "/".to_string()
+        } else if node_namespace.starts_with('/') {
+            node_namespace
+        } else {
+            format!("/{}", node_namespace)
+        };
+
         let capture = LoadNodeCapture {
             package: self.package.clone(),
             plugin: self.plugin.clone(),
             target_container_name,
             node_name: self.name.clone(),
-            namespace: self
-                .namespace
-                .clone()
-                .or_else(|| container_namespace.clone())
-                .unwrap_or_else(|| "/".to_string()),
+            namespace: normalized_namespace,
             parameters,
             remappings,
         };

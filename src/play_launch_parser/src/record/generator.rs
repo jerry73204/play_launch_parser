@@ -28,8 +28,26 @@ impl CommandGenerator {
         };
 
         let namespace = if let Some(ns_subs) = &node.namespace {
-            // Node has explicit namespace
-            Some(resolve_substitutions(ns_subs, context)?)
+            // Node has explicit namespace - resolve and normalize it
+            let ns_resolved = resolve_substitutions(ns_subs, context)?;
+
+            // Ensure namespace is absolute (starts with '/') or combine with current namespace
+            let normalized_ns = if ns_resolved.starts_with('/') {
+                // Already absolute
+                ns_resolved
+            } else if ns_resolved.is_empty() {
+                // Empty namespace means use current namespace from context
+                context.current_namespace()
+            } else {
+                // Relative namespace: combine with current namespace from context
+                let current_ns = context.current_namespace();
+                if current_ns == "/" {
+                    format!("/{}", ns_resolved)
+                } else {
+                    format!("{}/{}", current_ns, ns_resolved)
+                }
+            };
+            Some(normalized_ns)
         } else {
             // Use namespace from context (group scoping)
             Some(context.current_namespace())
