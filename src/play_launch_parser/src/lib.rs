@@ -174,9 +174,27 @@ impl LaunchTraverser {
         }
 
         // Extract global parameters from context and merge with include args
+        // IMPORTANT: Resolve substitutions in arg values before adding to global_params
         let mut global_params = self.context.global_parameters();
         for (k, v) in args {
-            global_params.insert(k.clone(), v.clone());
+            // Parse and resolve substitutions in the value
+            let resolved_value = match parse_substitutions(v) {
+                Ok(subs) => match resolve_substitutions(&subs, &self.context) {
+                    Ok(resolved) => {
+                        log::trace!("  Resolved '{}': '{}' -> '{}'", k, v, resolved);
+                        resolved
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to resolve substitutions in '{}': {}", v, e);
+                        v.clone() // Use original value if resolution fails
+                    }
+                },
+                Err(e) => {
+                    log::trace!("No substitutions in '{}': {}", v, e);
+                    v.clone() // No substitutions, use as-is
+                }
+            };
+            global_params.insert(k.clone(), resolved_value);
         }
 
         // Add current ROS namespace for OpaqueFunction to access
