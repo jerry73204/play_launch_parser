@@ -273,6 +273,7 @@ context = MockLaunchContext(launch_configurations, ros_namespace)
 /// ```python
 /// from launch.actions import LogInfo
 /// log_action = LogInfo(msg='Information message')
+/// log_action = LogInfo(msg=['Prefix: ', LaunchConfiguration('var'), ' suffix'])
 /// ```
 ///
 /// Logs an information message when the action is executed
@@ -286,14 +287,62 @@ pub struct LogInfo {
 impl LogInfo {
     #[new]
     #[pyo3(signature = (*, msg, **_kwargs))]
-    fn new(msg: String, _kwargs: Option<&pyo3::types::PyDict>) -> Self {
+    fn new(py: Python, msg: PyObject, _kwargs: Option<&pyo3::types::PyDict>) -> PyResult<Self> {
+        // Convert msg to string (handles strings, lists, LaunchConfiguration, etc.)
+        let msg_str = Self::pyobject_to_string(py, &msg)?;
+
         // Log the message immediately
-        log::info!("Python Launch LogInfo: {}", msg);
-        Self { msg }
+        log::info!("Python Launch LogInfo: {}", msg_str);
+        Ok(Self { msg: msg_str })
     }
 
     fn __repr__(&self) -> String {
         format!("LogInfo(msg='{}')", self.msg)
+    }
+}
+
+impl LogInfo {
+    /// Convert a PyObject to a string (handles both strings and substitutions)
+    /// Same logic as Node::pyobject_to_string
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        use pyo3::types::PyList;
+        let obj_ref = obj.as_ref(py);
+
+        // Try direct string extraction first
+        if let Ok(s) = obj_ref.extract::<String>() {
+            return Ok(s);
+        }
+
+        // Handle lists (concatenate elements)
+        if let Ok(list) = obj_ref.downcast::<PyList>() {
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_str = Self::pyobject_to_string(py, &item.into())?;
+                result.push_str(&item_str);
+            }
+            return Ok(result);
+        }
+
+        // Try calling perform() method (for LaunchConfiguration)
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+
+        // Try calling __str__ method
+        if let Ok(str_result) = obj_ref.call_method0("__str__") {
+            if let Ok(s) = str_result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj_ref.to_string())
     }
 }
 

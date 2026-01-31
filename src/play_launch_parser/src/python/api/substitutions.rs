@@ -400,30 +400,80 @@ impl ThisLaunchFileDir {
 /// ```python
 /// from launch.substitutions import PythonExpression
 /// expr = PythonExpression(["'value1' if condition else 'value2'"])
+/// expr = PythonExpression(["'true' if '", LaunchConfiguration('mode'), "' == 'realtime' else 'false'"])
 /// ```
 ///
-/// Note: Limited support - we just return the expression as-is for now
+/// Note: Limited support - we concatenate and return the expression as-is
 #[pyclass(module = "launch.substitutions")]
 #[derive(Clone)]
 pub struct PythonExpression {
-    expression: Vec<String>,
+    expression: String,
 }
 
 #[pymethods]
 impl PythonExpression {
     #[new]
-    fn new(expression: Vec<String>) -> Self {
-        Self { expression }
+    fn new(py: Python, expression: Vec<PyObject>) -> PyResult<Self> {
+        // Convert each element to string and concatenate
+        let mut result = String::new();
+        for obj in expression {
+            let s = Self::pyobject_to_string(py, &obj)?;
+            result.push_str(&s);
+        }
+        Ok(Self { expression: result })
     }
 
     fn __str__(&self) -> String {
-        // For now, just return the expression joined
-        // In a full implementation, this would evaluate the Python expression
-        self.expression.join("")
+        // Return the concatenated expression
+        self.expression.clone()
     }
 
     fn __repr__(&self) -> String {
         "PythonExpression(...)".to_string()
+    }
+}
+
+impl PythonExpression {
+    /// Convert a PyObject to a string (handles strings and substitutions)
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        use pyo3::types::PyList;
+        let obj_ref = obj.as_ref(py);
+
+        // Try direct string extraction
+        if let Ok(s) = obj_ref.extract::<String>() {
+            return Ok(s);
+        }
+
+        // Handle lists (concatenate)
+        if let Ok(list) = obj_ref.downcast::<PyList>() {
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_str = Self::pyobject_to_string(py, &item.into())?;
+                result.push_str(&item_str);
+            }
+            return Ok(result);
+        }
+
+        // Try perform() for LaunchConfiguration
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+
+        // Try __str__
+        if let Ok(str_result) = obj_ref.call_method0("__str__") {
+            if let Ok(s) = str_result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj_ref.to_string())
     }
 }
 
