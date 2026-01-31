@@ -2221,3 +2221,347 @@ fn test_remap_logging() {
     // 2. Nodes are captured properly
     // 3. The parser handles these actions gracefully
 }
+
+// ============================================================================
+// Phase 15: Python API Type Safety Tests
+// ============================================================================
+
+#[test]
+fn test_set_environment_variable_with_substitutions() {
+    let _guard = python_test_guard();
+
+    // Create temporary launch file with SetEnvironmentVariable using LaunchConfiguration
+    let launch_content = r#"
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('domain_id', default_value='42'),
+        DeclareLaunchArgument('log_level', default_value='INFO'),
+        
+        # Test 1: Plain strings (backward compatibility)
+        SetEnvironmentVariable('PLAIN_VAR', 'plain_value'),
+        
+        # Test 2: Single substitution
+        SetEnvironmentVariable('ROS_DOMAIN_ID', LaunchConfiguration('domain_id')),
+        
+        # Test 3: List with mixed types
+        SetEnvironmentVariable('ROS_LOG_LEVEL', [LaunchConfiguration('log_level')]),
+        
+        # Test Node to verify parsing completes
+        Node(
+            package='demo_nodes_cpp',
+            executable='talker',
+            name='test_node'
+        ),
+    ])
+"#;
+
+    let temp_file = std::env::temp_dir().join("test_set_env_var.launch.py");
+    std::fs::write(&temp_file, launch_content).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&temp_file, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing should succeed with LaunchConfiguration in SetEnvironmentVariable: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify node was captured
+    assert!(json["node"].is_array());
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    std::fs::remove_file(&temp_file).ok();
+}
+
+#[test]
+fn test_append_environment_variable_with_substitutions() {
+    let _guard = python_test_guard();
+
+    let launch_content = r#"
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, AppendEnvironmentVariable
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('custom_path', default_value='/custom/path'),
+        DeclareLaunchArgument('path_sep', default_value=':'),
+        DeclareLaunchArgument('should_prepend', default_value='false'),
+        
+        # Test 1: Plain strings
+        AppendEnvironmentVariable('PATH', '/usr/local/bin'),
+        
+        # Test 2: Substitution for value
+        AppendEnvironmentVariable('PYTHONPATH', LaunchConfiguration('custom_path')),
+        
+        # Test 3: Substitution for separator
+        AppendEnvironmentVariable('LD_LIBRARY_PATH', '/lib', separator=LaunchConfiguration('path_sep')),
+        
+        # Test 4: Substitution for prepend (bool from string)
+        AppendEnvironmentVariable('PATH', '/prepend/path', prepend=LaunchConfiguration('should_prepend')),
+        
+        # Test Node to verify parsing completes
+        Node(
+            package='demo_nodes_cpp',
+            executable='listener',
+            name='test_listener'
+        ),
+    ])
+"#;
+
+    let temp_file = std::env::temp_dir().join("test_append_env_var.launch.py");
+    std::fs::write(&temp_file, launch_content).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&temp_file, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing should succeed with substitutions in AppendEnvironmentVariable: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify node was captured
+    assert!(json["node"].is_array());
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    std::fs::remove_file(&temp_file).ok();
+}
+
+#[test]
+fn test_execute_process_with_substitutions() {
+    let _guard = python_test_guard();
+
+    let launch_content = r#"
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('package_name', default_value='demo_nodes_cpp'),
+        DeclareLaunchArgument('node_name', default_value='talker'),
+        
+        # Test 1: Plain strings
+        ExecuteProcess(cmd=['echo', 'hello']),
+        
+        # Test 2: Mixed strings and substitutions in cmd
+        ExecuteProcess(
+            cmd=['ros2', 'run', LaunchConfiguration('package_name'), LaunchConfiguration('node_name')]
+        ),
+        
+        # Test Node to verify parsing completes
+        Node(
+            package='demo_nodes_cpp',
+            executable='talker',
+            name='test_process_node'
+        ),
+    ])
+"#;
+
+    let temp_file = std::env::temp_dir().join("test_execute_process.launch.py");
+    std::fs::write(&temp_file, launch_content).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&temp_file, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing should succeed with substitutions in ExecuteProcess: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify node was captured
+    assert!(json["node"].is_array());
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    std::fs::remove_file(&temp_file).ok();
+}
+
+#[test]
+fn test_node_arguments_with_substitutions() {
+    let _guard = python_test_guard();
+
+    let launch_content = r#"
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('config_file', default_value='/tmp/config.yaml'),
+        DeclareLaunchArgument('log_level', default_value='info'),
+        
+        # Test 1: Plain string arguments
+        Node(
+            package='demo_nodes_cpp',
+            executable='talker',
+            name='plain_args_node',
+            arguments=['--ros-args', '--log-level', 'warn']
+        ),
+        
+        # Test 2: Arguments with substitutions
+        Node(
+            package='demo_nodes_cpp',
+            executable='listener',
+            name='sub_args_node',
+            arguments=['--config', LaunchConfiguration('config_file'), '--verbose']
+        ),
+        
+        # Test 3: Mixed arguments
+        Node(
+            package='demo_nodes_cpp',
+            executable='talker',
+            name='mixed_args_node',
+            arguments=[
+                '--log-level',
+                LaunchConfiguration('log_level'),
+                '--extra-flag'
+            ]
+        ),
+    ])
+"#;
+
+    let temp_file = std::env::temp_dir().join("test_node_arguments.launch.py");
+    std::fs::write(&temp_file, launch_content).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&temp_file, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing should succeed with substitutions in Node arguments: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify all nodes were captured
+    assert!(json["node"].is_array());
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 3, "Should have 3 nodes");
+
+    // Find each node and verify they have arguments
+    let plain_node = nodes
+        .iter()
+        .find(|n| n["name"] == "plain_args_node")
+        .unwrap();
+    assert!(
+        plain_node["args"].is_array(),
+        "plain_args_node should have args"
+    );
+
+    let sub_node = nodes.iter().find(|n| n["name"] == "sub_args_node").unwrap();
+    assert!(
+        sub_node["args"].is_array(),
+        "sub_args_node should have args"
+    );
+
+    let mixed_node = nodes
+        .iter()
+        .find(|n| n["name"] == "mixed_args_node")
+        .unwrap();
+    assert!(
+        mixed_node["args"].is_array(),
+        "mixed_args_node should have args"
+    );
+
+    std::fs::remove_file(&temp_file).ok();
+}
+
+#[test]
+fn test_phase_15_combined() {
+    let _guard = python_test_guard();
+
+    // Comprehensive test combining all Phase 15 fixes
+    let launch_content = r#"
+from launch import LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    SetEnvironmentVariable,
+    AppendEnvironmentVariable,
+    ExecuteProcess
+)
+from launch_ros.actions import Node
+from launch.substitutions import LaunchConfiguration
+
+def generate_launch_description():
+    return LaunchDescription([
+        # Declare arguments
+        DeclareLaunchArgument('domain_id', default_value='42'),
+        DeclareLaunchArgument('workspace', default_value='/opt/ros/humble'),
+        DeclareLaunchArgument('config_path', default_value='/etc/config.yaml'),
+        
+        # SetEnvironmentVariable with substitutions
+        SetEnvironmentVariable('ROS_DOMAIN_ID', LaunchConfiguration('domain_id')),
+        
+        # AppendEnvironmentVariable with substitutions
+        AppendEnvironmentVariable(
+            'CMAKE_PREFIX_PATH',
+            LaunchConfiguration('workspace'),
+            separator=':'
+        ),
+        
+        # ExecuteProcess with substitutions
+        ExecuteProcess(
+            cmd=['echo', 'Using config:', LaunchConfiguration('config_path')]
+        ),
+        
+        # Node with argument substitutions
+        Node(
+            package='demo_nodes_cpp',
+            executable='talker',
+            name='comprehensive_test_node',
+            arguments=['--config', LaunchConfiguration('config_path')]
+        ),
+    ])
+"#;
+
+    let temp_file = std::env::temp_dir().join("test_phase_15_combined.launch.py");
+    std::fs::write(&temp_file, launch_content).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&temp_file, args);
+
+    assert!(
+        result.is_ok(),
+        "Combined Phase 15 test should succeed: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify node was captured
+    assert!(json["node"].is_array());
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1, "Should have 1 node");
+
+    let node = &nodes[0];
+    assert_eq!(node["name"].as_str().unwrap(), "comprehensive_test_node");
+    assert!(node["args"].is_array(), "Node should have args");
+
+    std::fs::remove_file(&temp_file).ok();
+}

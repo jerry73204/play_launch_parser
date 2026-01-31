@@ -68,7 +68,7 @@ impl Node {
         namespace: Option<PyObject>,
         parameters: Option<Vec<PyObject>>,
         remappings: Option<Vec<PyObject>>,
-        arguments: Option<Vec<String>>,
+        arguments: Option<Vec<PyObject>>,
         env: Option<Vec<(String, String)>>,
         condition: Option<PyObject>,
         _kwargs: Option<&PyDict>,
@@ -98,6 +98,15 @@ impl Node {
             })
             .transpose()?;
 
+        // Convert arguments from Vec<PyObject> to Vec<String>
+        let arguments_vec = if let Some(args) = arguments {
+            args.iter()
+                .map(|obj| Self::pyobject_to_string(py, obj))
+                .collect::<Result<Vec<String>, _>>()?
+        } else {
+            Vec::new()
+        };
+
         log::debug!("Node::new: name={:?}, namespace={:?}", name, namespace);
 
         let node = Self {
@@ -107,7 +116,7 @@ impl Node {
             namespace: namespace.clone(),
             parameters: parameters.unwrap_or_default(),
             remappings: remappings.unwrap_or_default(),
-            arguments: arguments.unwrap_or_default(),
+            arguments: arguments_vec,
             env_vars: env.unwrap_or_default(),
             condition: condition.clone(),
         };

@@ -352,6 +352,8 @@ impl LogInfo {
 /// ```python
 /// from launch.actions import SetEnvironmentVariable
 /// set_env = SetEnvironmentVariable('VAR_NAME', 'value')
+/// set_env = SetEnvironmentVariable('VAR_NAME', LaunchConfiguration('var'))
+/// set_env = SetEnvironmentVariable('VAR_NAME', [LaunchConfiguration('prefix'), '/suffix'])
 /// ```
 ///
 /// Sets an environment variable
@@ -365,14 +367,69 @@ pub struct SetEnvironmentVariable {
 #[pymethods]
 impl SetEnvironmentVariable {
     #[new]
-    fn new(name: String, value: String) -> Self {
-        // TODO: Actually set the environment variable in the launch context
-        log::debug!("Python Launch SetEnvironmentVariable: {}={}", name, value);
-        Self { name, value }
+    fn new(py: Python, name: PyObject, value: PyObject) -> PyResult<Self> {
+        // Convert PyObjects to strings (handles strings, substitutions, and lists)
+        let name_str = Self::pyobject_to_string(py, &name)?;
+        let value_str = Self::pyobject_to_string(py, &value)?;
+
+        log::debug!(
+            "Python Launch SetEnvironmentVariable: {}={}",
+            name_str,
+            value_str
+        );
+        Ok(Self {
+            name: name_str,
+            value: value_str,
+        })
     }
 
     fn __repr__(&self) -> String {
         format!("SetEnvironmentVariable('{}', '{}')", self.name, self.value)
+    }
+}
+
+impl SetEnvironmentVariable {
+    /// Convert a PyObject to a string (handles strings, substitutions, and lists)
+    /// Reuses the same pattern as LogInfo
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        use pyo3::types::PyList;
+        let obj_ref = obj.as_ref(py);
+
+        // Try direct string extraction first
+        if let Ok(s) = obj_ref.extract::<String>() {
+            return Ok(s);
+        }
+
+        // Handle lists (concatenate elements)
+        if let Ok(list) = obj_ref.downcast::<PyList>() {
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_str = Self::pyobject_to_string(py, &item.into())?;
+                result.push_str(&item_str);
+            }
+            return Ok(result);
+        }
+
+        // Try calling perform() method (for LaunchConfiguration)
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+
+        // Try calling __str__ method
+        if let Ok(str_result) = obj_ref.call_method0("__str__") {
+            if let Ok(s) = str_result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj_ref.to_string())
     }
 }
 
@@ -461,6 +518,11 @@ impl GroupAction {
 ///     name='process_name',
 ///     output='screen'
 /// )
+/// # With substitutions:
+/// proc = ExecuteProcess(
+///     cmd=['ros2', 'run', LaunchConfiguration('package'), 'node'],
+///     cwd=[FindPackageShare('my_pkg'), '/dir']
+/// )
 /// ```
 ///
 /// Executes a non-ROS process
@@ -481,24 +543,85 @@ impl ExecuteProcess {
     #[new]
     #[pyo3(signature = (*, cmd, cwd=None, name=None, output=None, **_kwargs))]
     fn new(
-        cmd: Vec<String>,
-        cwd: Option<String>,
-        name: Option<String>,
+        py: Python,
+        cmd: Vec<PyObject>,
+        cwd: Option<PyObject>,
+        name: Option<PyObject>,
         output: Option<String>,
         _kwargs: Option<&pyo3::types::PyDict>,
-    ) -> Self {
-        // TODO: Capture this as an ExecutableRecord
-        log::debug!("Python Launch ExecuteProcess: {:?}", cmd);
-        Self {
-            cmd,
-            cwd,
-            name,
+    ) -> PyResult<Self> {
+        // Convert cmd elements to strings
+        let cmd_strs: Result<Vec<String>, _> = cmd
+            .iter()
+            .map(|obj| Self::pyobject_to_string(py, obj))
+            .collect();
+        let cmd_vec = cmd_strs?;
+
+        let cwd_str = cwd
+            .map(|obj| Self::pyobject_to_string(py, &obj))
+            .transpose()?;
+
+        let name_str = name
+            .map(|obj| Self::pyobject_to_string(py, &obj))
+            .transpose()?;
+
+        log::debug!("Python Launch ExecuteProcess: {:?}", cmd_vec);
+
+        Ok(Self {
+            cmd: cmd_vec,
+            cwd: cwd_str,
+            name: name_str,
             output: output.unwrap_or_else(|| "screen".to_string()),
-        }
+        })
     }
 
     fn __repr__(&self) -> String {
         format!("ExecuteProcess(cmd={:?})", self.cmd)
+    }
+}
+
+impl ExecuteProcess {
+    /// Convert a PyObject to a string (handles strings, substitutions, and lists)
+    /// Reuses the same pattern as SetEnvironmentVariable
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        use pyo3::types::PyList;
+        let obj_ref = obj.as_ref(py);
+
+        // Try direct string extraction first
+        if let Ok(s) = obj_ref.extract::<String>() {
+            return Ok(s);
+        }
+
+        // Handle lists (concatenate elements)
+        if let Ok(list) = obj_ref.downcast::<PyList>() {
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_str = Self::pyobject_to_string(py, &item.into())?;
+                result.push_str(&item_str);
+            }
+            return Ok(result);
+        }
+
+        // Try calling perform() method (for LaunchConfiguration)
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+
+        // Try calling __str__ method
+        if let Ok(str_result) = obj_ref.call_method0("__str__") {
+            if let Ok(s) = str_result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj_ref.to_string())
     }
 }
 
@@ -990,6 +1113,7 @@ impl ResetEnvironment {
 /// from launch.actions import AppendEnvironmentVariable
 /// AppendEnvironmentVariable('PATH', '/custom/path')
 /// AppendEnvironmentVariable('LD_LIBRARY_PATH', '/custom/lib', prepend=True, separator=':')
+/// AppendEnvironmentVariable(LaunchConfiguration('var_name'), '/path', separator=LaunchConfiguration('sep'))
 /// ```
 ///
 /// Appends (or prepends) a value to an existing environment variable.
@@ -1007,21 +1131,42 @@ pub struct AppendEnvironmentVariable {
 #[pymethods]
 impl AppendEnvironmentVariable {
     #[new]
-    #[pyo3(signature = (name, value, *, prepend=false, separator=":", **_kwargs))]
+    #[pyo3(signature = (name, value, *, prepend=None, separator=None, **_kwargs))]
     fn new(
         py: Python,
-        name: String,
+        name: PyObject,
         value: PyObject,
-        prepend: Option<bool>,
-        separator: Option<&str>,
+        prepend: Option<PyObject>,
+        separator: Option<PyObject>,
         _kwargs: Option<&pyo3::types::PyDict>,
-    ) -> Self {
-        let prepend_val = prepend.unwrap_or(false);
-        let sep_val = separator.unwrap_or(":").to_string();
+    ) -> PyResult<Self> {
+        // Convert name to string (handles strings, substitutions, and lists)
+        let name_str = Self::pyobject_to_string(py, &name)?;
+
+        // Handle prepend (bool or substitution resolving to bool)
+        let prepend_val = if let Some(p) = prepend {
+            if let Ok(b) = p.extract::<bool>(py) {
+                b
+            } else if let Ok(s) = Self::pyobject_to_string(py, &p) {
+                // Parse string as bool (YAML rules: true, True, yes, 1, etc.)
+                matches!(s.to_lowercase().as_str(), "true" | "yes" | "1")
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // Handle separator (default to ":")
+        let sep_str = if let Some(s) = separator {
+            Self::pyobject_to_string(py, &s)?
+        } else {
+            ":".to_string()
+        };
 
         // Convert PyObject to string for logging
         let value_str = if let Ok(s) = value.extract::<String>(py) {
-            s
+            s.clone()
         } else if let Ok(str_result) = value.call_method0(py, "__str__") {
             str_result
                 .extract::<String>(py)
@@ -1038,16 +1183,16 @@ impl AppendEnvironmentVariable {
                 "appending "
             },
             value_str,
-            sep_val,
-            name
+            sep_str,
+            name_str
         );
 
-        Self {
-            name,
+        Ok(Self {
+            name: name_str,
             value,
             prepend: prepend_val,
-            separator: sep_val,
-        }
+            separator: sep_str,
+        })
     }
 
     fn __repr__(&self, py: Python) -> String {
@@ -1065,6 +1210,51 @@ impl AppendEnvironmentVariable {
             "AppendEnvironmentVariable('{}', '{}', prepend={}, separator='{}')",
             self.name, value_str, self.prepend, self.separator
         )
+    }
+}
+
+impl AppendEnvironmentVariable {
+    /// Convert a PyObject to a string (handles strings, substitutions, and lists)
+    /// Reuses the same pattern as SetEnvironmentVariable
+    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
+        use pyo3::types::PyList;
+        let obj_ref = obj.as_ref(py);
+
+        // Try direct string extraction first
+        if let Ok(s) = obj_ref.extract::<String>() {
+            return Ok(s);
+        }
+
+        // Handle lists (concatenate elements)
+        if let Ok(list) = obj_ref.downcast::<PyList>() {
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_str = Self::pyobject_to_string(py, &item.into())?;
+                result.push_str(&item_str);
+            }
+            return Ok(result);
+        }
+
+        // Try calling perform() method (for LaunchConfiguration)
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = py.eval("type('Context', (), {})()", None, None) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(s) = result.extract::<String>() {
+                        return Ok(s);
+                    }
+                }
+            }
+        }
+
+        // Try calling __str__ method
+        if let Ok(str_result) = obj_ref.call_method0("__str__") {
+            if let Ok(s) = str_result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+
+        // Fallback to repr
+        Ok(obj_ref.to_string())
     }
 }
 
