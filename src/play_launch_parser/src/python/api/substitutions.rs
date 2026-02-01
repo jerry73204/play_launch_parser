@@ -2,7 +2,96 @@
 
 #![allow(non_local_definitions)] // pyo3 macros generate non-local impls
 
-use pyo3::prelude::*;
+use pyo3::{prelude::*, types::PyDict};
+
+// ============================================================================
+// Helper Functions for Context Management
+// ============================================================================
+
+/// Create a LaunchContext populated with data from Python context
+///
+/// Extracts the `launch_configurations` dictionary from the Python context
+/// and populates a Rust LaunchContext with the values. This enables proper
+/// resolution of nested substitutions like `$(var other_var)`.
+///
+/// # Arguments
+/// * `py_context` - Python context object (MockLaunchContext)
+///
+/// # Returns
+/// * `PyResult<LaunchContext>` - Populated Rust context or error
+///
+/// # Example
+/// ```ignore
+/// let ctx = create_context_from_python(py_context)?;
+/// let value = ctx.get_configuration("my_var");
+/// ```
+fn create_context_from_python(
+    py_context: &PyAny,
+) -> PyResult<crate::substitution::context::LaunchContext> {
+    use crate::substitution::context::LaunchContext;
+
+    // Extract launch_configurations from Python context
+    let launch_configs = py_context
+        .getattr("launch_configurations")?
+        .downcast::<PyDict>()?;
+
+    // Create Rust context
+    let mut ctx = LaunchContext::new();
+
+    // Populate with launch configurations
+    for (key, value) in launch_configs.iter() {
+        let key_str: String = key.extract()?;
+        let value_str: String = value.extract()?;
+        ctx.set_configuration(key_str, value_str);
+    }
+
+    // TODO: Also extract and populate:
+    // - Environment variables (if needed beyond std::env)
+    // - ROS namespace stack
+    // - Global parameters
+
+    Ok(ctx)
+}
+
+/// Parse and resolve substitution string with micro-optimization
+///
+/// Parses a string that may contain substitution syntax like `$(var name)` or
+/// `$(find-pkg-share pkg)/path` and resolves it using the provided context.
+/// Includes micro-optimization to skip parsing if no substitution syntax present.
+///
+/// # Arguments
+/// * `value` - String that may contain substitution syntax
+/// * `context` - LaunchContext with variable bindings
+///
+/// # Returns
+/// * `Result<String, SubstitutionError>` - Resolved string or error
+///
+/// # Example
+/// ```ignore
+/// let ctx = LaunchContext::new();
+/// ctx.set_configuration("pkg", "my_package");
+/// let result = resolve_substitution_string("$(var pkg)/config", &ctx)?;
+/// // result == "my_package/config"
+/// ```
+fn resolve_substitution_string(
+    value: &str,
+    context: &crate::substitution::context::LaunchContext,
+) -> Result<String, String> {
+    use crate::substitution::{parser::parse_substitutions, types::resolve_substitutions};
+
+    // Micro-optimization: skip parsing if no substitution syntax
+    if !value.contains("$(") {
+        return Ok(value.to_string());
+    }
+
+    // Parse and resolve
+    let subs = parse_substitutions(value).map_err(|e| format!("Parse error: {}", e))?;
+    resolve_substitutions(&subs, context).map_err(|e| format!("Resolution error: {}", e))
+}
+
+// ============================================================================
+// Mock Substitution Classes
+// ============================================================================
 
 /// Mock LaunchConfiguration substitution
 ///
@@ -47,19 +136,33 @@ impl LaunchConfiguration {
     /// Perform the substitution - extract the actual value from launch configurations
     ///
     /// In ROS 2, this method is called with a launch context to resolve the value.
-    /// We use our global LAUNCH_CONFIGURATIONS storage instead.
-    fn perform(&self, _context: &PyAny) -> PyResult<String> {
+    /// We extract the Python context to get launch_configurations and resolve any
+    /// nested substitutions using a populated Rust LaunchContext.
+    fn perform(&self, context: &PyAny) -> PyResult<String> {
         use crate::python::bridge::LAUNCH_CONFIGURATIONS;
 
+        // Get value from LAUNCH_CONFIGURATIONS
         let configs = LAUNCH_CONFIGURATIONS.lock();
-        let result = if let Some(value) = configs.get(&self.variable_name) {
-            value.clone()
+        let value = if let Some(v) = configs.get(&self.variable_name) {
+            v.clone()
         } else if let Some(ref default) = self.default {
             default.clone()
         } else {
             // Return empty string if not found (ROS 2 behavior)
             String::new()
         };
+        drop(configs); // Release lock early
+
+        // Create Rust context from Python context
+        let rust_context = create_context_from_python(context)?;
+
+        // Resolve any nested substitutions
+        let result = resolve_substitution_string(&value, &rust_context).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Failed to resolve substitutions in '{}': {}",
+                value, e
+            ))
+        })?;
 
         log::debug!(
             "LaunchConfiguration('{}').perform() -> '{}'",

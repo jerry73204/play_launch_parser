@@ -131,21 +131,77 @@ impl OpaqueFunction {
 
             log::debug!("OpaqueFunction context: ros_namespace='{}'", ros_namespace);
 
+            // Helper function to resolve substitution strings from Rust
+            #[pyfunction]
+            fn resolve_substitution_string(sub_string: String) -> PyResult<String> {
+                use crate::substitution::{
+                    context::LaunchContext, parser::parse_substitutions,
+                    types::resolve_substitutions,
+                };
+
+                // Parse the substitution string (e.g., "$(find-pkg-share pkg)/path")
+                let subs = parse_substitutions(&sub_string).map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "Failed to parse substitution: {}",
+                        e
+                    ))
+                })?;
+
+                // Resolve the substitutions
+                let ctx = LaunchContext::new();
+                resolve_substitutions(&subs, &ctx).map_err(|e| {
+                    pyo3::exceptions::PyFileNotFoundError::new_err(format!(
+                        "Failed to resolve substitution '{}': {}",
+                        sub_string, e
+                    ))
+                })
+            }
+
             // Create a context dict with launch_configurations and ros_namespace
             let context_code = r#"
 class MockLaunchContext:
-    def __init__(self, launch_configurations, ros_namespace):
+    def __init__(self, launch_configurations, ros_namespace, resolve_sub_fn):
         self.launch_configurations = launch_configurations
         # Store ros_namespace for OpaqueFunction access (e.g. context.launch_configurations.get('ros_namespace'))
         self.launch_configurations['ros_namespace'] = ros_namespace
+        self.resolve_sub_fn = resolve_sub_fn
 
     def perform_substitution(self, sub):
         # Support LaunchConfiguration.perform(context)
         if hasattr(sub, 'variable_name'):
-            return self.launch_configurations.get(sub.variable_name, '')
+            value = self.launch_configurations.get(sub.variable_name, '')
+            # If the value contains substitution syntax like $(...), resolve it
+            if isinstance(value, str) and '$(' in value:
+                try:
+                    return self.resolve_sub_fn(value)
+                except Exception as e:
+                    # If resolution fails, return the original value
+                    pass
+            return value
+
+        # Support FindPackageShare.perform(context)
+        if hasattr(sub, 'package_name'):
+            # Get the package name (might be a string or another substitution)
+            package_name = sub.package_name
+            if hasattr(package_name, 'perform'):
+                package_name = package_name.perform(self)
+            elif hasattr(package_name, '__iter__') and not isinstance(package_name, str):
+                # It's a list of substitutions
+                package_name = ''.join(str(self.perform_substitution(s)) for s in package_name)
+            else:
+                package_name = str(package_name)
+
+            # Resolve using Rust function (construct a find-pkg-share substitution string)
+            try:
+                sub_str = f"$(find-pkg-share {package_name})"
+                return self.resolve_sub_fn(sub_str)
+            except Exception as e:
+                # Fallback to string representation if resolution fails
+                return str(sub)
+
         return str(sub)
 
-context = MockLaunchContext(launch_configurations, ros_namespace)
+context = MockLaunchContext(launch_configurations, ros_namespace, resolve_substitution_string)
 "#;
 
             // Use __main__.dict() as namespace - this is the same namespace used by exec()
@@ -162,6 +218,10 @@ context = MockLaunchContext(launch_configurations, ros_namespace)
 
             // Add ros_namespace to namespace
             namespace.set_item("ros_namespace", ros_namespace)?;
+
+            // Add the Rust substitution resolution function to namespace
+            let resolve_fn = wrap_pyfunction!(resolve_substitution_string, py)?;
+            namespace.set_item("resolve_substitution_string", resolve_fn)?;
 
             // Add Python builtins that OpaqueFunction might need
             // Import Path for file operations

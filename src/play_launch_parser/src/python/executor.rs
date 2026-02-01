@@ -184,10 +184,76 @@ if not _ok:
             // Visit all entities in the launch description
             visit_launch_description(py, &launch_desc)?;
 
+            // Re-resolve any containers/load_nodes with unresolved substitutions
+            // This handles cases where containers are created before DeclareLaunchArgument
+            process_launch_arguments(py, &launch_desc)?;
+
             log::debug!("Python launch file execution complete");
             Ok(())
         })
     }
+}
+
+/// Process launch arguments and re-resolve any containers with unresolved names
+fn process_launch_arguments(_py: Python, _launch_desc: &PyObject) -> PyResult<()> {
+    use crate::{
+        python::bridge::{CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES, LAUNCH_CONFIGURATIONS},
+        substitution::{
+            context::LaunchContext, parser::parse_substitutions, types::resolve_substitutions,
+        },
+    };
+
+    // Create a LaunchContext from current LAUNCH_CONFIGURATIONS
+    let configs = LAUNCH_CONFIGURATIONS.lock();
+    let mut ctx = LaunchContext::new();
+    for (key, value) in configs.iter() {
+        ctx.set_configuration(key.clone(), value.clone());
+    }
+    drop(configs);
+
+    // Re-resolve container names that contain unresolved substitutions
+    let mut containers = CAPTURED_CONTAINERS.lock();
+    for container in containers.iter_mut() {
+        if container.name.contains("$(") {
+            log::debug!(
+                "Re-resolving container name '{}' with updated context",
+                container.name
+            );
+            if let Ok(subs) = parse_substitutions(&container.name) {
+                if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                    log::debug!("Container name '{}' -> '{}'", container.name, resolved);
+                    container.name = resolved;
+                }
+            }
+        }
+    }
+    drop(containers);
+
+    // Re-resolve target_container_name in load_nodes
+    let mut load_nodes = CAPTURED_LOAD_NODES.lock();
+    for load_node in load_nodes.iter_mut() {
+        if load_node.target_container_name.contains("$(") {
+            log::debug!(
+                "Re-resolving target_container_name '{}' for node '{}'",
+                load_node.target_container_name,
+                load_node.node_name
+            );
+            if let Ok(subs) = parse_substitutions(&load_node.target_container_name) {
+                if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                    log::debug!(
+                        "Target container '{}' -> '{}' for node '{}'",
+                        load_node.target_container_name,
+                        resolved,
+                        load_node.node_name
+                    );
+                    load_node.target_container_name = resolved;
+                }
+            }
+        }
+    }
+    drop(load_nodes);
+
+    Ok(())
 }
 
 /// Visit all entities in a launch description

@@ -35,7 +35,7 @@ def generate_launch_description():
     param_file_arg = DeclareLaunchArgument(
         'param_file',
         default_value=[
-            FindPackageShare('test_package'),
+            FindPackageShare('demo_nodes_cpp'),
             '/config/params.yaml'
         ],
         description='Parameter file path'

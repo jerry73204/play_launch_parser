@@ -493,8 +493,19 @@ impl ComposableNodeContainer {
         let composable_nodes = composable_node_descriptions.unwrap_or_default();
 
         // Convert PyObject parameters to strings (may be substitutions)
+        // For name and namespace, resolve substitutions if present
         log::debug!("ComposableNodeContainer::new: creating container");
-        let name_str = Self::pyobject_to_string(py, &name)?;
+
+        // Resolve name substitution
+        let name_before = Self::pyobject_to_string(py, &name)?;
+        let name_str = Self::resolve_pyobject_substitution(py, &name)?;
+        if name_before != name_str {
+            log::debug!(
+                "ComposableNodeContainer name resolved: '{}' -> '{}'",
+                name_before,
+                name_str
+            );
+        }
 
         // Debug: Log if name is empty
         if name_str.is_empty() {
@@ -506,10 +517,11 @@ impl ComposableNodeContainer {
             );
         }
 
+        // Resolve namespace substitution
         let namespace_str = namespace
             .map(|ns| {
                 log::debug!("ComposableNodeContainer::new: processing namespace parameter");
-                Self::pyobject_to_string(py, &ns)
+                Self::resolve_pyobject_substitution(py, &ns)
             })
             .transpose()?;
         let package_str = Self::pyobject_to_string(py, &package)?;
@@ -572,6 +584,44 @@ impl ComposableNodeContainer {
 }
 
 impl ComposableNodeContainer {
+    /// Resolve a PyObject substitution by calling perform() if available
+    ///
+    /// For substitutions like LaunchConfiguration, this calls perform() to get the resolved value.
+    /// For lists, recursively resolves each element.
+    /// Otherwise falls back to pyobject_to_string.
+    fn resolve_pyobject_substitution(py: Python, obj: &PyObject) -> PyResult<String> {
+        use crate::python::api::utils::create_launch_context;
+        use pyo3::types::PyList;
+
+        let obj_ref = obj.as_ref(py);
+
+        // Handle lists specially - resolve each element
+        if let Ok(list) = obj_ref.downcast::<PyList>() {
+            let mut result = String::new();
+            for item in list.iter() {
+                let item_resolved = Self::resolve_pyobject_substitution(py, &item.into())?;
+                result.push_str(&item_resolved);
+            }
+            log::debug!("Resolved list substitution: '{}'", result);
+            return Ok(result);
+        }
+
+        // Try to resolve using perform() with real context
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = create_launch_context(py) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(resolved) = result.extract::<String>() {
+                        log::debug!("Resolved substitution via perform(): '{}'", resolved);
+                        return Ok(resolved);
+                    }
+                }
+            }
+        }
+
+        // Fallback to regular conversion
+        Self::pyobject_to_string(py, obj)
+    }
+
     fn capture_container(container: &ComposableNodeContainer) {
         use crate::python::bridge::get_current_ros_namespace;
 
@@ -1769,14 +1819,17 @@ impl LoadComposableNodes {
             None
         };
 
+        // Use the resolved value if available, otherwise fall back to the unresolved name
+        let final_name = resolved_value.unwrap_or(name.clone());
+
         log::debug!(
-            "Target container: '{}' (resolved: {:?}), extracted namespace: {:?}",
+            "Target container: '{}' (original: '{}'), extracted namespace: {:?}",
+            final_name,
             name,
-            resolved_value,
             namespace
         );
 
-        Ok((name, namespace))
+        Ok((final_name, namespace))
     }
 
     /// Normalize namespace + name into a proper path

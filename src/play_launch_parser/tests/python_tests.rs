@@ -714,8 +714,8 @@ fn test_python_load_composable_nodes() {
     assert_eq!(containers.len(), 1, "Should have 1 container");
 
     let container = &containers[0];
-    // Container name uses LaunchConfiguration, so should be preserved as substitution
-    assert_eq!(container["name"].as_str().unwrap(), "$(var container_name)");
+    // Container name uses LaunchConfiguration, which Python resolves to the actual value
+    assert_eq!(container["name"].as_str().unwrap(), "test_container");
     assert_eq!(container["namespace"].as_str().unwrap(), "/test");
 
     // Check load_nodes
@@ -746,10 +746,10 @@ fn test_python_load_composable_nodes() {
     assert!(initial_node.is_some(), "Should have initial_node");
     let initial_node = initial_node.unwrap();
     // target_container_name is constructed from container namespace + name
-    // The container name is LaunchConfiguration, so this becomes a substitution
+    // Python resolves LaunchConfiguration to actual value
     assert_eq!(
         initial_node["target_container_name"].as_str().unwrap(),
-        "/test/$(var container_name)"
+        "/test/test_container"
     );
     assert_eq!(initial_node["namespace"].as_str().unwrap(), "/test");
 
@@ -759,11 +759,11 @@ fn test_python_load_composable_nodes() {
         .find(|n| n["node_name"].as_str() == Some("dynamic_node_1"));
     assert!(dynamic_node_1.is_some(), "Should have dynamic_node_1");
     let dynamic_node_1 = dynamic_node_1.unwrap();
-    // LoadComposableNodes.target_container now correctly preserves the LaunchConfiguration substitution
+    // LoadComposableNodes.target_container resolves LaunchConfiguration to actual value (Python behavior)
     assert_eq!(
         dynamic_node_1["target_container_name"].as_str().unwrap(),
-        "$(var full_container_path)",
-        "target_container with LaunchConfiguration should be preserved as substitution"
+        "/test/test_container",
+        "target_container with LaunchConfiguration should be resolved to actual value"
     );
     assert_eq!(dynamic_node_1["namespace"].as_str().unwrap(), "/test");
     assert_eq!(dynamic_node_1["package"].as_str().unwrap(), "dynamic_pkg1");
@@ -776,8 +776,8 @@ fn test_python_load_composable_nodes() {
     let dynamic_node_2 = dynamic_node_2.unwrap();
     assert_eq!(
         dynamic_node_2["target_container_name"].as_str().unwrap(),
-        "$(var full_container_path)",
-        "target_container with LaunchConfiguration should be preserved as substitution"
+        "/test/test_container",
+        "target_container with LaunchConfiguration should be resolved to actual value"
     );
     assert_eq!(dynamic_node_2["namespace"].as_str().unwrap(), "/custom_ns");
 
