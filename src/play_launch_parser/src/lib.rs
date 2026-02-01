@@ -1121,6 +1121,7 @@ impl LaunchTraverser {
             load_node: self.load_nodes,
             lifecycle_node: Vec::new(),
             file_data: HashMap::new(),
+            variables: self.context.configurations(),
         }
     }
 

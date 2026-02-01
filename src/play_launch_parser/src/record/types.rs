@@ -12,6 +12,10 @@ pub struct RecordJson {
     pub lifecycle_node: Vec<String>,
     pub load_node: Vec<LoadNodeRecord>,
     pub node: Vec<NodeRecord>,
+    /// Launch configuration variables (e.g., from DeclareLaunchArgument or CLI args)
+    /// Maps variable names to their resolved values
+    #[serde(default)]
+    pub variables: HashMap<String, String>,
 }
 
 impl RecordJson {
@@ -22,6 +26,7 @@ impl RecordJson {
             lifecycle_node: Vec::new(),
             load_node: Vec::new(),
             node: Vec::new(),
+            variables: HashMap::new(),
         }
     }
 
@@ -106,6 +111,7 @@ mod tests {
         assert_eq!(record.load_node.len(), 0);
         assert_eq!(record.lifecycle_node.len(), 0);
         assert_eq!(record.file_data.len(), 0);
+        assert_eq!(record.variables.len(), 0);
     }
 
     #[test]
@@ -117,6 +123,7 @@ mod tests {
         assert!(json.contains("\"load_node\""));
         assert!(json.contains("\"lifecycle_node\""));
         assert!(json.contains("\"file_data\""));
+        assert!(json.contains("\"variables\""));
     }
 
     #[test]
