@@ -344,22 +344,19 @@ impl Node {
 
     /// Extract a parameter value from a Python object
     ///
-    /// Handles: str, int, float, bool, and objects with __str__
+    /// Handles: str, int, float, bool, substitutions (including PythonExpression), and objects with __str__
     fn extract_param_value(value: &PyAny) -> PyResult<String> {
+        use pyo3::types::{PyBool, PyList};
+
         // Try direct string extraction
         if let Ok(s) = value.extract::<String>() {
             return Ok(s);
         }
 
         // Try boolean BEFORE integer (Python bools are subclass of int)
-        // Use is_instance to check specifically for bool type
-        if value.is_instance_of::<pyo3::types::PyBool>() {
+        if value.is_instance_of::<PyBool>() {
             if let Ok(b) = value.extract::<bool>() {
-                return Ok(if b {
-                    "true".to_string()
-                } else {
-                    "false".to_string()
-                });
+                return Ok(if b { "true" } else { "false" }.to_string());
             }
         }
 
@@ -371,8 +368,6 @@ impl Node {
         // Try float
         if let Ok(f) = value.extract::<f64>() {
             // Always format floats with decimal point to preserve type information
-            // This ensures ROS interprets them as floats, not integers
-            // e.g., "0.0" not "0", "1.0" not "1"
             if f.fract() == 0.0 && f.is_finite() {
                 return Ok(format!("{:.1}", f));
             } else {
@@ -389,15 +384,11 @@ impl Node {
             }
         }
 
-        // Fallback: call __str__
-        if let Ok(str_method) = value.call_method0("__str__") {
-            if let Ok(s) = str_method.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Final fallback: use repr
-        Ok(value.to_string())
+        // For substitutions (including PythonExpression), use the centralized utility
+        // This handles evaluation of PythonExpression and other evaluating substitutions
+        let py = value.py();
+        let obj_py = value.to_object(py);
+        crate::python::api::utils::pyobject_to_string(py, &obj_py)
     }
 
     /// Parse Python remappings to string tuples

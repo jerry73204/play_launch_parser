@@ -612,41 +612,11 @@ pub struct IncludeLaunchDescription {
 }
 
 /// Convert PyObject to string for launch arguments (handles strings, lists, substitutions)
-fn pyobject_to_string_for_include_args(_py: Python, obj: &PyAny) -> PyResult<String> {
-    use pyo3::types::PyList;
-
-    // Try direct string extraction
-    if let Ok(s) = obj.extract::<String>() {
-        return Ok(s);
-    }
-
-    // Try list (concatenate all elements)
-    if let Ok(list) = obj.downcast::<PyList>() {
-        let mut result = String::new();
-        for item in list.iter() {
-            // Try to extract as string
-            if let Ok(s) = item.extract::<String>() {
-                result.push_str(&s);
-            }
-            // Try calling __str__
-            else if let Ok(str_result) = item.call_method0("__str__") {
-                if let Ok(s) = str_result.extract::<String>() {
-                    result.push_str(&s);
-                }
-            }
-        }
-        return Ok(result);
-    }
-
-    // Try calling __str__ method (for substitutions)
-    if let Ok(str_result) = obj.call_method0("__str__") {
-        if let Ok(s) = str_result.extract::<String>() {
-            return Ok(s);
-        }
-    }
-
-    // Fallback to to_string
-    Ok(obj.to_string())
+/// Uses the centralized pyobject_to_string utility which properly evaluates
+/// PythonExpression and other substitutions that need perform() calls
+fn pyobject_to_string_for_include_args(py: Python, obj: &PyAny) -> PyResult<String> {
+    let obj_py = obj.to_object(py);
+    crate::python::api::utils::pyobject_to_string(py, &obj_py)
 }
 
 #[pymethods]

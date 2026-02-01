@@ -104,12 +104,20 @@ pub fn create_launch_context(py: Python) -> PyResult<PyObject> {
 /// This function is called during launch file parsing (one-time cost),
 /// not during node runtime, so performance impact is negligible.
 pub fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-    use pyo3::types::PyList;
+    use pyo3::types::{PyBool, PyList};
     let obj_ref = obj.as_ref(py);
 
     // Try direct string extraction first (most common case)
     if let Ok(s) = obj_ref.extract::<String>() {
         return Ok(s);
+    }
+
+    // Handle booleans explicitly (convert to lowercase "true"/"false" for ROS2 compatibility)
+    // Must check BEFORE integer extraction since Python bool is subclass of int
+    if obj_ref.is_instance_of::<PyBool>() {
+        if let Ok(b) = obj_ref.extract::<bool>() {
+            return Ok(if b { "true" } else { "false" }.to_string());
+        }
     }
 
     // Handle lists (concatenate elements recursively)
