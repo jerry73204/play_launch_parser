@@ -160,10 +160,7 @@ impl LaunchTraverser {
 
     fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
         use crate::python::{
-            bridge::{
-                get_current_ros_namespace, pop_ros_namespace, push_ros_namespace,
-                CAPTURED_CONTAINERS, CAPTURED_INCLUDES, CAPTURED_LOAD_NODES, CAPTURED_NODES,
-            },
+            bridge::{CAPTURED_CONTAINERS, CAPTURED_INCLUDES, CAPTURED_LOAD_NODES, CAPTURED_NODES},
             PythonLaunchExecutor,
         };
 
@@ -212,35 +209,30 @@ impl LaunchTraverser {
         CAPTURED_LOAD_NODES.lock().clear();
         CAPTURED_INCLUDES.lock().clear();
 
-        // Push current XML namespace onto ROS_NAMESPACE_STACK so Python code can see it
-        // IMPORTANT: Only push if it's not already on the stack (to avoid double-pushing
-        // when <push-ros-namespace> was already used in XML)
-        let need_pop = if !current_ns.is_empty() && current_ns != "/" {
-            // Check if the current namespace is already reflected in ROS_NAMESPACE_STACK
-            let stack_ns = get_current_ros_namespace();
-            if stack_ns == current_ns {
-                log::debug!(
-                    "XML namespace '{}' is already on ROS_NAMESPACE_STACK (from <push-ros-namespace>), skipping push",
-                    current_ns
-                );
-                false // Don't need to pop since we didn't push
-            } else {
-                log::debug!(
-                    "Pushing XML namespace '{}' onto ROS_NAMESPACE_STACK (current stack ns: '{}')",
-                    current_ns,
-                    stack_ns
-                );
-                push_ros_namespace(current_ns.clone());
-                log::trace!("ROS_NAMESPACE_STACK after push: {:?}", {
-                    use crate::python::bridge::ROS_NAMESPACE_STACK;
-                    ROS_NAMESPACE_STACK.lock().clone()
-                });
-                true
-            }
-        } else {
-            log::debug!("Not pushing namespace (empty or root): '{}'", current_ns);
-            false
+        // Save ROS_NAMESPACE_STACK and replace it with XML context's namespace
+        // CRITICAL FIX: We must REPLACE the stack, not PUSH onto it, to avoid namespace accumulation.
+        // The XML context's namespace_stack is the source of truth for the current namespace state.
+        // By replacing ROS_NAMESPACE_STACK with the XML state, Python code will see the correct
+        // namespace and can push/pop additional namespaces on top of it.
+        use crate::python::bridge::{
+            restore_ros_namespace_stack, save_and_set_ros_namespace_stack,
         };
+
+        // Convert XML namespace to ROS stack format
+        // XML has full accumulated path (e.g., "/foo/bar")
+        // ROS stack should be ["", "/foo/bar"] which joins to "/foo/bar"
+        let ros_stack = if !current_ns.is_empty() && current_ns != "/" {
+            vec!["".to_string(), current_ns.clone()]
+        } else {
+            vec!["".to_string()]
+        };
+
+        log::debug!(
+            "Replacing ROS_NAMESPACE_STACK with XML namespace: {:?} (current: '{}')",
+            ros_stack,
+            current_ns
+        );
+        let saved_stack = save_and_set_ros_namespace_stack(ros_stack);
 
         // Execute Python file with new executor
         let executor = PythonLaunchExecutor::new(global_params);
@@ -290,17 +282,20 @@ impl LaunchTraverser {
         }
 
         // Apply the current namespace context to all entities from Python
-        // Note: If we pushed the namespace onto ROS_NAMESPACE_STACK (need_pop=true),
-        // then Python code already saw and applied it, so we skip re-application here
-        // to avoid double-namespacing.
-        let current_ns = self.context.current_namespace();
-        let should_apply_namespace = !need_pop && current_ns != "/";
+        // CRITICAL FIX: Python nodes capture their namespace from ROS_NAMESPACE_STACK during
+        // construction, so we should NEVER apply an additional namespace prefix to them here.
+        // Doing so would cause namespace accumulation bugs where nodes get prefixed with
+        // the entire XML context namespace chain instead of just their intended namespace.
+        //
+        // The namespace is already correct because:
+        // 1. If need_pop=true: We pushed the namespace before execution, Python saw it
+        // 2. If need_pop=false: The namespace was already on the stack, Python saw it
+        //
+        // In both cases, Python nodes have already captured the correct namespace.
+        let should_apply_namespace = false; // NEVER apply namespace to Python nodes
 
         log::debug!(
-            "Python file executed with XML context namespace: '{}' (will {} apply prefix), need_pop={}",
-            current_ns,
-            if should_apply_namespace { "YES" } else { "NO" },
-            need_pop
+            "Python file executed with ROS_NAMESPACE_STACK namespace (no additional prefix will be applied)"
         );
 
         if should_apply_namespace {
@@ -515,11 +510,9 @@ impl LaunchTraverser {
             result?;
         }
 
-        // Pop the XML namespace if we pushed it
-        if need_pop {
-            log::debug!("Popping XML namespace from ROS_NAMESPACE_STACK");
-            pop_ros_namespace();
-        }
+        // Restore the saved ROS_NAMESPACE_STACK
+        log::debug!("Restoring ROS_NAMESPACE_STACK after Python execution");
+        restore_ros_namespace_stack(saved_stack);
 
         Ok(())
     }
@@ -539,6 +532,25 @@ impl LaunchTraverser {
         // Create a new context for the included file (O(1) with Arc, not O(n) clone!)
         let mut include_context = self.context.child();
         include_context.set_current_file(resolved_path.to_path_buf());
+
+        // CRITICAL FIX: When including an XML file from Python with a ROS namespace,
+        // we must clear the inherited namespace stack and push ONLY the ROS namespace.
+        // Otherwise, the XML nodes will inherit the parent XML context's namespace,
+        // and then we'll apply the ROS namespace on top, causing double accumulation.
+        if let Some(ref ns) = ros_namespace {
+            if !ns.is_empty() && ns != "/" {
+                log::debug!(
+                    "Clearing inherited namespace stack and setting ROS namespace: '{}'",
+                    ns
+                );
+                // Clear the namespace stack (keep only root)
+                while include_context.namespace_depth() > 1 {
+                    include_context.pop_namespace();
+                }
+                // Push the ROS namespace from Python
+                include_context.push_namespace(ns.clone());
+            }
+        }
 
         // Apply include arguments
         for (key, value) in include_args {
@@ -564,6 +576,26 @@ impl LaunchTraverser {
             include_chain: self.include_chain.clone(),
         };
         included_traverser.traverse_entity(&root)?;
+
+        // CRITICAL: Copy XML arguments to Python's LAUNCH_CONFIGURATIONS
+        // This allows Python nodes to reference variables declared in included XML files
+        {
+            use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+            let mut configs = LAUNCH_CONFIGURATIONS.lock();
+
+            // Get all configurations from the XML context
+            for (key, value) in included_traverser.context.configurations() {
+                // Only add if not already present (don't override Python's values)
+                if !configs.contains_key(&key) {
+                    log::debug!(
+                        "Copying XML argument '{}' = '{}' to Python LAUNCH_CONFIGURATIONS",
+                        key,
+                        value
+                    );
+                    configs.insert(key.clone(), value.clone());
+                }
+            }
+        }
 
         // Apply ROS namespace if provided (for includes from Python OpaqueFunction)
         if let Some(ns) = ros_namespace {

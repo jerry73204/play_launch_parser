@@ -645,7 +645,7 @@ fn test_parse_python_include() {
     assert_eq!(main_node["executable"].as_str().unwrap(), "main_node");
     assert_eq!(main_node["namespace"].as_str().unwrap(), "/main");
 
-    // Check for the included node (name will be a substitution)
+    // Check for the included node (name will be resolved)
     let included_node = nodes
         .iter()
         .find(|n| n["package"].as_str() == Some("included_pkg"));
@@ -660,20 +660,19 @@ fn test_parse_python_include() {
         "included_node"
     );
     assert_eq!(included_node["namespace"].as_str().unwrap(), "/included");
-    // The name should be a LaunchConfiguration substitution
-    assert_eq!(included_node["name"].as_str().unwrap(), "$(var node_name)");
+    // The name should be resolved to the passed argument value
+    assert_eq!(included_node["name"].as_str().unwrap(), "my_included_node");
 
-    // Check that launch arguments were passed to included file
-    // The parameter value will also be a substitution
+    // Check that launch arguments were passed to included file and resolved
+    // The parameter value should be resolved to the passed argument value
     let params = included_node["params"].as_array().unwrap();
     let has_param = params.iter().any(|p| {
         let tuple = p.as_array().unwrap();
-        tuple[0].as_str() == Some("included_param")
-            && tuple[1].as_str() == Some("$(var param_value)")
+        tuple[0].as_str() == Some("included_param") && tuple[1].as_str() == Some("my_custom_value")
     });
     assert!(
         has_param,
-        "Included node should have included_param with substitution"
+        "Included node should have included_param with resolved value"
     );
 }
 
@@ -1526,10 +1525,10 @@ fn test_lifecycle_nodes() {
     assert_eq!(remaps[1][1].as_str().unwrap(), "/remapped_output");
 
     // Test 3: Lifecycle node with LaunchConfiguration for name
-    // In static analysis, LaunchConfiguration converts to $(var ...) syntax
+    // After process_launch_arguments(), the name should be resolved to the default value
     let lifecycle_node_dynamic = nodes
         .iter()
-        .find(|n| n["name"] == "$(var node_name)")
+        .find(|n| n["name"] == "my_lifecycle_node")
         .unwrap();
     assert_eq!(
         lifecycle_node_dynamic["package"].as_str().unwrap(),

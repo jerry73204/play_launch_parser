@@ -402,16 +402,60 @@ impl GroupAction {
     #[new]
     #[pyo3(signature = (actions, *, scoped=true, forwarding=true, **_kwargs))]
     fn new(
+        py: Python,
         actions: Vec<PyObject>,
         scoped: Option<bool>,
         forwarding: Option<bool>,
         _kwargs: Option<&pyo3::types::PyDict>,
-    ) -> Self {
-        Self {
+    ) -> PyResult<Self> {
+        // CRITICAL FIX: GroupActions create a scoped namespace context.
+        // When the actions list is passed in, any PushRosNamespace actions have already
+        // been constructed and have pushed onto ROS_NAMESPACE_STACK. We need to pop them
+        // after the GroupAction is done being used (simulating scope exit).
+        //
+        // Since we're in dump mode (not actually executing the launch system), we simulate
+        // this by counting PushRosNamespace actions at the start and popping them immediately
+        // after GroupAction construction completes.
+        //
+        // This ensures that namespace pushes from one GroupAction don't leak into the next
+        // when multiple GroupActions are created in sequence (e.g., in a list comprehension).
+
+        // Count consecutive PushRosNamespace actions from the beginning
+        let mut push_count = 0;
+        for action in &actions {
+            // Check if this is a PushRosNamespace instance
+            if let Ok(type_name) = action
+                .getattr(py, "__class__")
+                .and_then(|cls| cls.getattr(py, "__name__"))
+                .and_then(|name| name.extract::<String>(py))
+            {
+                if type_name == "PushRosNamespace" {
+                    push_count += 1;
+                } else if type_name != "IncludeLaunchDescription" {
+                    // Stop counting if we hit a non-Push, non-Include action
+                    break;
+                }
+            }
+        }
+
+        // Pop the namespaces that were pushed by this GroupAction's PushRosNamespace actions
+        // This simulates the GroupAction's scope cleanup
+        if push_count > 0 {
+            use crate::python::bridge::pop_ros_namespace;
+            for _ in 0..push_count {
+                pop_ros_namespace();
+            }
+            log::debug!(
+                "GroupAction popped {} namespaces for scope cleanup",
+                push_count
+            );
+        }
+
+        Ok(Self {
             actions,
             scoped: scoped.unwrap_or(true),
             forwarding: forwarding.unwrap_or(true),
-        }
+        })
     }
 
     fn __repr__(&self) -> String {
@@ -672,11 +716,75 @@ pub struct IncludeLaunchDescription {
 }
 
 /// Convert PyObject to string for launch arguments (handles strings, lists, substitutions)
-/// Uses the centralized pyobject_to_string utility which properly evaluates
-/// PythonExpression and other substitutions that need perform() calls
+/// CRITICAL: Unlike pyobject_to_string, this function RESOLVES LaunchConfiguration objects
+/// instead of preserving them as "$(var name)" strings. This is necessary because include
+/// arguments are used to set variables in the included file's context, not for replay.
 fn pyobject_to_string_for_include_args(py: Python, obj: &PyAny) -> PyResult<String> {
-    let obj_py = obj.to_object(py);
-    crate::python::api::utils::pyobject_to_string(py, &obj_py)
+    use pyo3::types::PyList;
+
+    // Try direct string extraction first
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(s);
+    }
+
+    // Handle lists (concatenate elements recursively)
+    if let Ok(list) = obj.downcast::<PyList>() {
+        let mut result = String::new();
+        for item in list.iter() {
+            let item_str = pyobject_to_string_for_include_args(py, item)?;
+            result.push_str(&item_str);
+        }
+        return Ok(result);
+    }
+
+    // CRITICAL: For LaunchConfiguration, resolve it using LAUNCH_CONFIGURATIONS
+    // This is different from regular parameter handling where we preserve the substitution
+    let type_name = obj.get_type().name()?;
+    if type_name == "LaunchConfiguration" {
+        use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+
+        // Try to get the variable name
+        if let Ok(name_obj) = obj.getattr("variable_name") {
+            if let Ok(var_name) = name_obj.extract::<Vec<String>>() {
+                if var_name.len() == 1 {
+                    // Look up the value in LAUNCH_CONFIGURATIONS
+                    let configs = LAUNCH_CONFIGURATIONS.lock();
+                    if let Some(value) = configs.get(&var_name[0]) {
+                        log::debug!(
+                            "Resolving LaunchConfiguration('{}') for include arg: '{}'",
+                            var_name[0],
+                            value
+                        );
+                        return Ok(value.clone());
+                    } else {
+                        log::warn!(
+                            "LaunchConfiguration('{}') not found in LAUNCH_CONFIGURATIONS for include arg",
+                            var_name[0]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // For other substitutions, try calling perform() with context
+    if let Ok(perform_method) = obj.getattr("perform") {
+        let context = crate::python::api::utils::create_launch_context(py)?;
+        if let Ok(result) = perform_method.call1((context,)) {
+            if let Ok(s) = result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+    }
+
+    // Fallback: use __str__()
+    if let Ok(str_result) = obj.call_method0("__str__") {
+        if let Ok(s) = str_result.extract::<String>() {
+            return Ok(s);
+        }
+    }
+
+    Ok(obj.to_string())
 }
 
 #[pymethods]

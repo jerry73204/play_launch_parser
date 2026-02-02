@@ -229,9 +229,28 @@ fn process_launch_arguments(_py: Python, _launch_desc: &PyObject) -> PyResult<()
     }
     drop(containers);
 
-    // Re-resolve target_container_name in load_nodes
+    // Re-resolve target_container_name, node names, remappings, and parameters in load_nodes
     let mut load_nodes = CAPTURED_LOAD_NODES.lock();
     for load_node in load_nodes.iter_mut() {
+        // Re-resolve node name
+        if load_node.node_name.contains("$(") {
+            log::debug!(
+                "Re-resolving composable node name '{}' with updated context",
+                load_node.node_name
+            );
+            if let Ok(subs) = parse_substitutions(&load_node.node_name) {
+                if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                    log::debug!(
+                        "Composable node name '{}' -> '{}'",
+                        load_node.node_name,
+                        resolved
+                    );
+                    load_node.node_name = resolved;
+                }
+            }
+        }
+
+        // Re-resolve target_container_name
         if load_node.target_container_name.contains("$(") {
             log::debug!(
                 "Re-resolving target_container_name '{}' for node '{}'",
@@ -250,8 +269,85 @@ fn process_launch_arguments(_py: Python, _launch_desc: &PyObject) -> PyResult<()
                 }
             }
         }
+
+        // Re-resolve remappings
+        for remap in load_node.remappings.iter_mut() {
+            if remap.1.contains("$(") {
+                if let Ok(subs) = parse_substitutions(&remap.1) {
+                    if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                        log::debug!(
+                            "Remap '{}' -> '{}' for node '{}'",
+                            remap.1,
+                            resolved,
+                            load_node.node_name
+                        );
+                        remap.1 = resolved;
+                    }
+                }
+            }
+        }
+
+        // Re-resolve parameters
+        for param in load_node.parameters.iter_mut() {
+            if param.1.contains("$(") {
+                if let Ok(subs) = parse_substitutions(&param.1) {
+                    if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                        log::debug!(
+                            "Param '{}' -> '{}' for node '{}'",
+                            param.1,
+                            resolved,
+                            load_node.node_name
+                        );
+                        param.1 = resolved;
+                    }
+                }
+            }
+        }
     }
     drop(load_nodes);
+
+    // Re-resolve remappings and parameters in regular nodes
+    use crate::python::bridge::CAPTURED_NODES;
+    let mut nodes = CAPTURED_NODES.lock();
+    for node in nodes.iter_mut() {
+        // Re-resolve node name
+        if let Some(ref name) = node.name {
+            if name.contains("$(") {
+                log::debug!("Re-resolving node name '{}' with updated context", name);
+                if let Ok(subs) = parse_substitutions(name) {
+                    if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                        log::debug!("Node name '{}' -> '{}'", name, resolved);
+                        node.name = Some(resolved);
+                    }
+                }
+            }
+        }
+
+        // Re-resolve remappings
+        for remap in node.remappings.iter_mut() {
+            if remap.1.contains("$(") {
+                if let Ok(subs) = parse_substitutions(&remap.1) {
+                    if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                        log::debug!("Node remap '{}' -> '{}'", remap.1, resolved);
+                        remap.1 = resolved;
+                    }
+                }
+            }
+        }
+
+        // Re-resolve parameters
+        for param in node.parameters.iter_mut() {
+            if param.1.contains("$(") {
+                if let Ok(subs) = parse_substitutions(&param.1) {
+                    if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
+                        log::debug!("Node param '{}' -> '{}'", param.1, resolved);
+                        param.1 = resolved;
+                    }
+                }
+            }
+        }
+    }
+    drop(nodes);
 
     Ok(())
 }

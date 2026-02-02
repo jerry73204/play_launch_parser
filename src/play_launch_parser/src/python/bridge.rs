@@ -374,6 +374,31 @@ pub fn get_current_ros_namespace() -> String {
     }
 }
 
+/// Save the current ROS namespace stack and replace it with a new one
+/// Returns the saved stack for restoration later
+pub fn save_and_set_ros_namespace_stack(new_stack: Vec<String>) -> Vec<String> {
+    let mut stack = ROS_NAMESPACE_STACK.lock();
+    let saved = stack.clone();
+    *stack = new_stack;
+    log::debug!(
+        "Saved ROS namespace stack: {:?}, set new stack: {:?}",
+        saved,
+        *stack
+    );
+    saved
+}
+
+/// Restore the ROS namespace stack from a previously saved state
+pub fn restore_ros_namespace_stack(saved_stack: Vec<String>) {
+    let mut stack = ROS_NAMESPACE_STACK.lock();
+    log::debug!(
+        "Restoring ROS namespace stack from {:?} to {:?}",
+        *stack,
+        saved_stack
+    );
+    *stack = saved_stack;
+}
+
 /// Clear all captured global state
 ///
 /// This should be called at the start of each parse_launch_file call to prevent
