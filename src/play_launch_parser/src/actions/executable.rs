@@ -2,7 +2,8 @@
 
 use crate::{
     error::{ParseError, Result},
-    substitution::{parse_substitutions, Substitution},
+    python::bridge::NodeCapture,
+    substitution::{parse_substitutions, resolve_substitutions, LaunchContext, Substitution},
     xml::{Entity, EntityExt, XmlEntity},
 };
 
@@ -90,6 +91,44 @@ impl ExecutableAction {
             output,
             environment,
             arguments,
+        })
+    }
+
+    /// Convert ExecutableAction to NodeCapture by resolving substitutions
+    /// Executables are treated as nodes without a package
+    pub fn to_capture(&self, context: &LaunchContext) -> Result<NodeCapture> {
+        // Resolve cmd (executable)
+        let executable = resolve_substitutions(&self.cmd, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        // Resolve optional name
+        let name = self
+            .name
+            .as_ref()
+            .map(|n| resolve_substitutions(n, context))
+            .transpose()
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        // Resolve arguments
+        let arguments: Vec<String> = self
+            .arguments
+            .iter()
+            .map(|arg| {
+                resolve_substitutions(arg, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(NodeCapture {
+            package: String::new(), // Executables don't have packages
+            executable,
+            name,
+            namespace: None, // Executables don't use namespaces
+            parameters: Vec::new(),
+            params_files: Vec::new(),
+            remappings: Vec::new(),
+            arguments,
+            env_vars: self.environment.clone(),
         })
     }
 }

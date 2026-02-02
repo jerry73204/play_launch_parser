@@ -3,8 +3,8 @@
 #![allow(non_local_definitions)] // pyo3 macros generate non-local impls
 
 use crate::python::bridge::{
-    ContainerCapture, LoadNodeCapture, NodeCapture, CAPTURED_CONTAINERS, CAPTURED_LOAD_NODES,
-    CAPTURED_NODES,
+    capture_container, capture_load_node, capture_node, ContainerCapture, LoadNodeCapture,
+    NodeCapture,
 };
 use pyo3::{
     prelude::*,
@@ -255,7 +255,7 @@ impl Node {
             params_files_count
         );
 
-        CAPTURED_NODES.lock().push(capture);
+        capture_node(capture);
     }
 
     /// Parse Python parameters to string tuples
@@ -688,13 +688,15 @@ impl ComposableNodeContainer {
             ros_namespace
         );
 
-        CAPTURED_CONTAINERS.lock().push(capture);
+        capture_container(capture);
 
         // Capture each composable node as a load_node entry
+        // Use full_namespace (includes ros_namespace) not container.namespace
+        let full_ns_opt = Some(full_namespace);
         Python::with_gil(|py| {
             for node_obj in &container.composable_nodes {
                 let node = node_obj.borrow(py);
-                node.capture_as_load_node(&container.name, &container.namespace);
+                node.capture_as_load_node(&container.name, &full_ns_opt);
             }
         });
     }
@@ -903,7 +905,7 @@ impl ComposableNode {
             capture.target_container_name
         );
 
-        CAPTURED_LOAD_NODES.lock().push(capture);
+        capture_load_node(capture);
     }
 
     /// Normalize namespace + name into a proper path
@@ -1231,7 +1233,7 @@ impl LifecycleNode {
 
     /// Capture the lifecycle node as a regular NodeCapture
     fn capture_node(&self, py: Python) -> PyResult<()> {
-        use crate::python::bridge::{get_current_ros_namespace, NodeCapture, CAPTURED_NODES};
+        use crate::python::bridge::{capture_node, get_current_ros_namespace, NodeCapture};
 
         // Parse parameters (same logic as regular Node)
         let all_params = self.parse_parameters(py)?;
@@ -1309,7 +1311,7 @@ impl LifecycleNode {
             params_files_count
         );
 
-        CAPTURED_NODES.lock().push(capture);
+        capture_node(capture);
         Ok(())
     }
 
@@ -1634,7 +1636,7 @@ impl LoadComposableNodes {
         target_container: &PyObject,
         descriptions: &[PyObject],
     ) -> PyResult<()> {
-        use crate::python::bridge::{LoadNodeCapture, CAPTURED_LOAD_NODES};
+        use crate::python::bridge::{capture_load_node, LoadNodeCapture};
 
         // Extract target container name and namespace
         let (container_name, container_namespace) =
@@ -1711,7 +1713,7 @@ impl LoadComposableNodes {
                 capture.target_container_name
             );
 
-            CAPTURED_LOAD_NODES.lock().push(capture);
+            capture_load_node(capture);
         }
 
         Ok(())

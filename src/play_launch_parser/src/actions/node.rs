@@ -2,7 +2,8 @@
 
 use crate::{
     error::{ParseError, Result},
-    substitution::{parse_substitutions, Substitution},
+    python::bridge::NodeCapture,
+    substitution::{parse_substitutions, resolve_substitutions, LaunchContext, Substitution},
     xml::{Entity, EntityExt, XmlEntity},
 };
 
@@ -104,6 +105,76 @@ impl NodeAction {
                 .get_attr_str("respawn_delay", true)?
                 .map(|s| parse_substitutions(&s))
                 .transpose()?,
+        })
+    }
+
+    /// Convert NodeAction to NodeCapture by resolving substitutions
+    pub fn to_capture(&self, context: &LaunchContext) -> Result<NodeCapture> {
+        // Resolve package and executable (required)
+        let package = resolve_substitutions(&self.package, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let executable = resolve_substitutions(&self.executable, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        // Resolve optional name and namespace
+        let name = self
+            .name
+            .as_ref()
+            .map(|n| resolve_substitutions(n, context))
+            .transpose()
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        let namespace = self
+            .namespace
+            .as_ref()
+            .map(|ns| resolve_substitutions(ns, context))
+            .transpose()
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        // Resolve parameters
+        let parameters: Vec<(String, String)> = self
+            .parameters
+            .iter()
+            .map(|p| {
+                let value = resolve_substitutions(&p.value, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                Ok((p.name.clone(), value))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Resolve parameter files
+        let params_files: Vec<String> = self
+            .param_files
+            .iter()
+            .map(|pf| {
+                resolve_substitutions(pf, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Resolve remappings
+        let remappings: Vec<(String, String)> = self
+            .remappings
+            .iter()
+            .map(|r| {
+                let from = resolve_substitutions(&r.from, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                let to = resolve_substitutions(&r.to, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                Ok((from, to))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(NodeCapture {
+            package,
+            executable,
+            name,
+            namespace,
+            parameters,
+            params_files,
+            remappings,
+            arguments: Vec::new(), // XML nodes don't have arguments
+            env_vars: self.environment.clone(),
         })
     }
 }

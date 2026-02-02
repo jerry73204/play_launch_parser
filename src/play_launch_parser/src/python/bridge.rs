@@ -1,22 +1,18 @@
 //! Bridge between Python and Rust types
 
 use crate::{
+    context::ParseContext,
     error::Result,
     record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord},
 };
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use std::{collections::HashMap, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 /// Global storage for launch configurations (arguments passed to the launch file)
 /// This allows conditions to access and resolve LaunchConfiguration substitutions
 pub static LAUNCH_CONFIGURATIONS: Lazy<Arc<Mutex<HashMap<String, String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
-
-/// Global ROS namespace stack
-/// Tracks the current ROS namespace hierarchy from PushRosNamespace/PopRosNamespace actions
-pub static ROS_NAMESPACE_STACK: Lazy<Arc<Mutex<Vec<String>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(vec!["".to_string()])));
 
 /// Captured node data from Python
 #[derive(Debug, Clone)]
@@ -182,10 +178,6 @@ impl NodeCapture {
     }
 }
 
-/// Global storage for captured nodes (thread-safe)
-pub static CAPTURED_NODES: Lazy<Arc<Mutex<Vec<NodeCapture>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
-
 /// Captured container data from Python
 #[derive(Debug, Clone)]
 pub struct ContainerCapture {
@@ -283,10 +275,6 @@ impl ContainerCapture {
     }
 }
 
-/// Global storage for captured containers (thread-safe)
-pub static CAPTURED_CONTAINERS: Lazy<Arc<Mutex<Vec<ContainerCapture>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
-
 /// Captured composable node data from Python
 #[derive(Debug, Clone)]
 pub struct LoadNodeCapture {
@@ -317,10 +305,6 @@ impl LoadNodeCapture {
     }
 }
 
-/// Global storage for captured load_nodes (thread-safe)
-pub static CAPTURED_LOAD_NODES: Lazy<Arc<Mutex<Vec<LoadNodeCapture>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
-
 /// Captured include data from Python
 #[derive(Debug, Clone)]
 pub struct IncludeCapture {
@@ -329,90 +313,166 @@ pub struct IncludeCapture {
     pub ros_namespace: String,
 }
 
-/// Global storage for captured includes (thread-safe)
-pub static CAPTURED_INCLUDES: Lazy<Arc<Mutex<Vec<IncludeCapture>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
-
 /// Push a namespace onto the ROS namespace stack
+/// Uses ParseContext via thread-local storage
 pub fn push_ros_namespace(namespace: String) {
-    let normalized = if namespace.is_empty() {
-        String::new()
-    } else if namespace.starts_with('/') {
-        namespace
-    } else {
-        format!("/{}", namespace)
-    };
+    with_parse_context(|ctx| {
+        let normalized = if namespace.is_empty() {
+            String::new()
+        } else if namespace.starts_with('/') {
+            namespace
+        } else {
+            format!("/{}", namespace)
+        };
 
-    log::debug!("Pushing ROS namespace: '{}'", normalized);
-    ROS_NAMESPACE_STACK.lock().push(normalized);
+        log::debug!("Pushing ROS namespace to ParseContext: '{}'", normalized);
+        ctx.push_namespace(normalized);
+    });
 }
 
 /// Pop a namespace from the ROS namespace stack
+/// Uses ParseContext via thread-local storage
 pub fn pop_ros_namespace() {
-    let mut stack = ROS_NAMESPACE_STACK.lock();
-    if stack.len() > 1 {
-        let popped = stack.pop();
-        log::debug!("Popped ROS namespace: {:?}", popped);
-    } else {
-        log::warn!("Attempted to pop from empty namespace stack");
-    }
+    with_parse_context(|ctx| {
+        if let Some(popped) = ctx.pop_namespace() {
+            log::debug!("Popped ROS namespace from ParseContext: {:?}", popped);
+        } else {
+            log::warn!("Attempted to pop from root namespace in ParseContext");
+        }
+    });
 }
 
 /// Get the current ROS namespace (concatenation of all namespaces in the stack)
+/// Uses ParseContext via thread-local storage
 pub fn get_current_ros_namespace() -> String {
-    let stack = ROS_NAMESPACE_STACK.lock();
-    let result = stack.join("");
-    log::trace!(
-        "get_current_ros_namespace: stack={:?}, result='{}'",
-        *stack,
+    with_parse_context(|ctx| {
+        let result = ctx.current_namespace();
+        log::trace!("get_current_ros_namespace from ParseContext: '{}'", result);
         result
-    );
-    if result.is_empty() {
-        "/".to_string()
-    } else {
-        result
-    }
+    })
 }
 
-/// Save the current ROS namespace stack and replace it with a new one
-/// Returns the saved stack for restoration later
-pub fn save_and_set_ros_namespace_stack(new_stack: Vec<String>) -> Vec<String> {
-    let mut stack = ROS_NAMESPACE_STACK.lock();
-    let saved = stack.clone();
-    *stack = new_stack;
-    log::debug!(
-        "Saved ROS namespace stack: {:?}, set new stack: {:?}",
-        saved,
-        *stack
-    );
-    saved
+// ========== Thread-Local ParseContext (replaces global state) ==========
+
+thread_local! {
+    /// Thread-local storage for the current ParseContext
+    /// This allows Python API classes to access the context without global state
+    static CURRENT_PARSE_CONTEXT: RefCell<Option<*mut ParseContext>> = const { RefCell::new(None) };
 }
 
-/// Restore the ROS namespace stack from a previously saved state
-pub fn restore_ros_namespace_stack(saved_stack: Vec<String>) {
-    let mut stack = ROS_NAMESPACE_STACK.lock();
-    log::debug!(
-        "Restoring ROS namespace stack from {:?} to {:?}",
-        *stack,
-        saved_stack
-    );
-    *stack = saved_stack;
+/// Set the current ParseContext for this thread
+/// SAFETY: The caller must ensure the ParseContext lives for the duration of Python execution
+pub fn set_current_parse_context(ctx: &mut ParseContext) {
+    CURRENT_PARSE_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = Some(ctx as *mut ParseContext);
+    });
 }
 
-/// Clear all captured global state
-///
-/// This should be called at the start of each parse_launch_file call to prevent
-/// test contamination when running multiple tests in sequence.
-/// Note: LAUNCH_CONFIGURATIONS is managed separately by the executor and should
-/// not be cleared here.
-pub fn clear_all_captured() {
-    CAPTURED_NODES.lock().clear();
-    CAPTURED_CONTAINERS.lock().clear();
-    CAPTURED_LOAD_NODES.lock().clear();
-    CAPTURED_INCLUDES.lock().clear();
+/// Get the current ParseContext for this thread
+/// Returns None if no context is set
+pub fn get_current_parse_context() -> Option<*mut ParseContext> {
+    CURRENT_PARSE_CONTEXT.with(|cell| *cell.borrow())
+}
 
-    // Reset namespace stack to root
-    let mut stack = ROS_NAMESPACE_STACK.lock();
-    stack.clear();
-    stack.push("".to_string());
+/// Clear the current ParseContext for this thread
+pub fn clear_current_parse_context() {
+    CURRENT_PARSE_CONTEXT.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
+/// Execute a closure with access to the current ParseContext
+/// Panics if no context is set
+pub fn with_parse_context<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut ParseContext) -> R,
+{
+    let ctx_ptr = get_current_parse_context()
+        .expect("No ParseContext set - Python execution must be called through LaunchTraverser");
+
+    // SAFETY: The pointer is valid for the duration of Python execution
+    // as guaranteed by set_current_parse_context
+    unsafe { f(&mut *ctx_ptr) }
+}
+
+/// Get a clone of all captured nodes from ParseContext
+/// Panics if no context is set
+pub fn get_captured_nodes() -> Vec<NodeCapture> {
+    with_parse_context(|ctx| ctx.captured_nodes().to_vec())
+}
+
+/// Get a clone of all captured containers from ParseContext
+/// Panics if no context is set
+pub fn get_captured_containers() -> Vec<ContainerCapture> {
+    with_parse_context(|ctx| ctx.captured_containers().to_vec())
+}
+
+/// Get a clone of all captured load_nodes from ParseContext
+/// Panics if no context is set
+pub fn get_captured_load_nodes() -> Vec<LoadNodeCapture> {
+    with_parse_context(|ctx| ctx.captured_load_nodes().to_vec())
+}
+
+/// Get a clone of all captured includes from ParseContext
+/// Panics if no context is set
+pub fn get_captured_includes() -> Vec<IncludeCapture> {
+    with_parse_context(|ctx| ctx.captured_includes().to_vec())
+}
+
+/// Update captured nodes in ParseContext by applying a mutation function
+/// Panics if no context is set
+pub fn update_captured_nodes<F>(f: F)
+where
+    F: FnOnce(&mut Vec<NodeCapture>),
+{
+    with_parse_context(|ctx| {
+        let nodes = ctx.captured_nodes_mut();
+        f(nodes);
+    })
+}
+
+/// Update captured containers in ParseContext by applying a mutation function
+/// Panics if no context is set
+pub fn update_captured_containers<F>(f: F)
+where
+    F: FnOnce(&mut Vec<ContainerCapture>),
+{
+    with_parse_context(|ctx| {
+        let containers = ctx.captured_containers_mut();
+        f(containers);
+    })
+}
+
+/// Update captured load_nodes in ParseContext by applying a mutation function
+/// Panics if no context is set
+pub fn update_captured_load_nodes<F>(f: F)
+where
+    F: FnOnce(&mut Vec<LoadNodeCapture>),
+{
+    with_parse_context(|ctx| {
+        let load_nodes = ctx.captured_load_nodes_mut();
+        f(load_nodes);
+    })
+}
+
+// ========== Capture Functions (use ParseContext via thread-local) ==========
+
+/// Capture a node to ParseContext
+pub fn capture_node(node: NodeCapture) {
+    with_parse_context(|ctx| ctx.capture_node(node));
+}
+
+/// Capture a container to ParseContext
+pub fn capture_container(container: ContainerCapture) {
+    with_parse_context(|ctx| ctx.capture_container(container));
+}
+
+/// Capture a load_node to ParseContext
+pub fn capture_load_node(load_node: LoadNodeCapture) {
+    with_parse_context(|ctx| ctx.capture_load_node(load_node));
+}
+
+/// Capture an include to ParseContext
+pub fn capture_include(include: IncludeCapture) {
+    with_parse_context(|ctx| ctx.capture_include(include));
 }

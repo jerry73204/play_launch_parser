@@ -2,12 +2,16 @@
 
 pub mod actions;
 pub mod condition;
+pub mod context;
 pub mod error;
 pub mod params;
 pub mod python;
 pub mod record;
 pub mod substitution;
 pub mod xml;
+
+// Re-export key types
+pub use context::ParseContext;
 
 use actions::{
     ArgAction, ContainerAction, DeclareArgumentAction, ExecutableAction, GroupAction,
@@ -70,28 +74,36 @@ fn read_file_cached(path: &Path) -> Result<String> {
 
 /// Launch tree traverser for parsing launch files
 pub struct LaunchTraverser {
+    /// Substitution resolution context
     context: LaunchContext,
+    /// Parse state and captures
+    parse_context: ParseContext,
+    /// Track include chain to detect circular includes (thread-local stack)
+    include_chain: Vec<PathBuf>,
+    /// Temporary storage for records during XML parsing (moved to parse_context after Python)
     records: Vec<record::NodeRecord>,
     containers: Vec<record::ComposableNodeContainerRecord>,
     load_nodes: Vec<record::LoadNodeRecord>,
-    /// Track include chain to detect circular includes (thread-local stack)
-    include_chain: Vec<PathBuf>,
 }
 
 impl LaunchTraverser {
     pub fn new(cli_args: HashMap<String, String>) -> Self {
         let mut context = LaunchContext::new();
-        // Apply CLI args as initial configurations
-        for (k, v) in cli_args {
-            context.set_configuration(k, v);
+        // Apply CLI args to LaunchContext for substitution resolution
+        for (k, v) in &cli_args {
+            context.set_configuration(k.clone(), v.clone());
         }
+
+        // Create ParseContext with CLI args for capture and configuration storage
+        let parse_context = ParseContext::new(cli_args);
 
         Self {
             context,
+            parse_context,
+            include_chain: Vec::new(),
             records: Vec::new(),
             containers: Vec::new(),
             load_nodes: Vec::new(),
-            include_chain: Vec::new(),
         }
     }
 
@@ -159,10 +171,7 @@ impl LaunchTraverser {
     }
 
     fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
-        use crate::python::{
-            bridge::{CAPTURED_CONTAINERS, CAPTURED_INCLUDES, CAPTURED_LOAD_NODES, CAPTURED_NODES},
-            PythonLaunchExecutor,
-        };
+        use crate::python::PythonLaunchExecutor;
 
         log::debug!("Executing Python file: {}", path.display());
         log::trace!("Python file arguments: {} args", args.len());
@@ -203,212 +212,41 @@ impl LaunchTraverser {
 
         log::debug!("Executing with {} global parameters", global_params.len());
 
-        // Clear capture storage before execution
-        CAPTURED_NODES.lock().clear();
-        CAPTURED_CONTAINERS.lock().clear();
-        CAPTURED_LOAD_NODES.lock().clear();
-        CAPTURED_INCLUDES.lock().clear();
+        // Set the thread-local parse_context for Python API to access
+        use crate::python::bridge::{clear_current_parse_context, set_current_parse_context};
+        set_current_parse_context(&mut self.parse_context);
 
-        // Save ROS_NAMESPACE_STACK and replace it with XML context's namespace
-        // CRITICAL FIX: We must REPLACE the stack, not PUSH onto it, to avoid namespace accumulation.
-        // The XML context's namespace_stack is the source of truth for the current namespace state.
-        // By replacing ROS_NAMESPACE_STACK with the XML state, Python code will see the correct
-        // namespace and can push/pop additional namespaces on top of it.
-        use crate::python::bridge::{
-            restore_ros_namespace_stack, save_and_set_ros_namespace_stack,
-        };
-
-        // Convert XML namespace to ROS stack format
-        // XML has full accumulated path (e.g., "/foo/bar")
-        // ROS stack should be ["", "/foo/bar"] which joins to "/foo/bar"
-        let ros_stack = if !current_ns.is_empty() && current_ns != "/" {
-            vec!["".to_string(), current_ns.clone()]
-        } else {
-            vec!["".to_string()]
-        };
-
-        log::debug!(
-            "Replacing ROS_NAMESPACE_STACK with XML namespace: {:?} (current: '{}')",
-            ros_stack,
-            current_ns
-        );
-        let saved_stack = save_and_set_ros_namespace_stack(ros_stack);
-
-        // Execute Python file with new executor
         let executor = PythonLaunchExecutor::new(global_params);
         let path_str = path.to_str().ok_or_else(|| {
             ParseError::PythonError(format!("Invalid UTF-8 in path: {}", path.display()))
         })?;
-        executor
-            .execute(path_str)
-            .map_err(|e| ParseError::PythonError(e.to_string()))?;
+        let exec_result = executor.execute(path_str);
 
-        // Collect captured entities
-        let nodes: Vec<_> = CAPTURED_NODES
-            .lock()
-            .iter()
-            .map(|n| n.to_record())
-            .collect::<Result<Vec<_>>>()?;
+        // Clear the thread-local context after execution
+        clear_current_parse_context();
 
-        let containers: Vec<_> = CAPTURED_CONTAINERS
-            .lock()
-            .iter()
-            .map(|c| c.to_record())
-            .collect::<Result<Vec<_>>>()?;
+        // Propagate execution errors
+        exec_result.map_err(|e| ParseError::PythonError(e.to_string()))?;
 
-        let load_nodes: Vec<_> = CAPTURED_LOAD_NODES
-            .lock()
-            .iter()
-            .map(|ln| ln.to_record())
-            .collect::<Result<Vec<_>>>()?;
+        // Python API now stores captures directly in parse_context via thread-local
+        // No need to extract from globals and re-store - captures are already there!
+        log::debug!(
+            "Python file '{}' completed - captures stored in parse_context via thread-local",
+            path.display()
+        );
 
-        let includes = CAPTURED_INCLUDES.lock().clone();
+        // Process includes recursively (get from parse_context and clear)
+        let includes = self.parse_context.captured_includes().to_vec();
+        // Clear captured includes to prevent reprocessing in recursive calls
+        self.parse_context.captured_includes_mut().clear();
 
         log::debug!(
-            "Python file '{}' generated {} nodes, {} containers, {} load_nodes",
+            "Processing {} captured includes from Python file '{}', current context namespace: '{}'",
+            includes.len(),
             path.display(),
-            nodes.len(),
-            containers.len(),
-            load_nodes.len()
+            self.context.current_namespace()
         );
 
-        // Log captured container namespaces for debugging
-        for container in &containers {
-            log::trace!(
-                "Captured container: name='{}', namespace='{}'",
-                container.name,
-                container.namespace
-            );
-        }
-
-        // Apply the current namespace context to all entities from Python
-        // CRITICAL FIX: Python nodes capture their namespace from ROS_NAMESPACE_STACK during
-        // construction, so we should NEVER apply an additional namespace prefix to them here.
-        // Doing so would cause namespace accumulation bugs where nodes get prefixed with
-        // the entire XML context namespace chain instead of just their intended namespace.
-        //
-        // The namespace is already correct because:
-        // 1. If need_pop=true: We pushed the namespace before execution, Python saw it
-        // 2. If need_pop=false: The namespace was already on the stack, Python saw it
-        //
-        // In both cases, Python nodes have already captured the correct namespace.
-        let should_apply_namespace = false; // NEVER apply namespace to Python nodes
-
-        log::debug!(
-            "Python file executed with ROS_NAMESPACE_STACK namespace (no additional prefix will be applied)"
-        );
-
-        if should_apply_namespace {
-            log::debug!(
-                "Applying namespace '{}' to Python-generated entities",
-                current_ns
-            );
-
-            // Apply namespace to nodes
-            let namespaced_nodes: Vec<_> = nodes
-                .into_iter()
-                .map(|mut node| {
-                    if let Some(ref ns) = node.namespace {
-                        node.namespace = Some(Self::apply_namespace_prefix(&current_ns, ns));
-                    } else {
-                        node.namespace = Some(current_ns.clone());
-                    }
-                    node
-                })
-                .collect();
-
-            // Apply namespace to containers and build a mapping of old names to new names
-            let mut container_name_map = std::collections::HashMap::new();
-            let namespaced_containers: Vec<_> = containers
-                .into_iter()
-                .map(|mut container| {
-                    // Build old full name (namespace + name)
-                    let old_full_name = if container.namespace.starts_with('/') {
-                        if container.namespace == "/" {
-                            format!("/{}", container.name)
-                        } else {
-                            format!("{}/{}", container.namespace, container.name)
-                        }
-                    } else {
-                        format!("/{}/{}", container.namespace, container.name)
-                    };
-
-                    // Apply namespace prefix
-                    container.namespace =
-                        Self::apply_namespace_prefix(&current_ns, &container.namespace);
-
-                    // Build new full name (namespace + name)
-                    let new_full_name = if container.namespace.starts_with('/') {
-                        if container.namespace == "/" {
-                            format!("/{}", container.name)
-                        } else {
-                            format!("{}/{}", container.namespace, container.name)
-                        }
-                    } else {
-                        format!("/{}/{}", container.namespace, container.name)
-                    };
-
-                    // Store mapping for updating load_nodes
-                    container_name_map.insert(old_full_name, new_full_name);
-
-                    container
-                })
-                .collect();
-
-            // Apply namespace to load_nodes
-            let namespaced_load_nodes: Vec<_> = load_nodes
-                .into_iter()
-                .map(|mut load_node| {
-                    load_node.namespace =
-                        Self::apply_namespace_prefix(&current_ns, &load_node.namespace);
-
-                    // Update target_container_name if it matches a container that was renamed
-                    if let Some(new_name) = container_name_map.get(&load_node.target_container_name) {
-                        log::debug!(
-                            "Updating target_container_name from '{}' to '{}'",
-                            load_node.target_container_name,
-                            new_name
-                        );
-                        load_node.target_container_name = new_name.clone();
-                    } else {
-                        // If not in the map, still apply namespace prefix for containers defined elsewhere
-                        // This handles the case where target_container is a string reference to an external container
-                        if load_node.target_container_name.starts_with('/') {
-                            // Already absolute path - check if it needs namespace prefix
-                            let prefixed = Self::apply_namespace_prefix(&current_ns, &load_node.target_container_name);
-                            if prefixed != load_node.target_container_name {
-                                log::debug!(
-                                    "Applying namespace prefix to target_container_name: '{}' -> '{}'",
-                                    load_node.target_container_name,
-                                    prefixed
-                                );
-                                load_node.target_container_name = prefixed;
-                            }
-                        }
-                    }
-
-                    load_node
-                })
-                .collect();
-
-            self.records.extend(namespaced_nodes);
-            self.containers.extend(namespaced_containers);
-            self.load_nodes.extend(namespaced_load_nodes);
-        } else {
-            // Log container namespaces before extending (no prefix applied)
-            for container in &containers {
-                log::debug!(
-                    "Adding container without namespace prefix: name='{}', namespace='{}'",
-                    container.name,
-                    container.namespace
-                );
-            }
-            self.records.extend(nodes);
-            self.containers.extend(containers);
-            self.load_nodes.extend(load_nodes);
-        }
-
-        // Process includes recursively
         for include in includes {
             log::debug!(
                 "Processing Python include: {} with ROS namespace '{}'",
@@ -452,9 +290,6 @@ impl LaunchTraverser {
                 include_path.to_path_buf()
             };
 
-            // Apply the captured ROS namespace for this include
-            use crate::python::bridge::{pop_ros_namespace, push_ros_namespace};
-
             // Determine the ROS namespace to apply
             let ros_ns = if !include.ros_namespace.is_empty() && include.ros_namespace != "/" {
                 Some(include.ros_namespace.clone())
@@ -467,14 +302,17 @@ impl LaunchTraverser {
                 if let Some(ext) = resolved_include_path.extension().and_then(|s| s.to_str()) {
                     match ext {
                         "py" => {
-                            // For Python includes, push namespace onto stack
+                            // For Python includes, push namespace onto both contexts
+                            // self.context for XML, self.parse_context for Python (via thread-local)
                             if let Some(ref ns) = ros_ns {
-                                push_ros_namespace(ns.clone());
+                                self.context.push_namespace(ns.clone());
+                                self.parse_context.push_namespace(ns.clone());
                             }
                             let result =
                                 self.execute_python_file(&resolved_include_path, &include_args);
                             if ros_ns.is_some() {
-                                pop_ros_namespace();
+                                self.context.pop_namespace();
+                                self.parse_context.pop_namespace();
                             }
                             result
                         }
@@ -510,10 +348,6 @@ impl LaunchTraverser {
             result?;
         }
 
-        // Restore the saved ROS_NAMESPACE_STACK
-        log::debug!("Restoring ROS_NAMESPACE_STACK after Python execution");
-        restore_ros_namespace_stack(saved_stack);
-
         Ok(())
     }
 
@@ -537,6 +371,14 @@ impl LaunchTraverser {
         // we must clear the inherited namespace stack and push ONLY the ROS namespace.
         // Otherwise, the XML nodes will inherit the parent XML context's namespace,
         // and then we'll apply the ROS namespace on top, causing double accumulation.
+        log::debug!(
+            "process_xml_include_with_namespace: include_context initial namespace='{}', depth={}, ros_namespace={:?}",
+            include_context.current_namespace(),
+            include_context.namespace_depth(),
+            ros_namespace
+        );
+
+        // Only apply namespace transformation if ros_namespace is explicitly provided and not root
         if let Some(ref ns) = ros_namespace {
             if !ns.is_empty() && ns != "/" {
                 log::debug!(
@@ -549,7 +391,23 @@ impl LaunchTraverser {
                 }
                 // Push the ROS namespace from Python
                 include_context.push_namespace(ns.clone());
+                log::debug!(
+                    "After applying ROS namespace: include_context namespace='{}'",
+                    include_context.current_namespace()
+                );
+            } else {
+                // ros_namespace is "/" or empty - keep inherited namespace from parent
+                log::debug!(
+                    "ros_namespace is root or empty, keeping inherited namespace: '{}'",
+                    include_context.current_namespace()
+                );
             }
+        } else {
+            // No ros_namespace provided - keep inherited namespace from parent
+            log::debug!(
+                "No ros_namespace provided, keeping inherited namespace: '{}'",
+                include_context.current_namespace()
+            );
         }
 
         // Apply include arguments
@@ -570,10 +428,11 @@ impl LaunchTraverser {
         // Create temporary traverser for included file
         let mut included_traverser = LaunchTraverser {
             context: include_context,
+            parse_context: ParseContext::new(HashMap::new()), // Empty for includes
+            include_chain: self.include_chain.clone(),
             records: Vec::new(),
             containers: Vec::new(),
             load_nodes: Vec::new(),
-            include_chain: self.include_chain.clone(),
         };
         included_traverser.traverse_entity(&root)?;
 
@@ -598,7 +457,7 @@ impl LaunchTraverser {
         }
 
         // Apply ROS namespace if provided (for includes from Python OpaqueFunction)
-        if let Some(ns) = ros_namespace {
+        if let Some(ref ns) = ros_namespace {
             if !ns.is_empty() && ns != "/" {
                 log::debug!(
                     "Applying ROS namespace '{}' to {} nodes, {} containers, {} load_nodes from XML include",
@@ -611,7 +470,7 @@ impl LaunchTraverser {
                 // Apply namespace to regular nodes
                 for node in &mut included_traverser.records {
                     if let Some(ref node_ns) = node.namespace {
-                        node.namespace = Some(Self::apply_namespace_prefix(&ns, node_ns));
+                        node.namespace = Some(Self::apply_namespace_prefix(ns, node_ns));
                     } else {
                         node.namespace = Some(ns.clone());
                     }
@@ -632,7 +491,7 @@ impl LaunchTraverser {
                     };
 
                     // Apply namespace prefix
-                    container.namespace = Self::apply_namespace_prefix(&ns, &container.namespace);
+                    container.namespace = Self::apply_namespace_prefix(ns, &container.namespace);
 
                     // Build new full name
                     let new_full_name = if container.namespace.starts_with('/') {
@@ -650,7 +509,7 @@ impl LaunchTraverser {
 
                 // Apply namespace to load_nodes and update target containers
                 for load_node in &mut included_traverser.load_nodes {
-                    load_node.namespace = Self::apply_namespace_prefix(&ns, &load_node.namespace);
+                    load_node.namespace = Self::apply_namespace_prefix(ns, &load_node.namespace);
 
                     // Update target_container_name if it matches a renamed container
                     if let Some(new_name) = container_name_map.get(&load_node.target_container_name)
@@ -665,7 +524,7 @@ impl LaunchTraverser {
                         // If not in map, still apply namespace prefix for external containers
                         if load_node.target_container_name.starts_with('/') {
                             let prefixed =
-                                Self::apply_namespace_prefix(&ns, &load_node.target_container_name);
+                                Self::apply_namespace_prefix(ns, &load_node.target_container_name);
                             if prefixed != load_node.target_container_name {
                                 log::debug!(
                                     "Applying namespace prefix to target_container_name: '{}' -> '{}'",
@@ -684,6 +543,70 @@ impl LaunchTraverser {
         self.records.extend(included_traverser.records);
         self.containers.extend(included_traverser.containers);
         self.load_nodes.extend(included_traverser.load_nodes);
+
+        // CRITICAL: Also merge parse_context captures from included file
+        // XML load_composable_node elements are captured in parse_context (line 986)
+        // We need to apply namespace to these captures as well
+        for node in included_traverser.parse_context.captured_nodes() {
+            let mut node_copy = node.clone();
+            // Apply namespace if provided
+            if let Some(ref ns) = ros_namespace {
+                if !ns.is_empty() && ns != "/" {
+                    if let Some(ref node_ns) = node_copy.namespace {
+                        node_copy.namespace = Some(Self::apply_namespace_prefix(ns, node_ns));
+                    } else {
+                        node_copy.namespace = Some(ns.clone());
+                    }
+                }
+            }
+            self.parse_context.capture_node(node_copy);
+        }
+
+        for container in included_traverser.parse_context.captured_containers() {
+            let mut container_copy = container.clone();
+            // Apply namespace if provided
+            if let Some(ref ns) = ros_namespace {
+                if !ns.is_empty() && ns != "/" {
+                    container_copy.namespace =
+                        Self::apply_namespace_prefix(ns, &container_copy.namespace);
+                    container_copy.name = Self::apply_namespace_prefix(ns, &container_copy.name);
+                }
+            }
+            self.parse_context.capture_container(container_copy);
+        }
+
+        for load_node in included_traverser.parse_context.captured_load_nodes() {
+            let mut load_node_copy = load_node.clone();
+            log::debug!(
+                "Merging load_node from parse_context: target='{}', ros_namespace={:?}",
+                load_node_copy.target_container_name,
+                ros_namespace
+            );
+            // Apply namespace if provided
+            if let Some(ref ns) = ros_namespace {
+                if !ns.is_empty() && ns != "/" {
+                    load_node_copy.namespace =
+                        Self::apply_namespace_prefix(ns, &load_node_copy.namespace);
+                    // Apply namespace to target_container_name
+                    if load_node_copy.target_container_name.starts_with('/') {
+                        let old_target = load_node_copy.target_container_name.clone();
+                        load_node_copy.target_container_name =
+                            Self::apply_namespace_prefix(ns, &load_node_copy.target_container_name);
+                        log::debug!(
+                            "Applied namespace to target: '{}' -> '{}'",
+                            old_target,
+                            load_node_copy.target_container_name
+                        );
+                    }
+                }
+            }
+            self.parse_context.capture_load_node(load_node_copy);
+        }
+
+        log::debug!(
+            "Merged XML include captures: {} load_nodes from parse_context",
+            included_traverser.parse_context.captured_load_nodes().len()
+        );
 
         Ok(())
     }
@@ -793,10 +716,11 @@ impl LaunchTraverser {
 
         let mut included_traverser = LaunchTraverser {
             context: include_context,
+            parse_context: ParseContext::new(HashMap::new()), // Empty for includes
+            include_chain: child_chain,
             records: Vec::new(),
             containers: Vec::new(),
             load_nodes: Vec::new(),
-            include_chain: child_chain,
         };
         included_traverser.traverse_entity(&root)?;
 
@@ -837,10 +761,11 @@ impl LaunchTraverser {
 
                 let mut traverser = LaunchTraverser {
                     context: thread_context,
+                    parse_context: ParseContext::new(HashMap::new()), // Empty for parallel includes
+                    include_chain: include_chain.clone(), // Each thread gets its own chain
                     records: Vec::new(),
                     containers: Vec::new(),
                     load_nodes: Vec::new(),
-                    include_chain: include_chain.clone(), // Each thread gets its own chain
                 };
 
                 // Process the include
@@ -1002,12 +927,14 @@ impl LaunchTraverser {
                 }
             }
             "node" => {
+                // XML nodes use CommandGenerator for complete parameter file loading
                 let node = NodeAction::from_entity(entity)?;
                 let record = CommandGenerator::generate_node_record(&node, &self.context)
                     .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
                 self.records.push(record);
             }
             "executable" => {
+                // Executables don't use NodeCapture - they generate NodeRecord directly
                 let exec = ExecutableAction::from_entity(entity)?;
                 let record = CommandGenerator::generate_executable_record(&exec, &self.context)
                     .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
@@ -1087,20 +1014,16 @@ impl LaunchTraverser {
                 let namespace = resolve_substitutions(&ns_subs, &self.context)
                     .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
 
-                // Push to XML context namespace stack
+                // Push to both contexts to keep them in sync
+                // self.context is used for XML processing
+                // self.parse_context is used by Python code via thread-local
                 self.context.push_namespace(namespace.clone());
-
-                // ALSO push to Python ROS namespace stack so Python files can access it
-                use crate::python::bridge::push_ros_namespace;
-                push_ros_namespace(namespace);
+                self.parse_context.push_namespace(namespace);
             }
             "pop-ros-namespace" => {
-                // Pop from XML context namespace stack
+                // Pop from both contexts to keep them in sync
                 self.context.pop_namespace();
-
-                // ALSO pop from Python ROS namespace stack to keep them in sync
-                use crate::python::bridge::pop_ros_namespace;
-                pop_ros_namespace();
+                self.parse_context.pop_namespace();
             }
             "node_container" | "node-container" => {
                 // Parse container and its composable nodes
@@ -1126,17 +1049,19 @@ impl LaunchTraverser {
                 log::info!("Skipping standalone composable_node (should be in node_container)");
             }
             "load_composable_node" | "load-composable-node" => {
-                // Parse load_composable_node action and convert to LoadNodeRecords
+                // Parse load_composable_node action and convert to captures
                 let action = LoadComposableNodeAction::from_entity(entity, &self.context)?;
-                let load_records = action.to_load_node_records(&self.context)?;
+                let captures = action.to_captures(&self.context)?;
 
                 log::info!(
                     "Loaded {} composable node(s) into container via load_composable_node",
-                    load_records.len()
+                    captures.len()
                 );
 
-                // Add to load_nodes
-                self.load_nodes.extend(load_records);
+                // Add to parse_context
+                for capture in captures {
+                    self.parse_context.capture_load_node(capture);
+                }
             }
             other => {
                 log::warn!("Unsupported action type: {}", other);
@@ -1146,15 +1071,42 @@ impl LaunchTraverser {
         Ok(())
     }
 
-    pub fn into_record_json(self) -> RecordJson {
-        RecordJson {
-            node: self.records,
-            container: self.containers,
-            load_node: self.load_nodes,
+    pub fn into_record_json(self) -> Result<RecordJson> {
+        // Convert captures from parse_context to records
+        let mut nodes: Vec<_> = self
+            .parse_context
+            .captured_nodes()
+            .iter()
+            .map(|n| n.to_record())
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut containers: Vec<_> = self
+            .parse_context
+            .captured_containers()
+            .iter()
+            .map(|c| c.to_record())
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut load_nodes: Vec<_> = self
+            .parse_context
+            .captured_load_nodes()
+            .iter()
+            .map(|ln| ln.to_record())
+            .collect::<Result<Vec<_>>>()?;
+
+        // Merge with local vectors (from includes that haven't migrated yet)
+        nodes.extend(self.records);
+        containers.extend(self.containers);
+        load_nodes.extend(self.load_nodes);
+
+        Ok(RecordJson {
+            node: nodes,
+            container: containers,
+            load_node: load_nodes,
             lifecycle_node: Vec::new(),
             file_data: HashMap::new(),
             variables: self.context.configurations(),
-        }
+        })
     }
 
     /// Process a YAML launch file to extract argument declarations
@@ -1212,7 +1164,7 @@ impl LaunchTraverser {
 pub fn parse_launch_file(path: &Path, cli_args: HashMap<String, String>) -> Result<RecordJson> {
     let mut traverser = LaunchTraverser::new(cli_args);
     traverser.traverse_file(path)?;
-    Ok(traverser.into_record_json())
+    traverser.into_record_json()
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 
 #![allow(non_local_definitions)] // pyo3 macros generate non-local impls
 
-use crate::python::bridge::CAPTURED_INCLUDES;
+use crate::python::bridge::capture_include;
 use pyo3::prelude::*;
 
 /// Mock DeclareLaunchArgument action
@@ -410,8 +410,8 @@ impl GroupAction {
     ) -> PyResult<Self> {
         // CRITICAL FIX: GroupActions create a scoped namespace context.
         // When the actions list is passed in, any PushRosNamespace actions have already
-        // been constructed and have pushed onto ROS_NAMESPACE_STACK. We need to pop them
-        // after the GroupAction is done being used (simulating scope exit).
+        // been constructed and have pushed onto the ParseContext's namespace stack. We need
+        // to pop them after the GroupAction is done being used (simulating scope exit).
         //
         // Since we're in dump mode (not actually executing the launch system), we simulate
         // this by counting PushRosNamespace actions at the start and popping them immediately
@@ -865,8 +865,7 @@ impl IncludeLaunchDescription {
 
             log::debug!("Capturing include with ROS namespace: '{}'", ros_namespace);
 
-            let mut includes = CAPTURED_INCLUDES.lock();
-            includes.push(crate::python::bridge::IncludeCapture {
+            capture_include(crate::python::bridge::IncludeCapture {
                 file_path: file_path.clone(),
                 args: args.clone(),
                 ros_namespace,

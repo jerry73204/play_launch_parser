@@ -1176,6 +1176,64 @@ fn test_opaque_xml_namespace_preservation() {
 }
 
 #[test]
+fn test_debug_namespace_context() {
+    let _guard = python_test_guard();
+
+    // Simple test to debug namespace context passing
+    // Flow: XML pushes /test_ns → Python OpaqueFunction → XML include with load_node
+    let fixture = get_fixture_path("debug_ns_main.launch.xml");
+    let fixture_dir = get_fixture_path("");
+
+    let mut args = HashMap::new();
+    args.insert(
+        "fixture_dir".to_string(),
+        fixture_dir.to_str().unwrap().to_string(),
+    );
+
+    let result = parse_launch_file(&fixture, args);
+    if let Err(ref e) = result {
+        eprintln!("Parse error: {}", e);
+        eprintln!("Error debug: {:?}", e);
+    }
+    assert!(
+        result.is_ok(),
+        "Should parse successfully: {:?}",
+        result.err()
+    );
+
+    let record = result.unwrap();
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Debug: print what we got
+    eprintln!("\n=== DEBUG OUTPUT ===");
+    eprintln!(
+        "Containers: {}",
+        serde_json::to_string_pretty(&json["container"]).unwrap()
+    );
+    eprintln!(
+        "Load nodes: {}",
+        serde_json::to_string_pretty(&json["load_node"]).unwrap()
+    );
+
+    let containers = json["container"].as_array().unwrap();
+    eprintln!("Container count: {}", containers.len());
+
+    let load_nodes = json["load_node"].as_array().unwrap();
+    eprintln!("Load node count: {}", load_nodes.len());
+
+    // Check what namespace we got
+    if !load_nodes.is_empty() {
+        let target = load_nodes[0]["target_container_name"].as_str().unwrap();
+        eprintln!("First load_node target: {}", target);
+        eprintln!("Expected: should start with /test_ns/");
+        eprintln!(
+            "Actual starts with /test_ns/: {}",
+            target.starts_with("/test_ns/")
+        );
+    }
+}
+
+#[test]
 fn test_utilities_functions() {
     let _guard = python_test_guard();
 

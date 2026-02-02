@@ -3,6 +3,7 @@
 use crate::{
     actions::ComposableNodeAction,
     error::{ParseError, Result},
+    python::bridge::LoadNodeCapture,
     record::LoadNodeRecord,
     substitution::{parse_substitutions, resolve_substitutions, LaunchContext, Substitution},
     xml::{Entity, XmlEntity},
@@ -53,6 +54,59 @@ impl LoadComposableNodeAction {
     }
 
     /// Convert to LoadNodeRecords by resolving the target container
+    /// Convert to LoadNodeCaptures for ParseContext storage
+    pub fn to_captures(&self, context: &LaunchContext) -> Result<Vec<LoadNodeCapture>> {
+        // Resolve target container name
+        let target_container_name = resolve_substitutions(&self.target, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        // Normalize target container name
+        let normalized_target = if target_container_name.starts_with('/') {
+            target_container_name
+        } else {
+            let current_ns = context.current_namespace();
+            if current_ns == "/" {
+                format!("/{}", target_container_name)
+            } else {
+                format!("{}/{}", current_ns, target_container_name)
+            }
+        };
+
+        // Convert composable nodes to LoadNodeCaptures
+        let captures: Vec<LoadNodeCapture> = self
+            .composable_nodes
+            .iter()
+            .map(|node| {
+                // Extract the container namespace from the target
+                let container_namespace = if let Some(last_slash_idx) = normalized_target.rfind('/')
+                {
+                    if last_slash_idx == 0 {
+                        "/"
+                    } else {
+                        &normalized_target[..last_slash_idx]
+                    }
+                } else {
+                    "/"
+                };
+
+                LoadNodeCapture {
+                    package: node.package.clone(),
+                    plugin: node.plugin.clone(),
+                    target_container_name: normalized_target.clone(),
+                    node_name: node.name.clone(),
+                    namespace: node
+                        .namespace
+                        .clone()
+                        .unwrap_or_else(|| container_namespace.to_string()),
+                    parameters: node.parameters.clone(),
+                    remappings: node.remappings.clone(),
+                }
+            })
+            .collect();
+
+        Ok(captures)
+    }
+
     pub fn to_load_node_records(&self, context: &LaunchContext) -> Result<Vec<LoadNodeRecord>> {
         // Resolve target container name
         let target_container_name = resolve_substitutions(&self.target, context)
