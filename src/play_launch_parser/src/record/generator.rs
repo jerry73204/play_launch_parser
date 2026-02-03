@@ -3,9 +3,11 @@
 use crate::{
     actions::{ExecutableAction, NodeAction},
     error::GenerationError,
+    params::load_and_resolve_param_file,
     record::types::NodeRecord,
     substitution::{resolve_substitutions, LaunchContext},
 };
+use std::path::Path;
 
 pub struct CommandGenerator;
 
@@ -65,18 +67,20 @@ impl CommandGenerator {
         // Note: We do NOT expand parameters from files into the params array
         // because some YAML parameters have special characters (colons, spaces)
         // that cannot be passed via command-line `-p` arguments. Instead, we
-        // read the file contents and store them for play_launch to write out.
+        // load the file, resolve substitutions in the YAML content, and store
+        // the resolved YAML for play_launch to write out.
         let mut params_files = Vec::new();
         for param_file_subs in &node.param_files {
             let param_file_path = resolve_substitutions(param_file_subs, context)?;
-            // Read the file contents
-            let file_contents = std::fs::read_to_string(&param_file_path).map_err(|e| {
-                GenerationError::IoError(format!(
-                    "Failed to read parameter file '{}': {}",
-                    param_file_path, e
-                ))
-            })?;
-            params_files.push(file_contents);
+            // Load the file and resolve all substitutions in its contents
+            let resolved_contents =
+                load_and_resolve_param_file(Path::new(&param_file_path), context).map_err(|e| {
+                    GenerationError::IoError(format!(
+                        "Failed to load and resolve parameter file '{}': {}",
+                        param_file_path, e
+                    ))
+                })?;
+            params_files.push(resolved_contents);
         }
 
         // Collect node-specific remappings

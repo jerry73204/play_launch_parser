@@ -1,8 +1,93 @@
 //! Parameter file loading
 
-use crate::error::ParseError;
+use crate::{
+    error::ParseError,
+    substitution::{resolve_substitutions, LaunchContext},
+};
 use serde_yaml::Value;
 use std::{fs, path::Path};
+
+/// Load a parameter file and resolve all substitutions in its contents.
+/// Returns the resolved YAML content as a string.
+pub fn load_and_resolve_param_file(
+    path: &Path,
+    context: &LaunchContext,
+) -> Result<String, ParseError> {
+    let content = fs::read_to_string(path)?;
+    let mut yaml: Value = serde_yaml::from_str(&content)
+        .map_err(|e| ParseError::InvalidSubstitution(format!("YAML parse error: {}", e)))?;
+
+    // Recursively resolve all substitutions in the YAML structure
+    resolve_yaml_substitutions(&mut yaml, context)?;
+
+    // Serialize back to YAML string
+    serde_yaml::to_string(&yaml)
+        .map_err(|e| ParseError::InvalidSubstitution(format!("YAML serialize error: {}", e)))
+}
+
+/// Recursively resolve substitutions in a YAML value
+fn resolve_yaml_substitutions(
+    value: &mut Value,
+    context: &LaunchContext,
+) -> Result<(), ParseError> {
+    match value {
+        Value::String(s) => {
+            // Check if the string contains substitutions (starts with $)
+            if s.contains('$') {
+                // Parse and resolve the substitution
+                let subs = crate::substitution::parse_substitutions(s)?;
+                let resolved = resolve_substitutions(&subs, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+                // Try to convert the resolved string to the appropriate YAML type
+                *value = string_to_yaml_value(&resolved);
+            }
+        }
+        Value::Mapping(map) => {
+            // Recursively process all values in the mapping
+            for (_, v) in map.iter_mut() {
+                resolve_yaml_substitutions(v, context)?;
+            }
+        }
+        Value::Sequence(seq) => {
+            // Recursively process all items in the sequence
+            for item in seq.iter_mut() {
+                resolve_yaml_substitutions(item, context)?;
+            }
+        }
+        _ => {
+            // Other types (numbers, bools, null) don't need resolution
+        }
+    }
+    Ok(())
+}
+
+/// Convert a string to the appropriate YAML value type
+fn string_to_yaml_value(s: &str) -> Value {
+    // Try to parse as boolean
+    match s {
+        "true" => return Value::Bool(true),
+        "false" => return Value::Bool(false),
+        "null" | "~" => return Value::Null,
+        _ => {}
+    }
+
+    // Try to parse as integer
+    if let Ok(n) = s.parse::<i64>() {
+        return Value::Number(n.into());
+    }
+
+    // Try to parse as float
+    if let Ok(n) = s.parse::<f64>() {
+        // serde_yaml doesn't have a direct from_f64, so serialize and deserialize
+        if let Ok(value) = serde_yaml::to_value(n) {
+            return value;
+        }
+    }
+
+    // Default to string
+    Value::String(s.to_string())
+}
 
 /// Load parameters from a YAML file
 pub fn load_param_file(path: &Path) -> Result<Vec<(String, String)>, ParseError> {
