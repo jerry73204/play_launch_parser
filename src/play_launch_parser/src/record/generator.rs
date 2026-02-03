@@ -3,11 +3,9 @@
 use crate::{
     actions::{ExecutableAction, NodeAction},
     error::GenerationError,
-    params::load_param_file,
     record::types::NodeRecord,
     substitution::{resolve_substitutions, LaunchContext},
 };
-use std::path::Path;
 
 pub struct CommandGenerator;
 
@@ -54,7 +52,7 @@ impl CommandGenerator {
         };
 
         // Process inline parameters
-        let mut params: Vec<(String, String)> = node
+        let params: Vec<(String, String)> = node
             .parameters
             .iter()
             .map(|p| {
@@ -64,22 +62,21 @@ impl CommandGenerator {
             .collect::<Result<Vec<_>, GenerationError>>()?;
 
         // Process parameter files
+        // Note: We do NOT expand parameters from files into the params array
+        // because some YAML parameters have special characters (colons, spaces)
+        // that cannot be passed via command-line `-p` arguments. Instead, we
+        // read the file contents and store them for play_launch to write out.
         let mut params_files = Vec::new();
         for param_file_subs in &node.param_files {
             let param_file_path = resolve_substitutions(param_file_subs, context)?;
-
-            // Load parameters from file and merge with inline params
-            match load_param_file(Path::new(&param_file_path)) {
-                Ok(file_params) => {
-                    params.extend(file_params);
-                }
-                Err(e) => {
-                    log::warn!("Failed to load parameter file {}: {}", param_file_path, e);
-                }
-            }
-
-            // Move param_file_path into vec after use, no clone needed
-            params_files.push(param_file_path);
+            // Read the file contents
+            let file_contents = std::fs::read_to_string(&param_file_path).map_err(|e| {
+                GenerationError::IoError(format!(
+                    "Failed to read parameter file '{}': {}",
+                    param_file_path, e
+                ))
+            })?;
+            params_files.push(file_contents);
         }
 
         // Collect node-specific remappings

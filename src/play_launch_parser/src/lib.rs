@@ -1331,9 +1331,10 @@ test_node:
         let record = parse_launch_file(launch_file.path(), HashMap::new()).unwrap();
         assert_eq!(record.node.len(), 1);
 
-        // Check that both inline and file parameters are present
+        // Check that inline params are in params array, but file params are NOT
+        // (file params should only be referenced via param_files)
         let node = &record.node[0];
-        assert!(node.params.len() >= 4); // inline_param + 3 from YAML
+        assert_eq!(node.params.len(), 1); // Only inline_param
 
         // Check inline parameter
         let inline_param = node
@@ -1343,31 +1344,35 @@ test_node:
             .expect("inline_param not found");
         assert_eq!(inline_param.1, "inline_value");
 
-        // Check parameters from file
-        let param1 = node
-            .params
-            .iter()
-            .find(|(k, _)| k == "param1")
-            .expect("param1 not found");
-        assert_eq!(param1.1, "value1");
-
-        let param2 = node
-            .params
-            .iter()
-            .find(|(k, _)| k == "param2")
-            .expect("param2 not found");
-        assert_eq!(param2.1, "42");
-
-        let nested_param = node
-            .params
-            .iter()
-            .find(|(k, _)| k == "nested.param3")
-            .expect("nested.param3 not found");
-        assert_eq!(nested_param.1, "nested_value");
-
-        // Check that the param file path is recorded
+        // Check that parameter file contents are recorded
+        // Note: Parameters from files are NOT expanded into params array
+        // to avoid issues with special characters (colons, spaces) that
+        // cannot be passed via command-line `-p` arguments.
+        // The file contents are stored for play_launch to write out.
         assert_eq!(node.params_files.len(), 1);
-        assert_eq!(node.params_files[0], param_file_path);
+        assert!(
+            node.params_files[0].contains("param1"),
+            "File contents should contain param1"
+        );
+        assert!(
+            node.params_files[0].contains("param2"),
+            "File contents should contain param2"
+        );
+
+        // These parameters would be in the file, but NOT in params array
+        let param1 = node.params.iter().find(|(k, _)| k == "param1");
+        assert!(param1.is_none(), "param1 should not be in params array");
+
+        let param2 = node.params.iter().find(|(k, _)| k == "param2");
+        assert!(param2.is_none(), "param2 should not be in params array");
+
+        let nested_param = node.params.iter().find(|(k, _)| k == "nested.param3");
+        assert!(
+            nested_param.is_none(),
+            "nested.param3 should not be in params array"
+        );
+
+        // Param file path is already checked above
     }
 
     #[test]

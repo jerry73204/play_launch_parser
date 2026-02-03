@@ -79,6 +79,9 @@ pub enum GenerationError {
 
     #[error("Executable not found: {0}")]
     ExecutableNotFound(String),
+
+    #[error("IO error: {0}")]
+    IoError(String),
 }
 
 pub type Result<T> = std::result::Result<T, ParseError>;
