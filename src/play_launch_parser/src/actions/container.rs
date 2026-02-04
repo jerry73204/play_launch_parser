@@ -128,16 +128,17 @@ impl ContainerAction {
             format!("__ns:={}", self.namespace),
         ];
 
-        // Add global parameters to the command
+        // Add global parameters to the command (already filtered to SetParameter values)
         for (key, value) in context.global_parameters() {
             cmd.push("-p".to_string());
             cmd.push(format!("{}:={}", key, value));
         }
 
-        // Generate exec_name (container_name-1 following Python parser convention)
-        let exec_name = Some(format!("{}-1", self.executable));
+        // Generate exec_name using container name (not executable)
+        // Python parser uses node name and strips counter suffixes
+        let exec_name = Some(self.name.clone());
 
-        // Collect global parameters
+        // Collect global parameters (already filtered to SetParameter values)
         let global_params_vec: Vec<(String, String)> = context
             .global_parameters()
             .iter()
@@ -162,7 +163,7 @@ impl ContainerAction {
             params: Vec::new(),
             params_files: Vec::new(),
             remaps: Vec::new(),
-            respawn: Some(false),
+            respawn: None,
             respawn_delay: None,
             ros_args: None,
         })
@@ -188,7 +189,7 @@ impl ContainerAction {
             format!("__ns:={}", self.namespace),
         ];
 
-        // Add global parameters to the command
+        // Add global parameters to the command (already filtered to SetParameter values)
         for (key, value) in context.global_parameters() {
             cmd.push("-p".to_string());
             cmd.push(format!("{}:={}", key, value));

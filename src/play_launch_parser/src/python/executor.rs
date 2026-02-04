@@ -3,17 +3,17 @@
 //! Executes Python launch files with PyO3 mocks to capture node definitions.
 
 use crate::{error::Result, python::bridge::LAUNCH_CONFIGURATIONS};
+use indexmap::IndexMap;
 use pyo3::prelude::*;
-use std::collections::HashMap;
 
 /// Executes Python launch files with mock API
 pub struct PythonLaunchExecutor {
-    global_params: HashMap<String, String>,
+    global_params: IndexMap<String, String>,
 }
 
 impl PythonLaunchExecutor {
     /// Create new executor with global parameters
-    pub fn new(global_params: HashMap<String, String>) -> Self {
+    pub fn new(global_params: IndexMap<String, String>) -> Self {
         Self { global_params }
     }
 
@@ -104,7 +104,8 @@ if not _ok:
             py.run(isolation_code, None, None)?;
             log::debug!("Installed aggressive Python environment isolation for launch* mocks");
 
-            // Populate LAUNCH_CONFIGURATIONS with global parameters
+            // Populate LAUNCH_CONFIGURATIONS with launch arguments for LaunchConfiguration resolution
+            // GLOBAL_PARAMETERS accumulates across all Python files (don't clear it)
             {
                 let mut configs = LAUNCH_CONFIGURATIONS.lock();
                 configs.clear();

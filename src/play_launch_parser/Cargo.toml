@@ -34,6 +34,9 @@ rayon = "1.8"             # Parallel processing
 # Performance optimizations (Phase 7.4)
 lru = "0.16.3"            # LRU cache for substitution parsing
 
+# Parser parity fixes
+indexmap = "2.0"          # Preserves insertion order for global_parameters
+
 [dev-dependencies]
 tempfile = "3.8"
 

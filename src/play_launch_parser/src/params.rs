@@ -25,6 +25,37 @@ pub fn load_and_resolve_param_file(
         .map_err(|e| ParseError::InvalidSubstitution(format!("YAML serialize error: {}", e)))
 }
 
+/// Extract parameters from a YAML file and resolve substitutions.
+/// Returns a vector of (param_name, param_value) tuples.
+/// Used for temp parameter files that should be expanded into inline params.
+pub fn extract_params_from_yaml(
+    path: &Path,
+    context: &LaunchContext,
+) -> Result<Vec<(String, String)>, ParseError> {
+    let content = fs::read_to_string(path)?;
+    let mut yaml: Value = serde_yaml::from_str(&content)
+        .map_err(|e| ParseError::InvalidSubstitution(format!("YAML parse error: {}", e)))?;
+
+    // Recursively resolve all substitutions in the YAML structure
+    resolve_yaml_substitutions(&mut yaml, context)?;
+
+    // Extract parameters from resolved YAML
+    let mut params = Vec::new();
+    if let Value::Mapping(root_map) = yaml {
+        // Iterate through each node in the YAML
+        for (_node_name, node_value) in root_map.iter() {
+            if let Value::Mapping(node_map) = node_value {
+                // Look for ros__parameters key
+                if let Some(Value::Mapping(params_map)) = node_map.get("ros__parameters") {
+                    flatten_params("", params_map, &mut params);
+                }
+            }
+        }
+    }
+
+    Ok(params)
+}
+
 /// Recursively resolve substitutions in a YAML value
 fn resolve_yaml_substitutions(
     value: &mut Value,

@@ -5,6 +5,7 @@ use crate::{
     error::Result,
     record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord},
 };
+use indexmap::IndexMap;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
@@ -13,6 +14,12 @@ use std::{cell::RefCell, collections::HashMap, sync::Arc};
 /// This allows conditions to access and resolve LaunchConfiguration substitutions
 pub static LAUNCH_CONFIGURATIONS: Lazy<Arc<Mutex<HashMap<String, String>>>> =
     Lazy::new(|| Arc::new(Mutex::new(HashMap::new())));
+
+/// Global storage for ROS global parameters set via SetParameter actions
+/// Separate from LAUNCH_CONFIGURATIONS to distinguish launch args from global params
+/// Uses IndexMap to preserve insertion order (matches Python dict behavior)
+pub static GLOBAL_PARAMETERS: Lazy<Arc<Mutex<IndexMap<String, String>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(IndexMap::new())));
 
 /// Captured node data from Python
 #[derive(Debug, Clone)]
@@ -31,34 +38,14 @@ pub struct NodeCapture {
 impl NodeCapture {
     /// Convert to NodeRecord and generate command line
     pub fn to_record(&self) -> Result<NodeRecord> {
-        // Extract global parameters from LAUNCH_CONFIGURATIONS
+        // Extract global parameters from GLOBAL_PARAMETERS (set via SetParameter)
         let global_params = {
-            let configs = LAUNCH_CONFIGURATIONS.lock();
-            let mut params = Vec::new();
-
-            // Common global parameters to check
-            for key in [
-                "use_sim_time",
-                "wheel_radius",
-                "wheel_width",
-                "wheel_base",
-                "wheel_tread",
-                "front_overhang",
-                "rear_overhang",
-                "left_overhang",
-                "right_overhang",
-                "vehicle_height",
-                "max_steer_angle",
-            ] {
-                if let Some(value) = configs.get(key) {
-                    params.push((key.to_string(), value.clone()));
-                }
-            }
+            let params = GLOBAL_PARAMETERS.lock();
 
             if params.is_empty() {
                 None
             } else {
-                Some(params)
+                Some(params.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             }
         };
 
@@ -347,7 +334,7 @@ pub fn pop_ros_namespace() {
 pub fn get_current_ros_namespace() -> String {
     with_parse_context(|ctx| {
         let result = ctx.current_namespace();
-        log::trace!("get_current_ros_namespace from ParseContext: '{}'", result);
+        log::debug!("get_current_ros_namespace from ParseContext: '{}'", result);
         result
     })
 }

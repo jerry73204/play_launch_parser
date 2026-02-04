@@ -213,7 +213,8 @@ impl Node {
         let full_namespace = match node_ns {
             Some(ns) => {
                 if ros_namespace == "/" {
-                    if ns.is_empty() {
+                    if ns.is_empty() || ns == "/" {
+                        // Empty namespace or root namespace = no namespace (matches Python behavior)
                         None
                     } else {
                         Some(ns)
@@ -1053,15 +1054,63 @@ pub struct SetParameter {
 impl SetParameter {
     #[new]
     #[pyo3(signature = (*, name, value, **_kwargs))]
-    fn new(name: String, value: PyObject, _kwargs: Option<&PyDict>) -> Self {
-        log::debug!("Python Launch SetParameter: {}=<value>", name);
-        // TODO: Capture this as a global parameter
-        // For now, just store it but don't use it
-        Self { name, value }
+    fn new(py: Python, name: String, value: PyObject, _kwargs: Option<&PyDict>) -> PyResult<Self> {
+        // Try to resolve the value if it's a substitution (like LaunchConfiguration)
+        // Use perform() with context if available, otherwise fall back to string conversion
+        let value_str = Self::resolve_value(py, &value)?;
+
+        log::debug!("Python Launch SetParameter: {}={}", name, value_str);
+
+        // Capture this as a global parameter in GLOBAL_PARAMETERS
+        // (separate from LAUNCH_CONFIGURATIONS which is for launch args)
+        {
+            use crate::python::bridge::GLOBAL_PARAMETERS;
+            let mut params = GLOBAL_PARAMETERS.lock();
+
+            // Match Python boolean case: "False"/"True" not "false"/"true"
+            let normalized_value = match value_str.as_str() {
+                "false" => "False".to_string(),
+                "true" => "True".to_string(),
+                _ => value_str.clone(),
+            };
+
+            params.insert(name.clone(), normalized_value);
+            log::debug!(
+                "Captured SetParameter '{}' = '{}' to GLOBAL_PARAMETERS",
+                name,
+                value_str
+            );
+        }
+
+        Ok(Self { name, value })
     }
 
     fn __repr__(&self) -> String {
         format!("SetParameter(name='{}')", self.name)
+    }
+}
+
+impl SetParameter {
+    /// Resolve a value PyObject, attempting to resolve substitutions if possible
+    fn resolve_value(py: Python, obj: &PyObject) -> PyResult<String> {
+        use crate::python::api::utils::create_launch_context;
+
+        let obj_ref = obj.as_ref(py);
+
+        // If it has a perform() method, try to resolve it with a real context
+        if obj_ref.hasattr("perform")? {
+            if let Ok(context) = create_launch_context(py) {
+                if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+                    if let Ok(resolved) = result.extract::<String>() {
+                        log::debug!("Resolved SetParameter value via perform(): '{}'", resolved);
+                        return Ok(resolved);
+                    }
+                }
+            }
+        }
+
+        // Fallback to regular string conversion
+        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
@@ -1270,7 +1319,8 @@ impl LifecycleNode {
         let full_namespace = match node_ns {
             Some(ns) => {
                 if ros_namespace == "/" {
-                    if ns.is_empty() {
+                    if ns.is_empty() || ns == "/" {
+                        // Empty namespace or root namespace = no namespace (matches Python behavior)
                         None
                     } else {
                         Some(ns)

@@ -4,6 +4,7 @@ use crate::substitution::{
     parser::parse_substitutions,
     types::{resolve_substitutions, Substitution},
 };
+use indexmap::IndexMap;
 use std::{cell::Cell, collections::HashMap, path::PathBuf, sync::Arc};
 
 /// Maximum recursion depth for variable resolution to prevent stack overflow
@@ -30,7 +31,7 @@ struct ParentScope {
     configurations: HashMap<String, Vec<Substitution>>,
     environment: HashMap<String, String>,
     declared_arguments: HashMap<String, ArgumentMetadata>,
-    global_parameters: HashMap<String, String>,
+    global_parameters: IndexMap<String, String>,
     remappings: Vec<(String, String)>,
     /// Chain to grandparent scope
     parent: Option<Arc<ParentScope>>,
@@ -49,7 +50,7 @@ pub struct LaunchContext {
     local_configurations: HashMap<String, Vec<Substitution>>,
     local_environment: HashMap<String, String>,
     local_declared_arguments: HashMap<String, ArgumentMetadata>,
-    local_global_parameters: HashMap<String, String>,
+    local_global_parameters: IndexMap<String, String>,
     /// Local topic remappings (from -> to)
     local_remappings: Vec<(String, String)>,
 
@@ -65,7 +66,7 @@ impl LaunchContext {
             local_configurations: HashMap::new(),
             local_environment: HashMap::new(),
             local_declared_arguments: HashMap::new(),
-            local_global_parameters: HashMap::new(),
+            local_global_parameters: IndexMap::new(),
             local_remappings: Vec::new(),
             current_file: None,
             namespace_stack: vec!["/".to_string()], // Start with root namespace
@@ -91,7 +92,7 @@ impl LaunchContext {
             local_configurations: HashMap::new(), // Empty local scope
             local_environment: HashMap::new(),
             local_declared_arguments: HashMap::new(),
-            local_global_parameters: HashMap::new(),
+            local_global_parameters: IndexMap::new(),
             local_remappings: Vec::new(),
             current_file: None,
             namespace_stack: self.namespace_stack.clone(), // Small vec, acceptable to clone
@@ -442,9 +443,9 @@ impl LaunchContext {
     }
 
     /// Get all global parameters from entire scope chain
-    pub fn global_parameters(&self) -> HashMap<String, String> {
+    pub fn global_parameters(&self) -> IndexMap<String, String> {
         // Walk from root to local, so local values override parent values
-        let mut result = HashMap::new();
+        let mut result = IndexMap::new();
 
         // 1. Collect all parent scopes
         let mut scopes = Vec::new();

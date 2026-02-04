@@ -433,6 +433,7 @@ dependencies = [
  "clap",
  "dashmap",
  "env_logger",
+ "indexmap",
  "log",
  "lru",
  "once_cell",

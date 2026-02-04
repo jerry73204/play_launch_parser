@@ -172,10 +172,9 @@ fn test_parse_all_features() {
         .iter()
         .find(|n| n["name"].as_str() == Some("included_node"))
         .expect("Should have included_node from include");
-    assert_eq!(
-        included_node["namespace"].as_str().unwrap(),
-        "/",
-        "Included node should be in root namespace (not affected by group)"
+    assert!(
+        included_node["namespace"].is_null(),
+        "Included node should have null namespace (root/unspecified)"
     );
 }
 
@@ -388,12 +387,15 @@ fn test_push_pop_ros_namespace_actions() {
         .unwrap();
     assert_eq!(talker2["namespace"].as_str().unwrap(), "/robot1");
 
-    // listener2 should be in / (after popping robot1)
+    // listener2 should have null namespace (root/unspecified, after popping robot1)
     let listener2 = nodes
         .iter()
         .find(|n| n["name"].as_str() == Some("listener2"))
         .unwrap();
-    assert_eq!(listener2["namespace"].as_str().unwrap(), "/");
+    assert!(
+        listener2["namespace"].is_null(),
+        "listener2 should have null namespace (root/unspecified)"
+    );
 }
 
 #[test]
@@ -632,7 +634,10 @@ fn test_deeply_nested_namespaces() {
         .iter()
         .find(|n| n["name"].as_str() == Some("root_node"))
         .unwrap();
-    assert_eq!(root_node["namespace"].as_str().unwrap(), "/");
+    assert!(
+        root_node["namespace"].is_null(),
+        "root_node should have null namespace (root/unspecified)"
+    );
 }
 
 #[test]
@@ -1046,4 +1051,79 @@ fn test_load_composable_node() {
     );
     assert_eq!(validator["namespace"].as_str().unwrap(), "/planning");
     assert_eq!(validator["package"].as_str().unwrap(), "validator_pkg");
+}
+
+#[test]
+fn test_let_statement_ordering() {
+    let fixture = get_fixture_path("test_let_ordering.launch.xml");
+    assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);
+
+    let args = HashMap::new();
+    let result = parse_launch_file(&fixture, args);
+
+    assert!(
+        result.is_ok(),
+        "Parsing launch file with let statements should succeed: {:?}",
+        result.err()
+    );
+    let record = result.unwrap();
+
+    let json = serde_json::to_value(&record).unwrap();
+
+    // Verify we have 3 nodes
+    let nodes = json["node"].as_array().unwrap();
+    assert_eq!(nodes.len(), 3, "Should have 3 nodes");
+
+    // Node 1: should have parameter resolved to "initial_value" (before first let)
+    let node1 = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("node1"))
+        .expect("Should have node1");
+    let params1 = node1["params"].as_array().unwrap();
+    assert_eq!(params1.len(), 1, "Node1 should have 1 parameter");
+    let param1 = params1[0].as_array().unwrap();
+    assert_eq!(param1[0].as_str().unwrap(), "before_let");
+    assert_eq!(
+        param1[1].as_str().unwrap(),
+        "initial_value",
+        "Parameter should be resolved to initial_value (before let)"
+    );
+
+    // Node 2: should have parameter resolved to "changed_value" (after first let)
+    let node2 = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("node2"))
+        .expect("Should have node2");
+    let params2 = node2["params"].as_array().unwrap();
+    assert_eq!(params2.len(), 1, "Node2 should have 1 parameter");
+    let param2 = params2[0].as_array().unwrap();
+    assert_eq!(param2[0].as_str().unwrap(), "after_let");
+    assert_eq!(
+        param2[1].as_str().unwrap(),
+        "changed_value",
+        "Parameter should be resolved to changed_value (after first let)"
+    );
+
+    // Node 3: should have parameter resolved to "final_value" (after second let)
+    let node3 = nodes
+        .iter()
+        .find(|n| n["name"].as_str() == Some("node3"))
+        .expect("Should have node3");
+    let params3 = node3["params"].as_array().unwrap();
+    assert_eq!(params3.len(), 1, "Node3 should have 1 parameter");
+    let param3 = params3[0].as_array().unwrap();
+    assert_eq!(param3[0].as_str().unwrap(), "after_second_let");
+    assert_eq!(
+        param3[1].as_str().unwrap(),
+        "final_value",
+        "Parameter should be resolved to final_value (after second let)"
+    );
+
+    // Verify that the final value in variables is "final_value"
+    let variables = json["variables"].as_object().unwrap();
+    assert_eq!(
+        variables.get("test_var").and_then(|v| v.as_str()),
+        Some("final_value"),
+        "Variables should contain final value of test_var"
+    );
 }

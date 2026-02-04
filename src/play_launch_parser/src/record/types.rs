@@ -14,7 +14,7 @@ pub struct RecordJson {
     pub node: Vec<NodeRecord>,
     /// Launch configuration variables (e.g., from DeclareLaunchArgument or CLI args)
     /// Maps variable names to their resolved values
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub variables: HashMap<String, String>,
 }
 
@@ -123,7 +123,7 @@ mod tests {
         assert!(json.contains("\"load_node\""));
         assert!(json.contains("\"lifecycle_node\""));
         assert!(json.contains("\"file_data\""));
-        assert!(json.contains("\"variables\""));
+        // Note: "variables" is skipped when empty (matches Python behavior)
     }
 
     #[test]

@@ -228,8 +228,43 @@ impl LaunchTraverser {
         // Propagate execution errors
         exec_result.map_err(|e| ParseError::PythonError(e.to_string()))?;
 
+        // CRITICAL: Copy GLOBAL_PARAMETERS back into context for XML nodes
+        // SetParameter actions in Python store params in GLOBAL_PARAMETERS,
+        // XML nodes read from context.global_parameters()
+        {
+            use crate::python::bridge::GLOBAL_PARAMETERS;
+            let params = GLOBAL_PARAMETERS.lock();
+            eprintln!(
+                "[execute_python_file] Copying {} GLOBAL_PARAMETERS to context",
+                params.len()
+            );
+            for (key, value) in params.iter() {
+                self.context
+                    .set_global_parameter(key.clone(), value.clone());
+                log::debug!(
+                    "Copied GLOBAL_PARAMETERS '{}' = '{}' to context",
+                    key,
+                    value
+                );
+            }
+        }
+
         // Python API now stores captures directly in parse_context via thread-local
         // No need to extract from globals and re-store - captures are already there!
+        eprintln!("[execute_python_file] After Python execution:");
+        eprintln!(
+            "  Captured nodes: {}",
+            self.parse_context.captured_nodes().len()
+        );
+        eprintln!(
+            "  Captured containers: {}",
+            self.parse_context.captured_containers().len()
+        );
+        eprintln!(
+            "  Captured load_nodes: {}",
+            self.parse_context.captured_load_nodes().len()
+        );
+
         log::debug!(
             "Python file '{}' completed - captures stored in parse_context via thread-local",
             path.display()
@@ -729,6 +764,42 @@ impl LaunchTraverser {
         self.containers.extend(included_traverser.containers);
         self.load_nodes.extend(included_traverser.load_nodes);
 
+        // CRITICAL: Also merge parse_context captures from included file
+        // Python nodes are captured in parse_context and need to be merged
+        for node in included_traverser.parse_context.captured_nodes() {
+            self.parse_context.capture_node(node.clone());
+        }
+
+        for container in included_traverser.parse_context.captured_containers() {
+            self.parse_context.capture_container(container.clone());
+        }
+
+        for load_node in included_traverser.parse_context.captured_load_nodes() {
+            self.parse_context.capture_load_node(load_node.clone());
+        }
+
+        // CRITICAL: Merge configurations from included file back to parent context
+        // This ensures that <arg> defaults defined in included files are visible to parent
+        // Example: included file has <arg name="use_multithread" default="true"/>
+        //          Parent file needs to see use_multithread=true for conditionals
+        let included_configs = included_traverser.context.configurations();
+        eprintln!(
+            "[MERGE] Included file has {} configurations to merge",
+            included_configs.len()
+        );
+        for (key, value) in included_configs {
+            // Only set if not already defined in parent (parent takes precedence)
+            if self.context.get_configuration(&key).is_none() {
+                eprintln!(
+                    "[MERGE] Merging config from included file: {} = {}",
+                    key, value
+                );
+                self.context.set_configuration(key, value);
+            } else {
+                eprintln!("[MERGE] Skipping {} (already set in parent)", key);
+            }
+        }
+
         Ok(())
     }
 
@@ -1071,7 +1142,7 @@ impl LaunchTraverser {
         Ok(())
     }
 
-    pub fn into_record_json(self) -> Result<RecordJson> {
+    pub fn into_record_json(mut self) -> Result<RecordJson> {
         // Convert captures from parse_context to records
         let mut nodes: Vec<_> = self
             .parse_context
@@ -1093,6 +1164,71 @@ impl LaunchTraverser {
             .iter()
             .map(|ln| ln.to_record())
             .collect::<Result<Vec<_>>>()?;
+
+        // CRITICAL: Copy GLOBAL_PARAMETERS to context once at the end
+        // (accumulated across all Python files during parsing)
+        {
+            use crate::python::bridge::GLOBAL_PARAMETERS;
+            let params = GLOBAL_PARAMETERS.lock();
+            eprintln!(
+                "[into_record_json] Copying {} GLOBAL_PARAMETERS to context for backfill",
+                params.len()
+            );
+            for (key, value) in params.iter() {
+                self.context
+                    .set_global_parameter(key.clone(), value.clone());
+            }
+        }
+
+        // CRITICAL: Backfill global_params for nodes that were created before SetParameter ran
+        // Some XML nodes are created early in parsing, before Python files run SetParameter actions
+        let final_global_params = self.context.global_parameters();
+        eprintln!(
+            "[into_record_json] Final global_params has {} keys",
+            final_global_params.len()
+        );
+        if !final_global_params.is_empty() {
+            let global_params_vec: Vec<(String, String)> =
+                final_global_params.into_iter().collect();
+
+            // Backfill nodes from parse_context captures
+            let mut backfilled_count = 0;
+            for node in nodes.iter_mut() {
+                if node.global_params.is_none() {
+                    node.global_params = Some(global_params_vec.clone());
+                    backfilled_count += 1;
+                }
+            }
+            eprintln!(
+                "[into_record_json] Backfilled {} nodes from parse_context",
+                backfilled_count
+            );
+
+            // Backfill XML nodes from self.records
+            let mut backfilled_count = 0;
+            for node in self.records.iter_mut() {
+                if node.global_params.is_none() {
+                    node.global_params = Some(global_params_vec.clone());
+                    backfilled_count += 1;
+                }
+            }
+            eprintln!(
+                "[into_record_json] Backfilled {} XML nodes from self.records",
+                backfilled_count
+            );
+
+            // Backfill containers
+            for container in containers.iter_mut() {
+                if container.global_params.is_none() {
+                    container.global_params = Some(global_params_vec.clone());
+                }
+            }
+            for container in self.containers.iter_mut() {
+                if container.global_params.is_none() {
+                    container.global_params = Some(global_params_vec.clone());
+                }
+            }
+        }
 
         // Merge with local vectors (from includes that haven't migrated yet)
         nodes.extend(self.records);
@@ -1162,6 +1298,14 @@ impl LaunchTraverser {
 
 /// Parse launch file and generate record.json
 pub fn parse_launch_file(path: &Path, cli_args: HashMap<String, String>) -> Result<RecordJson> {
+    // Clear GLOBAL_PARAMETERS at the start of parsing
+    // (accumulates across all Python files during parsing)
+    {
+        use crate::python::bridge::GLOBAL_PARAMETERS;
+        let mut params = GLOBAL_PARAMETERS.lock();
+        params.clear();
+    }
+
     let mut traverser = LaunchTraverser::new(cli_args);
     traverser.traverse_file(path)?;
     traverser.into_record_json()

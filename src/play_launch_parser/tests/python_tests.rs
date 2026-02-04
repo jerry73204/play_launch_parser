@@ -45,7 +45,10 @@ fn test_parse_args_fixture() {
     assert_eq!(node["package"].as_str().unwrap(), "demo_nodes_cpp");
     assert_eq!(node["executable"].as_str().unwrap(), "talker");
     assert_eq!(node["name"].as_str().unwrap(), "my_talker");
-    assert_eq!(node["namespace"].as_str().unwrap(), "/");
+    assert!(
+        node["namespace"].is_null(),
+        "Namespace should be null (root/unspecified)"
+    );
 
     // Check params
     assert!(node["params"].is_array(), "Should have params");

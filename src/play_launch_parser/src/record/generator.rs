@@ -47,14 +47,25 @@ impl CommandGenerator {
                     format!("{}/{}", current_ns, ns_resolved)
                 }
             };
-            Some(normalized_ns)
+            // If normalized namespace is "/" (root), output None to match Python behavior
+            if normalized_ns == "/" {
+                None
+            } else {
+                Some(normalized_ns)
+            }
         } else {
             // Use namespace from context (group scoping)
-            Some(context.current_namespace())
+            // If current namespace is "/" (root/unspecified), output None to match Python behavior
+            let current_ns = context.current_namespace();
+            if current_ns == "/" {
+                None
+            } else {
+                Some(current_ns)
+            }
         };
 
         // Process inline parameters
-        let params: Vec<(String, String)> = node
+        let mut params: Vec<(String, String)> = node
             .parameters
             .iter()
             .map(|p| {
@@ -64,23 +75,38 @@ impl CommandGenerator {
             .collect::<Result<Vec<_>, GenerationError>>()?;
 
         // Process parameter files
-        // Note: We do NOT expand parameters from files into the params array
-        // because some YAML parameters have special characters (colons, spaces)
-        // that cannot be passed via command-line `-p` arguments. Instead, we
-        // load the file, resolve substitutions in the YAML content, and store
-        // the resolved YAML for play_launch to write out.
+        // Python distinguishes between temp files and regular files:
+        // - Temp files (/tmp/launch_params_*): Expand into inline params
+        // - Regular files: Store resolved YAML content
         let mut params_files = Vec::new();
         for param_file_subs in &node.param_files {
             let param_file_path = resolve_substitutions(param_file_subs, context)?;
-            // Load the file and resolve all substitutions in its contents
-            let resolved_contents =
-                load_and_resolve_param_file(Path::new(&param_file_path), context).map_err(|e| {
-                    GenerationError::IoError(format!(
-                        "Failed to load and resolve parameter file '{}': {}",
-                        param_file_path, e
-                    ))
-                })?;
-            params_files.push(resolved_contents);
+
+            // Check if this is a temp parameter file (created by launch system)
+            if param_file_path.contains("/tmp/launch_params_") {
+                // Temp file: extract parameters as inline params
+                let extracted_params =
+                    crate::params::extract_params_from_yaml(Path::new(&param_file_path), context)
+                        .map_err(|e| {
+                        GenerationError::IoError(format!(
+                            "Failed to extract parameters from temp file '{}': {}",
+                            param_file_path, e
+                        ))
+                    })?;
+                params.extend(extracted_params);
+            } else {
+                // Regular file: load and resolve substitutions in YAML content
+                let resolved_contents =
+                    load_and_resolve_param_file(Path::new(&param_file_path), context).map_err(
+                        |e| {
+                            GenerationError::IoError(format!(
+                                "Failed to load and resolve parameter file '{}': {}",
+                                param_file_path, e
+                            ))
+                        },
+                    )?;
+                params_files.push(resolved_contents);
+            }
         }
 
         // Collect node-specific remappings
@@ -120,7 +146,7 @@ impl CommandGenerator {
             Some(merged_env.into_iter().collect::<Vec<_>>())
         };
 
-        // Get global parameters from context
+        // Get global parameters from context (already filtered to SetParameter values)
         let global_params = if context.global_parameters().is_empty() {
             None
         } else {
@@ -277,17 +303,12 @@ impl CommandGenerator {
             Some(merged_env.into_iter().collect::<Vec<_>>())
         };
 
-        // Get global parameters from context
+        // Get global parameters from context (already filtered to SetParameter values)
         let global_params = if context.global_parameters().is_empty() {
             None
         } else {
-            Some(
-                context
-                    .global_parameters()
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>(),
-            )
+            // context.global_parameters() returns owned HashMap, convert to Vec
+            Some(context.global_parameters().into_iter().collect::<Vec<_>>())
         };
 
         Ok(NodeRecord {
@@ -307,8 +328,8 @@ impl CommandGenerator {
             executable: cmd_str,
             global_params,
             name,
-            namespace: Some("/".to_string()),
-            package: None, // Executables don't have packages
+            namespace: None, // Executables don't have namespaces
+            package: None,   // Executables don't have packages
             params: Vec::new(),
             params_files: Vec::new(),
             remaps: Vec::new(),
