@@ -173,6 +173,12 @@ impl LaunchTraverser {
     fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
         use crate::python::PythonLaunchExecutor;
 
+        log::debug!("Starting Python file: {}", path.display());
+        log::trace!(
+            "Current parse_context has {} nodes before execution",
+            self.parse_context.captured_nodes().len()
+        );
+
         log::debug!("Executing Python file: {}", path.display());
         log::trace!("Python file arguments: {} args", args.len());
         for (k, v) in args {
@@ -234,14 +240,11 @@ impl LaunchTraverser {
         {
             use crate::python::bridge::GLOBAL_PARAMETERS;
             let params = GLOBAL_PARAMETERS.lock();
-            eprintln!(
-                "[execute_python_file] Copying {} GLOBAL_PARAMETERS to context",
-                params.len()
-            );
+            log::debug!("Copying {} GLOBAL_PARAMETERS to context", params.len());
             for (key, value) in params.iter() {
                 self.context
                     .set_global_parameter(key.clone(), value.clone());
-                log::debug!(
+                log::trace!(
                     "Copied GLOBAL_PARAMETERS '{}' = '{}' to context",
                     key,
                     value
@@ -251,16 +254,16 @@ impl LaunchTraverser {
 
         // Python API now stores captures directly in parse_context via thread-local
         // No need to extract from globals and re-store - captures are already there!
-        eprintln!("[execute_python_file] After Python execution:");
-        eprintln!(
+        log::debug!("After Python execution:");
+        log::debug!(
             "  Captured nodes: {}",
             self.parse_context.captured_nodes().len()
         );
-        eprintln!(
+        log::debug!(
             "  Captured containers: {}",
             self.parse_context.captured_containers().len()
         );
-        eprintln!(
+        log::debug!(
             "  Captured load_nodes: {}",
             self.parse_context.captured_load_nodes().len()
         );
@@ -783,20 +786,17 @@ impl LaunchTraverser {
         // Example: included file has <arg name="use_multithread" default="true"/>
         //          Parent file needs to see use_multithread=true for conditionals
         let included_configs = included_traverser.context.configurations();
-        eprintln!(
-            "[MERGE] Included file has {} configurations to merge",
+        log::debug!(
+            "Included file has {} configurations to merge",
             included_configs.len()
         );
         for (key, value) in included_configs {
             // Only set if not already defined in parent (parent takes precedence)
             if self.context.get_configuration(&key).is_none() {
-                eprintln!(
-                    "[MERGE] Merging config from included file: {} = {}",
-                    key, value
-                );
+                log::debug!("Merging config from included file: {} = {}", key, value);
                 self.context.set_configuration(key, value);
             } else {
-                eprintln!("[MERGE] Skipping {} (already set in parent)", key);
+                log::debug!("Skipping {} (already set in parent)", key);
             }
         }
 
@@ -1040,6 +1040,11 @@ impl LaunchTraverser {
             }
             "let" => {
                 let let_action = LetAction::from_entity(entity)?;
+                log::debug!(
+                    "Setting {} = {} in context",
+                    let_action.name,
+                    let_action.value
+                );
                 // Set variable in context (acts like arg)
                 self.context
                     .set_configuration(let_action.name, let_action.value);
@@ -1144,6 +1149,13 @@ impl LaunchTraverser {
 
     pub fn into_record_json(mut self) -> Result<RecordJson> {
         // Convert captures from parse_context to records
+        let captured_count = self.parse_context.captured_nodes().len();
+        log::debug!(
+            "Processing {} captured nodes from parse_context",
+            captured_count
+        );
+        log::debug!("Also have {} nodes in self.records", self.records.len());
+
         let mut nodes: Vec<_> = self
             .parse_context
             .captured_nodes()
@@ -1170,8 +1182,8 @@ impl LaunchTraverser {
         {
             use crate::python::bridge::GLOBAL_PARAMETERS;
             let params = GLOBAL_PARAMETERS.lock();
-            eprintln!(
-                "[into_record_json] Copying {} GLOBAL_PARAMETERS to context for backfill",
+            log::debug!(
+                "Copying {} GLOBAL_PARAMETERS to context for backfill",
                 params.len()
             );
             for (key, value) in params.iter() {
@@ -1183,10 +1195,7 @@ impl LaunchTraverser {
         // CRITICAL: Backfill global_params for nodes that were created before SetParameter ran
         // Some XML nodes are created early in parsing, before Python files run SetParameter actions
         let final_global_params = self.context.global_parameters();
-        eprintln!(
-            "[into_record_json] Final global_params has {} keys",
-            final_global_params.len()
-        );
+        log::debug!("Final global_params has {} keys", final_global_params.len());
         if !final_global_params.is_empty() {
             let global_params_vec: Vec<(String, String)> =
                 final_global_params.into_iter().collect();
@@ -1199,10 +1208,7 @@ impl LaunchTraverser {
                     backfilled_count += 1;
                 }
             }
-            eprintln!(
-                "[into_record_json] Backfilled {} nodes from parse_context",
-                backfilled_count
-            );
+            log::debug!("Backfilled {} nodes from parse_context", backfilled_count);
 
             // Backfill XML nodes from self.records
             let mut backfilled_count = 0;
@@ -1212,8 +1218,8 @@ impl LaunchTraverser {
                     backfilled_count += 1;
                 }
             }
-            eprintln!(
-                "[into_record_json] Backfilled {} XML nodes from self.records",
+            log::debug!(
+                "Backfilled {} XML nodes from self.records",
                 backfilled_count
             );
 
