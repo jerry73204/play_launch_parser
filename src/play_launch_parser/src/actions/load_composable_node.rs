@@ -126,6 +126,16 @@ impl LoadComposableNodeAction {
             }
         };
 
+        // Get global parameters
+        let mut global_params_vec = Vec::new();
+        {
+            use crate::python::bridge::GLOBAL_PARAMETERS;
+            let global_params = GLOBAL_PARAMETERS.lock();
+            for (key, value) in global_params.iter() {
+                global_params_vec.push((key.clone(), value.clone()));
+            }
+        }
+
         // Convert composable nodes to LoadNodeRecords
         let records: Vec<LoadNodeRecord> = self
             .composable_nodes
@@ -143,6 +153,19 @@ impl LoadComposableNodeAction {
                     "/"
                 };
 
+                // Merge global parameters with node-specific parameters
+                let mut merged_params = global_params_vec.clone();
+                for (key, value) in &node.parameters {
+                    // Check if this key already exists
+                    if let Some(existing) = merged_params.iter_mut().find(|(k, _)| k == key) {
+                        // Override global parameter with node-specific value
+                        existing.1 = value.clone();
+                    } else {
+                        // Add new parameter
+                        merged_params.push((key.clone(), value.clone()));
+                    }
+                }
+
                 // Build LoadNodeRecord
                 LoadNodeRecord {
                     package: node.package.clone(),
@@ -155,7 +178,7 @@ impl LoadComposableNodeAction {
                         .unwrap_or_else(|| container_namespace.to_string()),
                     log_level: None,
                     remaps: node.remappings.clone(),
-                    params: node.parameters.clone(),
+                    params: merged_params,
                     extra_args: node.extra_args.clone(),
                     env: None,
                 }

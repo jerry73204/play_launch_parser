@@ -277,6 +277,48 @@ pub struct LoadNodeCapture {
 impl LoadNodeCapture {
     /// Convert to LoadNodeRecord
     pub fn to_record(&self) -> Result<LoadNodeRecord> {
+        log::warn!(
+            "DEBUG LoadNodeCapture::to_record: node='{}', self.parameters.len()={}",
+            self.node_name,
+            self.parameters.len()
+        );
+
+        // Merge global parameters with node-specific parameters
+        // Global parameters are added first, then node-specific parameters
+        // (node-specific parameters can override global ones)
+        let mut merged_params = Vec::new();
+
+        // Add global parameters
+        {
+            let global_params = GLOBAL_PARAMETERS.lock();
+            log::warn!(
+                "DEBUG LoadNodeCapture::to_record: GLOBAL_PARAMETERS has {} entries for node '{}'",
+                global_params.len(),
+                self.node_name
+            );
+            for (key, value) in global_params.iter() {
+                merged_params.push((key.clone(), value.clone()));
+            }
+        }
+
+        // Add node-specific parameters (may override global params)
+        for (key, value) in &self.parameters {
+            // Check if this key already exists in merged_params
+            if let Some(existing) = merged_params.iter_mut().find(|(k, _)| k == key) {
+                // Override global parameter with node-specific value
+                existing.1 = value.clone();
+            } else {
+                // Add new parameter
+                merged_params.push((key.clone(), value.clone()));
+            }
+        }
+
+        log::warn!(
+            "DEBUG LoadNodeCapture::to_record: Final merged_params count={} for node '{}'",
+            merged_params.len(),
+            self.node_name
+        );
+
         Ok(LoadNodeRecord {
             package: self.package.clone(),
             plugin: self.plugin.clone(),
@@ -285,7 +327,7 @@ impl LoadNodeCapture {
             namespace: self.namespace.clone(),
             log_level: None,
             remaps: self.remappings.clone(),
-            params: self.parameters.clone(),
+            params: merged_params,
             extra_args: HashMap::new(),
             env: None,
         })

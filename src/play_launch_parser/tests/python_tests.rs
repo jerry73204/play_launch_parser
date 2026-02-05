@@ -1116,8 +1116,8 @@ fn test_list_namespace_concatenation() {
     let load_node = &load_nodes[0];
     assert_eq!(
         load_node["namespace"].as_str().unwrap(),
-        "my_container",
-        "Composable node namespace should be concatenated from list [\"my\", \"_\", \"container\"]"
+        "/my_container",
+        "Composable node namespace should be concatenated from list [\"my\", \"_\", \"container\"] with leading slash"
     );
 }
 

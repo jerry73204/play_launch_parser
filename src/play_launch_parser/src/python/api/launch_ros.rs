@@ -273,11 +273,24 @@ impl Node {
             // Try to extract as different types
             let param_any = param_obj.as_ref(py);
 
-            // Case 1: String (parameter file path)
+            // Case 1: String (parameter file path or literal value)
             if let Ok(path) = param_any.extract::<String>() {
-                // Check if it looks like a file path
-                if path.contains('/') || path.ends_with(".yaml") || path.ends_with(".yml") {
-                    // Mark as parameter file with special prefix
+                // Check if it's a YAML parameter file
+                if is_yaml_file(&path) {
+                    // Load and expand YAML parameter file
+                    match load_yaml_params(&path) {
+                        Ok(yaml_params) => {
+                            log::debug!("Loaded {} parameters from {}", yaml_params.len(), path);
+                            parsed_params.extend(yaml_params);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load parameter file {}: {}", path, e);
+                            // Fallback: store as __param_file for backward compatibility
+                            parsed_params.push(("__param_file".to_string(), path));
+                        }
+                    }
+                } else if path.contains('/') {
+                    // Looks like a file path but not YAML - store as reference
                     parsed_params.push(("__param_file".to_string(), path));
                 } else {
                     // Treat as a literal parameter value
@@ -881,12 +894,13 @@ impl ComposableNode {
             .or_else(|| container_namespace.clone())
             .unwrap_or_else(|| "/".to_string());
 
-        // Only add leading slash if namespace is empty (not if it just doesn't start with '/')
-        // This preserves the namespace format from list concatenation
+        // Ensure namespace always has a leading slash for RCL compatibility
         let normalized_namespace = if node_namespace.is_empty() {
             "/".to_string()
-        } else {
+        } else if node_namespace.starts_with('/') {
             node_namespace
+        } else {
+            format!("/{}", node_namespace)
         };
 
         let capture = LoadNodeCapture {
@@ -949,11 +963,27 @@ impl ComposableNode {
         for param_obj in &self.parameters {
             let param_any = param_obj.as_ref(py);
 
-            // String (parameter file path)
+            // String (parameter file path or literal value)
             if let Ok(path) = param_any.extract::<String>() {
-                if path.contains('/') || path.ends_with(".yaml") || path.ends_with(".yml") {
+                // Check if it's a YAML parameter file
+                if is_yaml_file(&path) {
+                    // Load and expand YAML parameter file
+                    match load_yaml_params(&path) {
+                        Ok(yaml_params) => {
+                            log::debug!("Loaded {} parameters from {}", yaml_params.len(), path);
+                            parsed_params.extend(yaml_params);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load parameter file {}: {}", path, e);
+                            // Fallback: store as __param_file for backward compatibility
+                            parsed_params.push(("__param_file".to_string(), path));
+                        }
+                    }
+                } else if path.contains('/') {
+                    // Looks like a file path but not YAML - store as reference
                     parsed_params.push(("__param_file".to_string(), path));
                 } else {
+                    // Treat as a literal parameter value
                     parsed_params.push(("value".to_string(), path));
                 }
                 continue;
@@ -1369,11 +1399,21 @@ impl LifecycleNode {
     fn parse_parameters(&self, py: Python) -> PyResult<Vec<(String, String)>> {
         let mut parsed_params = Vec::new();
 
-        for param_obj in &self.parameters {
+        log::warn!(
+            "DEBUG parse_parameters: Processing {} parameter objects",
+            self.parameters.len()
+        );
+
+        for (idx, param_obj) in self.parameters.iter().enumerate() {
             let param_any = param_obj.as_ref(py);
 
             // Try to extract as dict (most common case for parameters)
             if let Ok(param_dict) = param_any.downcast::<pyo3::types::PyDict>() {
+                log::warn!(
+                    "DEBUG parse_parameters: param {} is dict with {} keys",
+                    idx,
+                    param_dict.len()
+                );
                 for (key, value) in param_dict.iter() {
                     let key_str = key.extract::<String>()?;
                     // Convert value to string
@@ -1383,8 +1423,33 @@ impl LifecycleNode {
             }
             // Try to extract as string (path to YAML parameter file)
             else if let Ok(path_str) = param_any.extract::<String>() {
-                // This is a parameter file path
-                parsed_params.push(("__param_file".to_string(), path_str));
+                log::warn!(
+                    "DEBUG parse_parameters: param {} is string: {}",
+                    idx,
+                    path_str
+                );
+                // Check if it's a YAML parameter file
+                if is_yaml_file(&path_str) {
+                    // Load and expand YAML parameter file
+                    match load_yaml_params(&path_str) {
+                        Ok(yaml_params) => {
+                            log::debug!(
+                                "Loaded {} parameters from {}",
+                                yaml_params.len(),
+                                path_str
+                            );
+                            parsed_params.extend(yaml_params);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load parameter file {}: {}", path_str, e);
+                            // Fallback: store as __param_file for backward compatibility
+                            parsed_params.push(("__param_file".to_string(), path_str));
+                        }
+                    }
+                } else {
+                    // Non-YAML file path - store as reference
+                    parsed_params.push(("__param_file".to_string(), path_str));
+                }
             }
         }
 
@@ -1651,6 +1716,23 @@ impl LoadComposableNodes {
         };
 
         if should_capture {
+            // Log node names for debugging
+            let node_names: Vec<String> = composable_node_descriptions
+                .iter()
+                .filter_map(|obj| {
+                    obj.as_ref(py)
+                        .getattr("_ComposableNode__node_name")
+                        .ok()
+                        .and_then(|attr| attr.extract::<String>().ok())
+                })
+                .collect();
+            log::warn!(
+                "DEBUG LoadComposableNodes: target='{}', {} nodes: {:?}",
+                target_str,
+                composable_node_descriptions.len(),
+                node_names
+            );
+
             // Capture the composable nodes
             Self::capture_composable_nodes(py, &target_container, &composable_node_descriptions)?;
 
@@ -1746,11 +1828,17 @@ impl LoadComposableNodes {
                 Vec::new()
             };
 
+            log::warn!(
+                "DEBUG capture_composable_nodes: node='{}', extracted {} parameters",
+                node_name,
+                parameters.len()
+            );
+
             let capture = LoadNodeCapture {
                 package,
                 plugin,
                 target_container_name: container_name.clone(),
-                node_name,
+                node_name: node_name.clone(),
                 namespace,
                 parameters,
                 remappings,
@@ -1922,15 +2010,147 @@ impl LoadComposableNodes {
         let mut parsed_params = Vec::new();
 
         if let Ok(params_list) = params_obj.downcast::<pyo3::types::PyList>() {
-            for param_item in params_list.iter() {
+            log::warn!(
+                "DEBUG extract_parameters: params_list has {} items",
+                params_list.len()
+            );
+
+            for (idx, param_item) in params_list.iter().enumerate() {
                 if let Ok(param_dict) = param_item.downcast::<pyo3::types::PyDict>() {
+                    log::warn!(
+                        "DEBUG extract_parameters: item {} is dict with {} keys",
+                        idx,
+                        param_dict.len()
+                    );
+
+                    // Log first few keys for debugging
+                    let keys: Vec<String> = param_dict
+                        .keys()
+                        .iter()
+                        .take(5)
+                        .filter_map(|k| k.extract::<String>().ok())
+                        .collect();
+                    log::warn!("DEBUG extract_parameters: first 5 keys: {:?}", keys);
+                    // Check if this dict represents a parameter file
+                    if param_dict.len() == 1 {
+                        if let Some((key, value)) = param_dict.iter().next() {
+                            let key_str = key.extract::<String>().unwrap_or_default();
+                            log::warn!("DEBUG: single-key dict with key='{}'", key_str);
+
+                            // Check if the value is a file path
+                            if let Ok(path_str) = value.extract::<String>() {
+                                log::warn!("DEBUG: value is string: {}", path_str);
+                                if is_yaml_file(&path_str) {
+                                    log::warn!("DEBUG: Loading YAML file: {}", path_str);
+                                    match load_yaml_params(&path_str) {
+                                        Ok(yaml_params) => {
+                                            log::warn!(
+                                                "DEBUG: Loaded {} parameters",
+                                                yaml_params.len()
+                                            );
+                                            parsed_params.extend(yaml_params);
+                                            continue; // Skip normal dict processing
+                                        }
+                                        Err(e) => {
+                                            log::warn!(
+                                                "Failed to load YAML file {}: {}",
+                                                path_str,
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Normal dict processing
                     for (key, value) in param_dict.iter() {
                         let key_str = key.extract::<String>()?;
                         let value_str = Self::pyobject_to_string(value)?;
                         parsed_params.push((key_str, value_str));
                     }
-                } else if let Ok(path_str) = param_item.extract::<String>() {
-                    parsed_params.push(("__param_file".to_string(), path_str));
+                } else {
+                    // Try to get Python type name for debugging
+                    let type_name = param_item.get_type().name().unwrap_or("<unknown>");
+                    log::warn!(
+                        "DEBUG extract_parameters: item {} is not dict or string, type={}",
+                        idx,
+                        type_name
+                    );
+
+                    // Check if it's a ParameterFile object
+                    if type_name.contains("ParameterFile")
+                        || type_name.contains("parameter_descriptions")
+                    {
+                        log::warn!("DEBUG extract_parameters: item {} is ParameterFile", idx);
+                        // Call __str__() to get the file path
+                        if let Ok(str_method) = param_item.call_method0("__str__") {
+                            if let Ok(path_str) = str_method.extract::<String>() {
+                                log::warn!(
+                                    "DEBUG extract_parameters: ParameterFile path: {}",
+                                    path_str
+                                );
+                                // Check if it's a YAML parameter file
+                                if is_yaml_file(&path_str) {
+                                    log::warn!("DEBUG: is_yaml_file returned true");
+                                    // Load and expand YAML parameter file
+                                    match load_yaml_params(&path_str) {
+                                        Ok(yaml_params) => {
+                                            log::warn!(
+                                                "DEBUG: Loaded {} parameters from {}",
+                                                yaml_params.len(),
+                                                path_str
+                                            );
+                                            parsed_params.extend(yaml_params);
+                                        }
+                                        Err(e) => {
+                                            log::warn!(
+                                                "Failed to load parameter file {}: {}",
+                                                path_str,
+                                                e
+                                            );
+                                            // Fallback: store as __param_file for backward compatibility
+                                            parsed_params
+                                                .push(("__param_file".to_string(), path_str));
+                                        }
+                                    }
+                                } else {
+                                    log::warn!("DEBUG: is_yaml_file returned false");
+                                    // Non-YAML file path - store as reference
+                                    parsed_params.push(("__param_file".to_string(), path_str));
+                                }
+                            }
+                        }
+                    }
+                    // Try extracting as string anyway
+                    else if let Ok(path_str) = param_item.extract::<String>() {
+                        log::warn!("DEBUG: extract_parameters got string: {}", path_str);
+                        // Check if it's a YAML parameter file
+                        if is_yaml_file(&path_str) {
+                            log::warn!("DEBUG: is_yaml_file returned true");
+                            // Load and expand YAML parameter file
+                            match load_yaml_params(&path_str) {
+                                Ok(yaml_params) => {
+                                    log::warn!(
+                                        "DEBUG: Loaded {} parameters from {}",
+                                        yaml_params.len(),
+                                        path_str
+                                    );
+                                    parsed_params.extend(yaml_params);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to load parameter file {}: {}", path_str, e);
+                                    // Fallback: store as __param_file for backward compatibility
+                                    parsed_params.push(("__param_file".to_string(), path_str));
+                                }
+                            }
+                        } else {
+                            log::warn!("DEBUG: is_yaml_file returned false");
+                            // Non-YAML file path - store as reference
+                            parsed_params.push(("__param_file".to_string(), path_str));
+                        }
+                    }
                 }
             }
         }
@@ -2100,4 +2320,146 @@ impl SetROSLogDir {
     fn __repr__(&self) -> String {
         "SetROSLogDir(...)".to_string()
     }
+}
+
+// ============================================================================
+// Parameter File Loading Helpers
+// ============================================================================
+
+/// Load and expand YAML parameter file into key-value pairs
+///
+/// This matches the Python parser's behavior of loading parameter files
+/// and extracting all parameters as individual key-value pairs.
+fn load_yaml_params(path: &str) -> PyResult<Vec<(String, String)>> {
+    use serde_yaml::Value;
+
+    // Read YAML file
+    let contents = std::fs::read_to_string(path).map_err(|e| {
+        pyo3::exceptions::PyIOError::new_err(format!(
+            "Failed to read parameter file {}: {}",
+            path, e
+        ))
+    })?;
+
+    // Parse YAML
+    let yaml: Value = serde_yaml::from_str(&contents).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "Failed to parse YAML file {}: {}",
+            path, e
+        ))
+    })?;
+
+    // Strip ROS 2 parameter file wrappers (/**:  and ros__parameters:)
+    let params_value = if let Value::Mapping(top_map) = &yaml {
+        // Look for the /**:  key (wildcard node matcher)
+        let ros_params = top_map.iter().find_map(|(k, v)| {
+            if let Value::String(key) = k {
+                if key == "/**" || key.starts_with('/') {
+                    // Found top-level node matcher, look for ros__parameters
+                    if let Value::Mapping(node_map) = v {
+                        return node_map
+                            .get(Value::String("ros__parameters".to_string()))
+                            .or(Some(v)); // Fallback to whole node_map if no ros__parameters
+                    }
+                }
+            }
+            None
+        });
+
+        ros_params.unwrap_or(&yaml)
+    } else {
+        &yaml
+    };
+
+    // Flatten nested structure with dot notation
+    let mut params = Vec::new();
+    flatten_yaml(params_value, "", &mut params);
+
+    Ok(params)
+}
+
+/// Flatten YAML structure into key-value pairs with dot notation for nested objects
+///
+/// Example:
+/// ```yaml
+/// namespace:
+///   param1: value1
+///   nested:
+///     param2: value2
+/// ```
+/// Becomes: `[("namespace.param1", "value1"), ("namespace.nested.param2", "value2")]`
+fn flatten_yaml(value: &serde_yaml::Value, prefix: &str, params: &mut Vec<(String, String)>) {
+    use serde_yaml::Value;
+
+    match value {
+        Value::Mapping(map) => {
+            for (k, v) in map {
+                if let Some(key) = k.as_str() {
+                    let full_key = if prefix.is_empty() {
+                        key.to_string()
+                    } else {
+                        format!("{}.{}", prefix, key)
+                    };
+
+                    if v.is_mapping() {
+                        // Recurse for nested objects
+                        flatten_yaml(v, &full_key, params);
+                    } else {
+                        // Convert value to string
+                        let value_str = yaml_value_to_string(v);
+                        params.push((full_key, value_str));
+                    }
+                }
+            }
+        }
+        _ => {
+            // Top-level is not a mapping, treat as single value
+            if !prefix.is_empty() {
+                params.push((prefix.to_string(), yaml_value_to_string(value)));
+            }
+        }
+    }
+}
+
+/// Convert YAML value to string representation
+///
+/// Handles booleans, numbers, strings, arrays, and null values
+fn yaml_value_to_string(value: &serde_yaml::Value) -> String {
+    use serde_yaml::Value;
+
+    match value {
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => {
+            // Preserve float format with decimal point for ROS type checking
+            if let Some(f) = n.as_f64() {
+                // Check if it's actually an integer value
+                if f.fract() == 0.0 && f.abs() < (i64::MAX as f64) {
+                    // Integer value - format without decimal
+                    format!("{}", f as i64)
+                } else {
+                    // Float value - ensure decimal point
+                    if f.to_string().contains('.') {
+                        f.to_string()
+                    } else {
+                        format!("{}.0", f)
+                    }
+                }
+            } else {
+                n.to_string()
+            }
+        }
+        Value::String(s) => s.clone(),
+        Value::Sequence(seq) => {
+            // Convert array to string representation
+            let elements: Vec<String> = seq.iter().map(yaml_value_to_string).collect();
+            format!("[{}]", elements.join(", "))
+        }
+        Value::Null => "null".to_string(),
+        _ => format!("{:?}", value),
+    }
+}
+
+/// Check if a string looks like a YAML file path
+fn is_yaml_file(path: &str) -> bool {
+    path.ends_with(".yaml") || path.ends_with(".yml")
 }

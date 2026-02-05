@@ -2,11 +2,12 @@
 
 use crate::{
     error::{ParseError, Result},
+    params::extract_params_from_yaml,
     record::{ComposableNodeContainerRecord, LoadNodeRecord},
     substitution::{parse_substitutions, resolve_substitutions, LaunchContext},
     xml::{Entity, XmlEntity},
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 /// Container action representing a composable node container
 #[derive(Debug, Clone)]
@@ -289,11 +290,41 @@ impl ComposableNodeAction {
                 "param" => {
                     // Check if this is a parameter file reference
                     if let Some(from_attr) = child.get_attr_str("from", true)? {
-                        // This is a parameter file - mark it with special prefix
+                        // This is a parameter file - resolve path and load YAML
                         let from_parsed = parse_substitutions(&from_attr)?;
                         let from_resolved = resolve_substitutions(&from_parsed, context)
                             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-                        parameters.push(("__param_file".to_string(), from_resolved));
+
+                        // Load YAML parameter file and extract parameters
+                        log::warn!(
+                            "DEBUG container.rs: Found param file='{}', checking if YAML",
+                            from_resolved
+                        );
+                        if from_resolved.ends_with(".yaml") || from_resolved.ends_with(".yml") {
+                            log::warn!("DEBUG container.rs: Loading YAML file");
+                            match extract_params_from_yaml(Path::new(&from_resolved), context) {
+                                Ok(yaml_params) => {
+                                    log::warn!(
+                                        "DEBUG container.rs: Loaded {} parameters from {}",
+                                        yaml_params.len(),
+                                        from_resolved
+                                    );
+                                    parameters.extend(yaml_params);
+                                }
+                                Err(e) => {
+                                    log::warn!(
+                                        "DEBUG container.rs: Failed to load YAML parameter file {}: {}",
+                                        from_resolved,
+                                        e
+                                    );
+                                    // Fallback: store as __param_file
+                                    parameters.push(("__param_file".to_string(), from_resolved));
+                                }
+                            }
+                        } else {
+                            // Non-YAML file - store as reference
+                            parameters.push(("__param_file".to_string(), from_resolved));
+                        }
                     } else {
                         // This is an inline parameter
                         let name = child.get_attr_str("name", false)?.ok_or_else(|| {
@@ -360,6 +391,12 @@ impl ComposableNodeAction {
         container_name: &str,
         container_namespace: &str,
     ) -> LoadNodeRecord {
+        log::warn!(
+            "DEBUG to_load_node_record: node='{}', self.parameters.len()={}",
+            self.name,
+            self.parameters.len()
+        );
+
         // Build full target container name: namespace + name
         // This matches the Python implementation's behavior
         let target_container_name = if container_namespace == "/" {
@@ -369,6 +406,31 @@ impl ComposableNodeAction {
         } else {
             format!("{}/{}", container_namespace, container_name)
         };
+
+        // Merge global parameters with node-specific parameters
+        let mut merged_params = Vec::new();
+        {
+            use crate::python::bridge::GLOBAL_PARAMETERS;
+            let global_params = GLOBAL_PARAMETERS.lock();
+            for (key, value) in global_params.iter() {
+                merged_params.push((key.clone(), value.clone()));
+            }
+        }
+
+        // Add node-specific parameters (may override global params)
+        for (key, value) in &self.parameters {
+            if let Some(existing) = merged_params.iter_mut().find(|(k, _)| k == key) {
+                existing.1 = value.clone();
+            } else {
+                merged_params.push((key.clone(), value.clone()));
+            }
+        }
+
+        log::warn!(
+            "DEBUG to_load_node_record: node='{}', final merged_params.len()={}",
+            self.name,
+            merged_params.len()
+        );
 
         LoadNodeRecord {
             package: self.package.clone(),
@@ -381,7 +443,7 @@ impl ComposableNodeAction {
                 .unwrap_or_else(|| container_namespace.to_string()),
             log_level: None,
             remaps: self.remappings.clone(),
-            params: self.parameters.clone(),
+            params: merged_params,
             extra_args: self.extra_args.clone(),
             env: None,
         }
