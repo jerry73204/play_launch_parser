@@ -1,0 +1,304 @@
+use super::super::LaunchTraverser;
+use crate::{
+    actions::{
+        ArgAction, ContainerAction, DeclareArgumentAction, ExecutableAction, GroupAction,
+        IncludeAction, LetAction, LoadComposableNodeAction, NodeAction, SetEnvAction,
+        SetParameterAction, SetRemapAction, UnsetEnvAction,
+    },
+    condition::should_process_entity,
+    error::{ParseError, Result},
+    record::CommandGenerator,
+    substitution::{parse_substitutions, resolve_substitutions, ArgumentMetadata},
+    xml::{Entity, XmlEntity},
+};
+use std::collections::HashMap;
+
+impl LaunchTraverser {
+    pub(crate) fn traverse_entity(&mut self, entity: &XmlEntity) -> Result<()> {
+        // Check if entity should be processed based on if/unless conditions
+        if !should_process_entity(entity, &self.context)? {
+            log::debug!("Skipping {} due to condition", entity.type_name());
+            return Ok(());
+        }
+
+        match entity.type_name() {
+            "launch" => {
+                // Root element, traverse children
+                // Collect consecutive includes and process them in parallel for maximum performance
+                // Note: We collect here because we need random access for include batching
+                let children: Vec<_> = entity.children().collect();
+                let mut i = 0;
+
+                while i < children.len() {
+                    // Check if this is the start of a sequence of includes
+                    if children[i].type_name() == "include"
+                        && should_process_entity(&children[i], &self.context)?
+                    {
+                        // Collect consecutive includes, but stop at YAML includes
+                        // YAML includes modify context and must be processed sequentially
+                        let mut includes = Vec::new();
+                        while i < children.len()
+                            && children[i].type_name() == "include"
+                            && should_process_entity(&children[i], &self.context)?
+                        {
+                            let include = IncludeAction::from_entity(&children[i])?;
+
+                            // Check if this is a YAML include by resolving its file path
+                            let file_path_str = resolve_substitutions(&include.file, &self.context)
+                                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                            let is_yaml =
+                                file_path_str.ends_with(".yaml") || file_path_str.ends_with(".yml");
+
+                            if is_yaml {
+                                // Process any collected includes first
+                                if includes.len() > 1 {
+                                    log::debug!(
+                                        "Processing {} includes in parallel (before YAML)",
+                                        includes.len()
+                                    );
+                                    let (records, containers, load_nodes) =
+                                        self.process_includes_parallel(includes)?;
+                                    self.records.extend(records);
+                                    self.containers.extend(containers);
+                                    self.load_nodes.extend(load_nodes);
+                                } else if includes.len() == 1 {
+                                    self.process_include(&includes[0])?;
+                                }
+                                includes = Vec::new();
+
+                                // Process YAML include sequentially (modifies context)
+                                log::debug!(
+                                    "Processing YAML include sequentially: {}",
+                                    file_path_str
+                                );
+                                self.process_include(&include)?;
+                                i += 1;
+                                break; // Exit inner loop to restart include collection
+                            } else {
+                                includes.push(include);
+                                i += 1;
+                            }
+                        }
+
+                        // Process any remaining includes
+                        if includes.len() > 1 {
+                            log::debug!("Processing {} includes in parallel", includes.len());
+                            let (records, containers, load_nodes) =
+                                self.process_includes_parallel(includes)?;
+                            self.records.extend(records);
+                            self.containers.extend(containers);
+                            self.load_nodes.extend(load_nodes);
+                        } else if includes.len() == 1 {
+                            // Single include, process sequentially
+                            self.process_include(&includes[0])?;
+                        }
+                    } else {
+                        // Not an include, process normally
+                        self.traverse_entity(&children[i])?;
+                        i += 1;
+                    }
+                }
+            }
+            "arg" => {
+                let arg = ArgAction::from_entity(entity)?;
+                arg.apply(&mut self.context, &HashMap::new());
+            }
+            "declare_argument" => {
+                let declare_arg = DeclareArgumentAction::from_entity(entity)?;
+
+                // Resolve default value if present
+                let default = if let Some(default_subs) = &declare_arg.default {
+                    Some(
+                        resolve_substitutions(default_subs, &self.context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+
+                log::debug!(
+                    "[RUST] Declaring argument: {} = {:?}",
+                    declare_arg.name,
+                    default
+                );
+
+                // Store metadata
+                let metadata = ArgumentMetadata {
+                    name: declare_arg.name.clone(),
+                    default,
+                    description: declare_arg.description.clone(),
+                    choices: declare_arg.choices.clone(),
+                };
+                self.context.declare_argument(metadata);
+
+                // If a default value is provided and the argument is not yet set, apply it
+                if let Some(default_val) = &declare_arg.default {
+                    if self.context.get_configuration(&declare_arg.name).is_none() {
+                        let resolved_default = resolve_substitutions(default_val, &self.context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                        log::debug!(
+                            "[RUST] Setting default value for {}: {}",
+                            declare_arg.name,
+                            resolved_default
+                        );
+                        self.context
+                            .set_configuration(declare_arg.name, resolved_default);
+                    }
+                }
+            }
+            "node" => {
+                // XML nodes use CommandGenerator for complete parameter file loading
+                let node = NodeAction::from_entity(entity)?;
+                let record = CommandGenerator::generate_node_record(&node, &self.context)
+                    .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
+                self.records.push(record);
+            }
+            "executable" => {
+                // Executables don't use NodeCapture - they generate NodeRecord directly
+                let exec = ExecutableAction::from_entity(entity)?;
+                let record = CommandGenerator::generate_executable_record(&exec, &self.context)
+                    .map_err(|e| ParseError::IoError(std::io::Error::other(e.to_string())))?;
+                self.records.push(record);
+            }
+            "include" => {
+                let include = IncludeAction::from_entity(entity)?;
+                self.process_include(&include)?;
+            }
+            "group" => {
+                let group = GroupAction::from_entity(entity)?;
+
+                // Save namespace depth and remapping count to restore after group
+                let initial_depth = self.context.namespace_depth();
+                let initial_remap_count = self.context.remapping_count();
+
+                // Push namespace if specified
+                if let Some(ns_subs) = &group.namespace {
+                    let namespace = resolve_substitutions(ns_subs, &self.context)
+                        .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                    self.context.push_namespace(namespace);
+                }
+
+                // Traverse children with scoped namespace and remappings
+                for child in entity.children() {
+                    self.traverse_entity(&child)?;
+                }
+
+                // Restore namespace depth and remappings (scoped to this group)
+                self.context.restore_namespace_depth(initial_depth);
+                self.context.restore_remapping_count(initial_remap_count);
+            }
+            "let" => {
+                let let_action = LetAction::from_entity(entity)?;
+                log::debug!(
+                    "Setting {} = {} in context",
+                    let_action.name,
+                    let_action.value
+                );
+                // Set variable in context (acts like arg)
+                self.context
+                    .set_configuration(let_action.name, let_action.value);
+            }
+            "set_env" | "set-env" => {
+                let set_env = SetEnvAction::from_entity(entity)?;
+                let value = resolve_substitutions(&set_env.value, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.set_environment_variable(set_env.name, value);
+            }
+            "unset_env" | "unset-env" => {
+                let unset_env = UnsetEnvAction::from_entity(entity)?;
+                self.context.unset_environment_variable(&unset_env.name);
+            }
+            "set_parameter" => {
+                let set_param = SetParameterAction::from_entity(entity)?;
+                let value = resolve_substitutions(&set_param.value, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.set_global_parameter(set_param.name, value);
+            }
+            "set_remap" | "set-remap" => {
+                let set_remap = SetRemapAction::from_entity(entity)?;
+                let from = resolve_substitutions(&set_remap.from, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                let to = resolve_substitutions(&set_remap.to, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.add_remapping(from, to);
+            }
+            "push-ros-namespace" => {
+                // Try "namespace" attribute first (Autoware/ROS 2 standard),
+                // then fall back to "ns" for backwards compatibility
+                let ns_str = entity
+                    .get_attr_str("namespace", false)
+                    .ok()
+                    .flatten()
+                    .or_else(|| entity.get_attr_str("ns", false).ok().flatten())
+                    .ok_or_else(|| ParseError::MissingAttribute {
+                        element: "push-ros-namespace".to_string(),
+                        attribute: "namespace or ns".to_string(),
+                    })?;
+
+                let ns_subs = parse_substitutions(&ns_str)?;
+                let namespace = resolve_substitutions(&ns_subs, &self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+                self.context.push_namespace(namespace);
+            }
+            "pop-ros-namespace" => {
+                self.context.pop_namespace();
+            }
+            "node_container" | "node-container" => {
+                // Parse container and its composable nodes
+                let container_action = ContainerAction::from_entity(entity, &self.context)?;
+
+                // Add container record
+                self.containers
+                    .push(container_action.to_container_record(&self.context)?);
+
+                // Add load_node records for each composable node
+                let load_node_records = container_action.to_load_node_records(&self.context);
+                log::warn!(
+                    "DEBUG: Adding {} load_node records from container '{}' to self.load_nodes",
+                    load_node_records.len(),
+                    container_action.name
+                );
+                for record in &load_node_records {
+                    log::warn!(
+                        "DEBUG: Adding load_node '{}' with {} params",
+                        record.node_name,
+                        record.params.len()
+                    );
+                }
+                self.load_nodes.extend(load_node_records);
+
+                log::info!(
+                    "Parsed container '{}' with {} composable nodes",
+                    container_action.name,
+                    container_action.composable_nodes.len()
+                );
+            }
+            "composable_node" | "composable-node" => {
+                // Composable nodes are loaded into containers
+                // Standalone composable nodes should be inside a node_container
+                log::info!("Skipping standalone composable_node (should be in node_container)");
+            }
+            "load_composable_node" | "load-composable-node" => {
+                // Parse load_composable_node action and convert to captures
+                let action = LoadComposableNodeAction::from_entity(entity, &self.context)?;
+                let captures = action.to_captures(&self.context)?;
+
+                log::info!(
+                    "Loaded {} composable node(s) into container via load_composable_node",
+                    captures.len()
+                );
+
+                // Add to context captures
+                for capture in captures {
+                    self.context.capture_load_node(capture);
+                }
+            }
+            other => {
+                log::warn!("Unsupported action type: {}", other);
+                // For MVP: skip unknown actions
+            }
+        }
+        Ok(())
+    }
+}
