@@ -170,10 +170,10 @@ impl ContainerAction {
         })
     }
 
-    pub fn to_load_node_records(&self) -> Vec<LoadNodeRecord> {
+    pub fn to_load_node_records(&self, context: &LaunchContext) -> Vec<LoadNodeRecord> {
         self.composable_nodes
             .iter()
-            .map(|node| node.to_load_node_record(&self.name, &self.namespace))
+            .map(|node| node.to_load_node_record(&self.name, &self.namespace, context))
             .collect()
     }
 
@@ -390,9 +390,10 @@ impl ComposableNodeAction {
         &self,
         container_name: &str,
         container_namespace: &str,
+        context: &LaunchContext,
     ) -> LoadNodeRecord {
-        log::warn!(
-            "DEBUG to_load_node_record: node='{}', self.parameters.len()={}",
+        log::debug!(
+            "to_load_node_record: node='{}', self.parameters.len()={}",
             self.name,
             self.parameters.len()
         );
@@ -407,15 +408,9 @@ impl ComposableNodeAction {
             format!("{}/{}", container_namespace, container_name)
         };
 
-        // Merge global parameters with node-specific parameters
-        let mut merged_params = Vec::new();
-        {
-            use crate::python::bridge::GLOBAL_PARAMETERS;
-            let global_params = GLOBAL_PARAMETERS.lock();
-            for (key, value) in global_params.iter() {
-                merged_params.push((key.clone(), value.clone()));
-            }
-        }
+        // Merge global parameters from context with node-specific parameters
+        let mut merged_params: Vec<(String, String)> =
+            context.global_parameters().into_iter().collect();
 
         // Add node-specific parameters (may override global params)
         for (key, value) in &self.parameters {
@@ -426,8 +421,8 @@ impl ComposableNodeAction {
             }
         }
 
-        log::warn!(
-            "DEBUG to_load_node_record: node='{}', final merged_params.len()={}",
+        log::debug!(
+            "to_load_node_record: node='{}', final merged_params.len()={}",
             self.name,
             merged_params.len()
         );

@@ -2,9 +2,9 @@
 
 #![allow(non_local_definitions)] // pyo3 macros generate non-local impls
 
-use crate::python::bridge::{
-    capture_container, capture_load_node, capture_node, ContainerCapture, LoadNodeCapture,
-    NodeCapture,
+use crate::{
+    captures::{ContainerCapture, LoadNodeCapture, NodeCapture},
+    python::bridge::{capture_container, capture_load_node, capture_node},
 };
 use pyo3::{
     prelude::*,
@@ -200,6 +200,13 @@ impl Node {
 
         // Get current ROS namespace and combine with node's namespace
         let ros_namespace = get_current_ros_namespace();
+        log::debug!(
+            "Node::capture_node: package={}, exec={}, node_ns={:?}, ros_namespace={}",
+            node.package,
+            node.executable,
+            node.namespace,
+            ros_namespace
+        );
         let node_ns = node.namespace.as_ref().map(|ns| {
             if ns.is_empty() {
                 String::new()
@@ -1091,11 +1098,9 @@ impl SetParameter {
 
         log::debug!("Python Launch SetParameter: {}={}", name, value_str);
 
-        // Capture this as a global parameter in GLOBAL_PARAMETERS
-        // (separate from LAUNCH_CONFIGURATIONS which is for launch args)
+        // Capture this as a global parameter in LaunchContext via thread-local
         {
-            use crate::python::bridge::GLOBAL_PARAMETERS;
-            let mut params = GLOBAL_PARAMETERS.lock();
+            use crate::python::bridge::with_launch_context;
 
             // Match Python boolean case: "False"/"True" not "false"/"true"
             let normalized_value = match value_str.as_str() {
@@ -1104,11 +1109,13 @@ impl SetParameter {
                 _ => value_str.clone(),
             };
 
-            params.insert(name.clone(), normalized_value);
+            with_launch_context(|ctx| {
+                ctx.set_global_parameter(name.clone(), normalized_value.clone());
+            });
             log::debug!(
-                "Captured SetParameter '{}' = '{}' to GLOBAL_PARAMETERS",
+                "Captured SetParameter '{}' = '{}' to LaunchContext",
                 name,
-                value_str
+                normalized_value
             );
         }
 
@@ -1312,7 +1319,10 @@ impl LifecycleNode {
 
     /// Capture the lifecycle node as a regular NodeCapture
     fn capture_node(&self, py: Python) -> PyResult<()> {
-        use crate::python::bridge::{capture_node, get_current_ros_namespace, NodeCapture};
+        use crate::{
+            captures::NodeCapture,
+            python::bridge::{capture_node, get_current_ros_namespace},
+        };
 
         // Parse parameters (same logic as regular Node)
         let all_params = self.parse_parameters(py)?;
@@ -1768,7 +1778,7 @@ impl LoadComposableNodes {
         target_container: &PyObject,
         descriptions: &[PyObject],
     ) -> PyResult<()> {
-        use crate::python::bridge::{capture_load_node, LoadNodeCapture};
+        use crate::{captures::LoadNodeCapture, python::bridge::capture_load_node};
 
         // Extract target container name and namespace
         let (container_name, container_namespace) =

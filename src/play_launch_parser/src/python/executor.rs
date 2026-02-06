@@ -105,7 +105,6 @@ if not _ok:
             log::debug!("Installed aggressive Python environment isolation for launch* mocks");
 
             // Populate LAUNCH_CONFIGURATIONS with launch arguments for LaunchConfiguration resolution
-            // GLOBAL_PARAMETERS accumulates across all Python files (don't clear it)
             {
                 let mut configs = LAUNCH_CONFIGURATIONS.lock();
                 configs.clear();

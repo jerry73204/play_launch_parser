@@ -1,8 +1,8 @@
 //! Node action implementation
 
 use crate::{
+    captures::NodeCapture,
     error::{ParseError, Result},
-    python::bridge::NodeCapture,
     substitution::{parse_substitutions, resolve_substitutions, LaunchContext, Substitution},
     xml::{Entity, EntityExt, XmlEntity},
 };

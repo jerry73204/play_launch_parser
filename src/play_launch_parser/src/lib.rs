@@ -1,17 +1,14 @@
 //! play_launch_parser library
 
 pub mod actions;
+pub mod captures;
 pub mod condition;
-pub mod context;
 pub mod error;
 pub mod params;
 pub mod python;
 pub mod record;
 pub mod substitution;
 pub mod xml;
-
-// Re-export key types
-pub use context::ParseContext;
 
 use actions::{
     ArgAction, ContainerAction, DeclareArgumentAction, ExecutableAction, GroupAction,
@@ -74,13 +71,11 @@ fn read_file_cached(path: &Path) -> Result<String> {
 
 /// Launch tree traverser for parsing launch files
 pub struct LaunchTraverser {
-    /// Substitution resolution context
+    /// Unified context for substitution resolution, namespace management, and entity captures
     context: LaunchContext,
-    /// Parse state and captures
-    parse_context: ParseContext,
     /// Track include chain to detect circular includes (thread-local stack)
     include_chain: Vec<PathBuf>,
-    /// Temporary storage for records during XML parsing (moved to parse_context after Python)
+    /// Temporary storage for records during XML parsing
     records: Vec<record::NodeRecord>,
     containers: Vec<record::ComposableNodeContainerRecord>,
     load_nodes: Vec<record::LoadNodeRecord>,
@@ -94,12 +89,8 @@ impl LaunchTraverser {
             context.set_configuration(k.clone(), v.clone());
         }
 
-        // Create ParseContext with CLI args for capture and configuration storage
-        let parse_context = ParseContext::new(cli_args);
-
         Self {
             context,
-            parse_context,
             include_chain: Vec::new(),
             records: Vec::new(),
             containers: Vec::new(),
@@ -173,12 +164,6 @@ impl LaunchTraverser {
     fn execute_python_file(&mut self, path: &Path, args: &HashMap<String, String>) -> Result<()> {
         use crate::python::PythonLaunchExecutor;
 
-        log::debug!("Starting Python file: {}", path.display());
-        log::trace!(
-            "Current parse_context has {} nodes before execution",
-            self.parse_context.captured_nodes().len()
-        );
-
         log::debug!("Executing Python file: {}", path.display());
         log::trace!("Python file arguments: {} args", args.len());
         for (k, v) in args {
@@ -218,9 +203,10 @@ impl LaunchTraverser {
 
         log::debug!("Executing with {} global parameters", global_params.len());
 
-        // Set the thread-local parse_context for Python API to access
-        use crate::python::bridge::{clear_current_parse_context, set_current_parse_context};
-        set_current_parse_context(&mut self.parse_context);
+        // Set the thread-local context for Python API to access
+        // No namespace sync needed — Python API now operates directly on LaunchContext
+        use crate::python::bridge::{clear_current_launch_context, set_current_launch_context};
+        set_current_launch_context(&mut self.context);
 
         let executor = PythonLaunchExecutor::new(global_params);
         let path_str = path.to_str().ok_or_else(|| {
@@ -229,54 +215,33 @@ impl LaunchTraverser {
         let exec_result = executor.execute(path_str);
 
         // Clear the thread-local context after execution
-        clear_current_parse_context();
+        clear_current_launch_context();
 
         // Propagate execution errors
         exec_result.map_err(|e| ParseError::PythonError(e.to_string()))?;
 
-        // CRITICAL: Copy GLOBAL_PARAMETERS back into context for XML nodes
-        // SetParameter actions in Python store params in GLOBAL_PARAMETERS,
-        // XML nodes read from context.global_parameters()
-        {
-            use crate::python::bridge::GLOBAL_PARAMETERS;
-            let params = GLOBAL_PARAMETERS.lock();
-            log::debug!("Copying {} GLOBAL_PARAMETERS to context", params.len());
-            for (key, value) in params.iter() {
-                self.context
-                    .set_global_parameter(key.clone(), value.clone());
-                log::trace!(
-                    "Copied GLOBAL_PARAMETERS '{}' = '{}' to context",
-                    key,
-                    value
-                );
-            }
-        }
-
-        // Python API now stores captures directly in parse_context via thread-local
-        // No need to extract from globals and re-store - captures are already there!
+        // Python API stores captures directly in self.context via thread-local
+        // (SetParameter also writes global params directly to context via thread-local)
         log::debug!("After Python execution:");
-        log::debug!(
-            "  Captured nodes: {}",
-            self.parse_context.captured_nodes().len()
-        );
+        log::debug!("  Captured nodes: {}", self.context.captured_nodes().len());
         log::debug!(
             "  Captured containers: {}",
-            self.parse_context.captured_containers().len()
+            self.context.captured_containers().len()
         );
         log::debug!(
             "  Captured load_nodes: {}",
-            self.parse_context.captured_load_nodes().len()
+            self.context.captured_load_nodes().len()
         );
 
         log::debug!(
-            "Python file '{}' completed - captures stored in parse_context via thread-local",
+            "Python file '{}' completed - captures stored in context via thread-local",
             path.display()
         );
 
-        // Process includes recursively (get from parse_context and clear)
-        let includes = self.parse_context.captured_includes().to_vec();
+        // Process includes recursively (get from context and clear)
+        let includes = self.context.captured_includes().to_vec();
         // Clear captured includes to prevent reprocessing in recursive calls
-        self.parse_context.captured_includes_mut().clear();
+        self.context.captured_includes_mut().clear();
 
         log::debug!(
             "Processing {} captured includes from Python file '{}', current context namespace: '{}'",
@@ -340,17 +305,14 @@ impl LaunchTraverser {
                 if let Some(ext) = resolved_include_path.extension().and_then(|s| s.to_str()) {
                     match ext {
                         "py" => {
-                            // For Python includes, push namespace onto both contexts
-                            // self.context for XML, self.parse_context for Python (via thread-local)
+                            // For Python includes, push namespace onto context
                             if let Some(ref ns) = ros_ns {
                                 self.context.push_namespace(ns.clone());
-                                self.parse_context.push_namespace(ns.clone());
                             }
                             let result =
                                 self.execute_python_file(&resolved_include_path, &include_args);
                             if ros_ns.is_some() {
                                 self.context.pop_namespace();
-                                self.parse_context.pop_namespace();
                             }
                             result
                         }
@@ -466,7 +428,6 @@ impl LaunchTraverser {
         // Create temporary traverser for included file
         let mut included_traverser = LaunchTraverser {
             context: include_context,
-            parse_context: ParseContext::new(HashMap::new()), // Empty for includes
             include_chain: self.include_chain.clone(),
             records: Vec::new(),
             containers: Vec::new(),
@@ -582,12 +543,10 @@ impl LaunchTraverser {
         self.containers.extend(included_traverser.containers);
         self.load_nodes.extend(included_traverser.load_nodes);
 
-        // CRITICAL: Also merge parse_context captures from included file
-        // XML load_composable_node elements are captured in parse_context (line 986)
-        // We need to apply namespace to these captures as well
-        for node in included_traverser.parse_context.captured_nodes() {
+        // Merge captures from included file's context
+        // Apply namespace to captures as well
+        for node in included_traverser.context.captured_nodes() {
             let mut node_copy = node.clone();
-            // Apply namespace if provided
             if let Some(ref ns) = ros_namespace {
                 if !ns.is_empty() && ns != "/" {
                     if let Some(ref node_ns) = node_copy.namespace {
@@ -597,12 +556,11 @@ impl LaunchTraverser {
                     }
                 }
             }
-            self.parse_context.capture_node(node_copy);
+            self.context.capture_node(node_copy);
         }
 
-        for container in included_traverser.parse_context.captured_containers() {
+        for container in included_traverser.context.captured_containers() {
             let mut container_copy = container.clone();
-            // Apply namespace if provided
             if let Some(ref ns) = ros_namespace {
                 if !ns.is_empty() && ns != "/" {
                     container_copy.namespace =
@@ -610,22 +568,20 @@ impl LaunchTraverser {
                     container_copy.name = Self::apply_namespace_prefix(ns, &container_copy.name);
                 }
             }
-            self.parse_context.capture_container(container_copy);
+            self.context.capture_container(container_copy);
         }
 
-        for load_node in included_traverser.parse_context.captured_load_nodes() {
+        for load_node in included_traverser.context.captured_load_nodes() {
             let mut load_node_copy = load_node.clone();
             log::debug!(
-                "Merging load_node from parse_context: target='{}', ros_namespace={:?}",
+                "Merging load_node capture: target='{}', ros_namespace={:?}",
                 load_node_copy.target_container_name,
                 ros_namespace
             );
-            // Apply namespace if provided
             if let Some(ref ns) = ros_namespace {
                 if !ns.is_empty() && ns != "/" {
                     load_node_copy.namespace =
                         Self::apply_namespace_prefix(ns, &load_node_copy.namespace);
-                    // Apply namespace to target_container_name
                     if load_node_copy.target_container_name.starts_with('/') {
                         let old_target = load_node_copy.target_container_name.clone();
                         load_node_copy.target_container_name =
@@ -638,12 +594,12 @@ impl LaunchTraverser {
                     }
                 }
             }
-            self.parse_context.capture_load_node(load_node_copy);
+            self.context.capture_load_node(load_node_copy);
         }
 
         log::debug!(
-            "Merged XML include captures: {} load_nodes from parse_context",
-            included_traverser.parse_context.captured_load_nodes().len()
+            "Merged XML include captures: {} load_nodes from context",
+            included_traverser.context.captured_load_nodes().len()
         );
 
         Ok(())
@@ -754,7 +710,6 @@ impl LaunchTraverser {
 
         let mut included_traverser = LaunchTraverser {
             context: include_context,
-            parse_context: ParseContext::new(HashMap::new()), // Empty for includes
             include_chain: child_chain,
             records: Vec::new(),
             containers: Vec::new(),
@@ -767,18 +722,17 @@ impl LaunchTraverser {
         self.containers.extend(included_traverser.containers);
         self.load_nodes.extend(included_traverser.load_nodes);
 
-        // CRITICAL: Also merge parse_context captures from included file
-        // Python nodes are captured in parse_context and need to be merged
-        for node in included_traverser.parse_context.captured_nodes() {
-            self.parse_context.capture_node(node.clone());
+        // Merge captures from included file's context
+        for node in included_traverser.context.captured_nodes() {
+            self.context.capture_node(node.clone());
         }
 
-        for container in included_traverser.parse_context.captured_containers() {
-            self.parse_context.capture_container(container.clone());
+        for container in included_traverser.context.captured_containers() {
+            self.context.capture_container(container.clone());
         }
 
-        for load_node in included_traverser.parse_context.captured_load_nodes() {
-            self.parse_context.capture_load_node(load_node.clone());
+        for load_node in included_traverser.context.captured_load_nodes() {
+            self.context.capture_load_node(load_node.clone());
         }
 
         // CRITICAL: Merge configurations from included file back to parent context
@@ -832,7 +786,6 @@ impl LaunchTraverser {
 
                 let mut traverser = LaunchTraverser {
                     context: thread_context,
-                    parse_context: ParseContext::new(HashMap::new()), // Empty for parallel includes
                     include_chain: include_chain.clone(), // Each thread gets its own chain
                     records: Vec::new(),
                     containers: Vec::new(),
@@ -1090,16 +1043,10 @@ impl LaunchTraverser {
                 let namespace = resolve_substitutions(&ns_subs, &self.context)
                     .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
 
-                // Push to both contexts to keep them in sync
-                // self.context is used for XML processing
-                // self.parse_context is used by Python code via thread-local
-                self.context.push_namespace(namespace.clone());
-                self.parse_context.push_namespace(namespace);
+                self.context.push_namespace(namespace);
             }
             "pop-ros-namespace" => {
-                // Pop from both contexts to keep them in sync
                 self.context.pop_namespace();
-                self.parse_context.pop_namespace();
             }
             "node_container" | "node-container" => {
                 // Parse container and its composable nodes
@@ -1110,7 +1057,7 @@ impl LaunchTraverser {
                     .push(container_action.to_container_record(&self.context)?);
 
                 // Add load_node records for each composable node
-                let load_node_records = container_action.to_load_node_records();
+                let load_node_records = container_action.to_load_node_records(&self.context);
                 log::warn!(
                     "DEBUG: Adding {} load_node records from container '{}' to self.load_nodes",
                     load_node_records.len(),
@@ -1146,9 +1093,9 @@ impl LaunchTraverser {
                     captures.len()
                 );
 
-                // Add to parse_context
+                // Add to context captures
                 for capture in captures {
-                    self.parse_context.capture_load_node(capture);
+                    self.context.capture_load_node(capture);
                 }
             }
             other => {
@@ -1160,59 +1107,48 @@ impl LaunchTraverser {
     }
 
     pub fn into_record_json(mut self) -> Result<RecordJson> {
-        // Convert captures from parse_context to records
-        let captured_count = self.parse_context.captured_nodes().len();
-        log::debug!(
-            "Processing {} captured nodes from parse_context",
-            captured_count
-        );
+        // Convert captures from context to records
+        let captured_count = self.context.captured_nodes().len();
+        log::debug!("Processing {} captured nodes from context", captured_count);
         log::debug!("Also have {} nodes in self.records", self.records.len());
 
+        // Build global_params from context (accumulated via SetParameter actions)
+        let final_global_params = self.context.global_parameters();
+        let global_params_opt = if final_global_params.is_empty() {
+            None
+        } else {
+            Some(final_global_params.into_iter().collect::<Vec<_>>())
+        };
+
         let mut nodes: Vec<_> = self
-            .parse_context
+            .context
             .captured_nodes()
             .iter()
-            .map(|n| n.to_record())
+            .map(|n| n.to_record(&global_params_opt))
             .collect::<Result<Vec<_>>>()?;
 
         let mut containers: Vec<_> = self
-            .parse_context
+            .context
             .captured_containers()
             .iter()
-            .map(|c| c.to_record())
+            .map(|c| c.to_record(&global_params_opt))
             .collect::<Result<Vec<_>>>()?;
 
         let mut load_nodes: Vec<_> = self
-            .parse_context
+            .context
             .captured_load_nodes()
             .iter()
-            .map(|ln| ln.to_record())
+            .map(|ln| ln.to_record(&global_params_opt))
             .collect::<Result<Vec<_>>>()?;
-
-        // CRITICAL: Copy GLOBAL_PARAMETERS to context once at the end
-        // (accumulated across all Python files during parsing)
-        {
-            use crate::python::bridge::GLOBAL_PARAMETERS;
-            let params = GLOBAL_PARAMETERS.lock();
-            log::debug!(
-                "Copying {} GLOBAL_PARAMETERS to context for backfill",
-                params.len()
-            );
-            for (key, value) in params.iter() {
-                self.context
-                    .set_global_parameter(key.clone(), value.clone());
-            }
-        }
 
         // CRITICAL: Backfill global_params for nodes that were created before SetParameter ran
         // Some XML nodes are created early in parsing, before Python files run SetParameter actions
-        let final_global_params = self.context.global_parameters();
-        log::debug!("Final global_params has {} keys", final_global_params.len());
-        if !final_global_params.is_empty() {
-            let global_params_vec: Vec<(String, String)> =
-                final_global_params.into_iter().collect();
-
-            // Backfill nodes from parse_context captures
+        log::debug!(
+            "Final global_params has {} keys",
+            global_params_opt.as_ref().map_or(0, |v| v.len())
+        );
+        if let Some(ref global_params_vec) = global_params_opt {
+            // Backfill nodes from context captures
             let mut backfilled_count = 0;
             for node in nodes.iter_mut() {
                 if node.global_params.is_none() {
@@ -1220,7 +1156,7 @@ impl LaunchTraverser {
                     backfilled_count += 1;
                 }
             }
-            log::debug!("Backfilled {} nodes from parse_context", backfilled_count);
+            log::debug!("Backfilled {} captured nodes", backfilled_count);
 
             // Backfill XML nodes from self.records
             let mut backfilled_count = 0;
@@ -1316,14 +1252,6 @@ impl LaunchTraverser {
 
 /// Parse launch file and generate record.json
 pub fn parse_launch_file(path: &Path, cli_args: HashMap<String, String>) -> Result<RecordJson> {
-    // Clear GLOBAL_PARAMETERS at the start of parsing
-    // (accumulates across all Python files during parsing)
-    {
-        use crate::python::bridge::GLOBAL_PARAMETERS;
-        let mut params = GLOBAL_PARAMETERS.lock();
-        params.clear();
-    }
-
     let mut traverser = LaunchTraverser::new(cli_args);
     traverser.traverse_file(path)?;
     traverser.into_record_json()

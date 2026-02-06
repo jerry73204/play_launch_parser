@@ -2,8 +2,8 @@
 
 use crate::{
     actions::ComposableNodeAction,
+    captures::LoadNodeCapture,
     error::{ParseError, Result},
-    python::bridge::LoadNodeCapture,
     record::LoadNodeRecord,
     substitution::{parse_substitutions, resolve_substitutions, LaunchContext, Substitution},
     xml::{Entity, XmlEntity},
@@ -53,8 +53,7 @@ impl LoadComposableNodeAction {
         })
     }
 
-    /// Convert to LoadNodeRecords by resolving the target container
-    /// Convert to LoadNodeCaptures for ParseContext storage
+    /// Convert to LoadNodeCaptures for LaunchContext storage
     pub fn to_captures(&self, context: &LaunchContext) -> Result<Vec<LoadNodeCapture>> {
         // Resolve target container name
         let target_container_name = resolve_substitutions(&self.target, context)
@@ -126,15 +125,9 @@ impl LoadComposableNodeAction {
             }
         };
 
-        // Get global parameters
-        let mut global_params_vec = Vec::new();
-        {
-            use crate::python::bridge::GLOBAL_PARAMETERS;
-            let global_params = GLOBAL_PARAMETERS.lock();
-            for (key, value) in global_params.iter() {
-                global_params_vec.push((key.clone(), value.clone()));
-            }
-        }
+        // Get global parameters from context (set via SetParameter actions)
+        let global_params_vec: Vec<(String, String)> =
+            context.global_parameters().into_iter().collect();
 
         // Convert composable nodes to LoadNodeRecords
         let records: Vec<LoadNodeRecord> = self

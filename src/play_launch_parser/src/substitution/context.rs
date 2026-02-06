@@ -1,8 +1,14 @@
-//! Launch context for managing configurations
+//! Launch context for managing configurations and entity captures
+//!
+//! This is the unified context used by both XML and Python launch file parsers.
+//! It combines substitution resolution (scope chain) with entity capture storage.
 
-use crate::substitution::{
-    parser::parse_substitutions,
-    types::{resolve_substitutions, Substitution},
+use crate::{
+    captures::{ContainerCapture, IncludeCapture, LoadNodeCapture, NodeCapture},
+    substitution::{
+        parser::parse_substitutions,
+        types::{resolve_substitutions, Substitution},
+    },
 };
 use indexmap::IndexMap;
 use std::{cell::Cell, collections::HashMap, path::PathBuf, sync::Arc};
@@ -37,9 +43,14 @@ struct ParentScope {
     parent: Option<Arc<ParentScope>>,
 }
 
-/// Launch context holding configurations and state
-/// Uses hybrid Arc + Local pattern: parent scope is shared (Arc), local scope is owned
-/// This makes child context creation O(1) instead of O(n)
+/// Launch context holding configurations, state, and entity captures
+///
+/// Uses hybrid Arc + Local pattern: parent scope is shared (Arc), local scope is owned.
+/// This makes child context creation O(1) instead of O(n).
+///
+/// Entity captures (nodes, containers, load_nodes, includes) are always local —
+/// they are not inherited by child contexts. Child contexts capture locally,
+/// and callers merge captures back to the parent after processing includes.
 #[derive(Debug, Clone)]
 pub struct LaunchContext {
     /// Parent scope (shared, immutable via Arc)
@@ -57,6 +68,12 @@ pub struct LaunchContext {
     /// Always local (not inherited)
     current_file: Option<PathBuf>,
     namespace_stack: Vec<String>,
+
+    /// Entity captures — always local, never inherited by child()
+    captured_nodes: Vec<NodeCapture>,
+    captured_containers: Vec<ContainerCapture>,
+    captured_load_nodes: Vec<LoadNodeCapture>,
+    captured_includes: Vec<IncludeCapture>,
 }
 
 impl LaunchContext {
@@ -70,6 +87,10 @@ impl LaunchContext {
             local_remappings: Vec::new(),
             current_file: None,
             namespace_stack: vec!["/".to_string()], // Start with root namespace
+            captured_nodes: Vec::new(),
+            captured_containers: Vec::new(),
+            captured_load_nodes: Vec::new(),
+            captured_includes: Vec::new(),
         }
     }
 
@@ -96,6 +117,11 @@ impl LaunchContext {
             local_remappings: Vec::new(),
             current_file: None,
             namespace_stack: self.namespace_stack.clone(), // Small vec, acceptable to clone
+            // Captures are always local — child starts empty
+            captured_nodes: Vec::new(),
+            captured_containers: Vec::new(),
+            captured_load_nodes: Vec::new(),
+            captured_includes: Vec::new(),
         }
     }
 
@@ -544,6 +570,78 @@ impl LaunchContext {
             .cloned()
             .unwrap_or_else(|| "/".to_string())
     }
+
+    /// Get a clone of the namespace stack (for context synchronization)
+    pub fn namespace_stack(&self) -> Vec<String> {
+        self.namespace_stack.clone()
+    }
+
+    /// Set the namespace stack directly (for context synchronization)
+    pub fn set_namespace_stack(&mut self, stack: Vec<String>) {
+        self.namespace_stack = stack;
+    }
+
+    // ========== Entity Capture Methods ==========
+
+    /// Capture a node definition
+    pub fn capture_node(&mut self, node: NodeCapture) {
+        self.captured_nodes.push(node);
+    }
+
+    /// Capture a container definition
+    pub fn capture_container(&mut self, container: ContainerCapture) {
+        self.captured_containers.push(container);
+    }
+
+    /// Capture a composable node load operation
+    pub fn capture_load_node(&mut self, load_node: LoadNodeCapture) {
+        self.captured_load_nodes.push(load_node);
+    }
+
+    /// Capture an include operation
+    pub fn capture_include(&mut self, include: IncludeCapture) {
+        self.captured_includes.push(include);
+    }
+
+    /// Get captured nodes
+    pub fn captured_nodes(&self) -> &[NodeCapture] {
+        &self.captured_nodes
+    }
+
+    /// Get captured containers
+    pub fn captured_containers(&self) -> &[ContainerCapture] {
+        &self.captured_containers
+    }
+
+    /// Get captured load nodes
+    pub fn captured_load_nodes(&self) -> &[LoadNodeCapture] {
+        &self.captured_load_nodes
+    }
+
+    /// Get captured includes
+    pub fn captured_includes(&self) -> &[IncludeCapture] {
+        &self.captured_includes
+    }
+
+    /// Get mutable reference to captured nodes
+    pub fn captured_nodes_mut(&mut self) -> &mut Vec<NodeCapture> {
+        &mut self.captured_nodes
+    }
+
+    /// Get mutable reference to captured containers
+    pub fn captured_containers_mut(&mut self) -> &mut Vec<ContainerCapture> {
+        &mut self.captured_containers
+    }
+
+    /// Get mutable reference to captured load nodes
+    pub fn captured_load_nodes_mut(&mut self) -> &mut Vec<LoadNodeCapture> {
+        &mut self.captured_load_nodes
+    }
+
+    /// Get mutable reference to captured includes
+    pub fn captured_includes_mut(&mut self) -> &mut Vec<IncludeCapture> {
+        &mut self.captured_includes
+    }
 }
 
 /// Reconstruct the original string representation of substitutions
@@ -857,5 +955,160 @@ mod tests {
             context.get_global_parameter("param"),
             Some("value2".to_string())
         );
+    }
+
+    // ========== Entity Capture Tests ==========
+
+    #[test]
+    fn test_capture_node() {
+        let mut context = LaunchContext::new();
+
+        let node = NodeCapture {
+            package: "pkg".to_string(),
+            executable: "exec".to_string(),
+            name: Some("node1".to_string()),
+            namespace: Some("/ns".to_string()),
+            parameters: Vec::new(),
+            params_files: Vec::new(),
+            remappings: Vec::new(),
+            arguments: Vec::new(),
+            env_vars: Vec::new(),
+        };
+
+        context.capture_node(node);
+        assert_eq!(context.captured_nodes().len(), 1);
+        assert_eq!(context.captured_nodes()[0].package, "pkg");
+    }
+
+    #[test]
+    fn test_capture_multiple_entities() {
+        let mut context = LaunchContext::new();
+
+        context.capture_node(NodeCapture {
+            package: "pkg1".to_string(),
+            executable: "exec1".to_string(),
+            name: None,
+            namespace: None,
+            parameters: Vec::new(),
+            params_files: Vec::new(),
+            remappings: Vec::new(),
+            arguments: Vec::new(),
+            env_vars: Vec::new(),
+        });
+
+        context.capture_node(NodeCapture {
+            package: "pkg2".to_string(),
+            executable: "exec2".to_string(),
+            name: None,
+            namespace: None,
+            parameters: Vec::new(),
+            params_files: Vec::new(),
+            remappings: Vec::new(),
+            arguments: Vec::new(),
+            env_vars: Vec::new(),
+        });
+
+        assert_eq!(context.captured_nodes().len(), 2);
+    }
+
+    #[test]
+    fn test_capture_container() {
+        let mut context = LaunchContext::new();
+
+        context.capture_container(ContainerCapture {
+            name: "my_container".to_string(),
+            namespace: "/ns".to_string(),
+            package: Some("rclcpp_components".to_string()),
+            executable: Some("component_container".to_string()),
+            cmd: Vec::new(),
+        });
+
+        assert_eq!(context.captured_containers().len(), 1);
+        assert_eq!(context.captured_containers()[0].name, "my_container");
+    }
+
+    #[test]
+    fn test_capture_load_node() {
+        let mut context = LaunchContext::new();
+
+        context.capture_load_node(LoadNodeCapture {
+            package: "pkg".to_string(),
+            plugin: "pkg::MyNode".to_string(),
+            target_container_name: "/my_container".to_string(),
+            node_name: "my_node".to_string(),
+            namespace: "/ns".to_string(),
+            parameters: vec![("key".to_string(), "value".to_string())],
+            remappings: Vec::new(),
+        });
+
+        assert_eq!(context.captured_load_nodes().len(), 1);
+        assert_eq!(context.captured_load_nodes()[0].node_name, "my_node");
+    }
+
+    #[test]
+    fn test_capture_include() {
+        let mut context = LaunchContext::new();
+
+        context.capture_include(IncludeCapture {
+            file_path: "/path/to/file.launch.xml".to_string(),
+            args: vec![("arg1".to_string(), "val1".to_string())],
+            ros_namespace: "/ns".to_string(),
+        });
+
+        assert_eq!(context.captured_includes().len(), 1);
+        assert_eq!(
+            context.captured_includes()[0].file_path,
+            "/path/to/file.launch.xml"
+        );
+    }
+
+    #[test]
+    fn test_child_does_not_inherit_captures() {
+        let mut context = LaunchContext::new();
+
+        // Add captures to parent
+        context.capture_node(NodeCapture {
+            package: "parent_pkg".to_string(),
+            executable: "parent_exec".to_string(),
+            name: None,
+            namespace: None,
+            parameters: Vec::new(),
+            params_files: Vec::new(),
+            remappings: Vec::new(),
+            arguments: Vec::new(),
+            env_vars: Vec::new(),
+        });
+        assert_eq!(context.captured_nodes().len(), 1);
+
+        // Create child — captures should NOT be inherited
+        let child = context.child();
+        assert_eq!(child.captured_nodes().len(), 0);
+        assert_eq!(child.captured_containers().len(), 0);
+        assert_eq!(child.captured_load_nodes().len(), 0);
+        assert_eq!(child.captured_includes().len(), 0);
+
+        // Parent captures still exist
+        assert_eq!(context.captured_nodes().len(), 1);
+    }
+
+    #[test]
+    fn test_captured_includes_mut_clear() {
+        let mut context = LaunchContext::new();
+
+        context.capture_include(IncludeCapture {
+            file_path: "file1.xml".to_string(),
+            args: Vec::new(),
+            ros_namespace: String::new(),
+        });
+        context.capture_include(IncludeCapture {
+            file_path: "file2.xml".to_string(),
+            args: Vec::new(),
+            ros_namespace: String::new(),
+        });
+        assert_eq!(context.captured_includes().len(), 2);
+
+        // Clear includes (used after processing)
+        context.captured_includes_mut().clear();
+        assert_eq!(context.captured_includes().len(), 0);
     }
 }

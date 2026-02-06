@@ -410,7 +410,7 @@ impl GroupAction {
     ) -> PyResult<Self> {
         // CRITICAL FIX: GroupActions create a scoped namespace context.
         // When the actions list is passed in, any PushRosNamespace actions have already
-        // been constructed and have pushed onto the ParseContext's namespace stack. We need
+        // been constructed and have pushed onto the LaunchContext's namespace stack. We need
         // to pop them after the GroupAction is done being used (simulating scope exit).
         //
         // Since we're in dump mode (not actually executing the launch system), we simulate
@@ -865,7 +865,7 @@ impl IncludeLaunchDescription {
 
             log::debug!("Capturing include with ROS namespace: '{}'", ros_namespace);
 
-            capture_include(crate::python::bridge::IncludeCapture {
+            capture_include(crate::captures::IncludeCapture {
                 file_path: file_path.clone(),
                 args: args.clone(),
                 ros_namespace,
