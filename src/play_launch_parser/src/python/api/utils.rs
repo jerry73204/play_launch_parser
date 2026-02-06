@@ -6,14 +6,13 @@
 
 use pyo3::{prelude::*, types::PyDict};
 
-/// Create a LaunchContext-like object with access to LAUNCH_CONFIGURATIONS
+/// Create a LaunchContext-like Python object with access to launch configurations
 /// This allows substitutions to resolve LaunchConfiguration values during perform()
 pub fn create_launch_context(py: Python) -> PyResult<PyObject> {
-    // Import the launch configuration storage
-    use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+    use crate::python::bridge::with_launch_context;
 
-    // Get the launch configurations
-    let configs = LAUNCH_CONFIGURATIONS.lock();
+    // Get resolved configurations from the thread-local LaunchContext
+    let configs = with_launch_context(|ctx| ctx.configurations());
 
     // Create a simple context object that has a launch_configurations dict
     let context_class = py.eval(
@@ -25,9 +24,9 @@ pub fn create_launch_context(py: Python) -> PyResult<PyObject> {
         None,
     )?;
 
-    // Create a Python dict from our LAUNCH_CONFIGURATIONS
+    // Create a Python dict from our configurations
     let py_configs = PyDict::new(py);
-    for (key, value) in configs.iter() {
+    for (key, value) in &configs {
         py_configs.set_item(key, value)?;
     }
 
@@ -57,7 +56,7 @@ pub fn create_launch_context(py: Python) -> PyResult<PyObject> {
 ///
 /// Conditional substitutions (EqualsSubstitution, IfElseSubstitution, NotEqualsSubstitution, etc.)
 /// need to evaluate during parsing to determine which path to take. These are handled specially:
-/// - They call `perform()` with a real LaunchContext containing LAUNCH_CONFIGURATIONS values
+/// - They call `perform()` with a real LaunchContext containing LaunchContext values
 /// - This allows them to resolve LaunchConfiguration values and evaluate to "true"/"false"
 ///
 /// # LaunchConfiguration Preservation
@@ -133,7 +132,7 @@ pub fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
     // Check if this is a substitution that needs to be evaluated during parsing
     // These substitutions need to call perform() to resolve their content/logic
     if is_evaluating_substitution(obj_ref)? {
-        // Create a real launch context with access to LAUNCH_CONFIGURATIONS
+        // Create a real launch context with access to LaunchContext
         let context = create_launch_context(py)?;
 
         // Call perform() to evaluate the condition

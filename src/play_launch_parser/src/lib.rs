@@ -166,13 +166,9 @@ impl LaunchTraverser {
 
         log::debug!("Executing Python file: {}", path.display());
         log::trace!("Python file arguments: {} args", args.len());
-        for (k, v) in args {
-            log::trace!("  {} = {}", k, v);
-        }
 
-        // Extract global parameters from context and merge with include args
-        // IMPORTANT: Resolve substitutions in arg values before adding to global_params
-        let mut global_params = self.context.global_parameters();
+        // Write include args into context as configurations
+        // (Python API reads these via with_launch_context → get_configuration)
         for (k, v) in args {
             // Parse and resolve substitutions in the value
             let resolved_value = match parse_substitutions(v) {
@@ -183,32 +179,30 @@ impl LaunchTraverser {
                     }
                     Err(e) => {
                         log::warn!("Failed to resolve substitutions in '{}': {}", v, e);
-                        v.clone() // Use original value if resolution fails
+                        v.clone()
                     }
                 },
                 Err(e) => {
                     log::trace!("No substitutions in '{}': {}", v, e);
-                    v.clone() // No substitutions, use as-is
+                    v.clone()
                 }
             };
-            global_params.insert(k.clone(), resolved_value);
+            self.context.set_configuration(k.clone(), resolved_value);
         }
 
         // Add current ROS namespace for OpaqueFunction to access
         let current_ns = self.context.current_namespace();
         if !current_ns.is_empty() && current_ns != "/" {
-            global_params.insert("ros_namespace".to_string(), current_ns.clone());
-            log::debug!("Added ros_namespace='{}' to global parameters", current_ns);
+            self.context
+                .set_configuration("ros_namespace".to_string(), current_ns.clone());
+            log::debug!("Added ros_namespace='{}' to context", current_ns);
         }
 
-        log::debug!("Executing with {} global parameters", global_params.len());
-
         // Set the thread-local context for Python API to access
-        // No namespace sync needed — Python API now operates directly on LaunchContext
         use crate::python::bridge::{clear_current_launch_context, set_current_launch_context};
         set_current_launch_context(&mut self.context);
 
-        let executor = PythonLaunchExecutor::new(global_params);
+        let executor = PythonLaunchExecutor::new();
         let path_str = path.to_str().ok_or_else(|| {
             ParseError::PythonError(format!("Invalid UTF-8 in path: {}", path.display()))
         })?;
@@ -435,23 +429,16 @@ impl LaunchTraverser {
         };
         included_traverser.traverse_entity(&root)?;
 
-        // CRITICAL: Copy XML arguments to Python's LAUNCH_CONFIGURATIONS
-        // This allows Python nodes to reference variables declared in included XML files
-        {
-            use crate::python::bridge::LAUNCH_CONFIGURATIONS;
-            let mut configs = LAUNCH_CONFIGURATIONS.lock();
-
-            // Get all configurations from the XML context
-            for (key, value) in included_traverser.context.configurations() {
-                // Only add if not already present (don't override Python's values)
-                if !configs.contains_key(&key) {
-                    log::debug!(
-                        "Copying XML argument '{}' = '{}' to Python LAUNCH_CONFIGURATIONS",
-                        key,
-                        value
-                    );
-                    configs.insert(key.clone(), value.clone());
-                }
+        // Copy XML arguments into self.context so subsequent Python files can see them
+        for (key, value) in included_traverser.context.configurations() {
+            // Only add if not already present (don't override existing values)
+            if self.context.get_configuration(&key).is_none() {
+                log::debug!(
+                    "Copying XML argument '{}' = '{}' to parent context",
+                    key,
+                    value
+                );
+                self.context.set_configuration(key, value);
             }
         }
 

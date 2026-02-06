@@ -40,32 +40,32 @@ impl DeclareLaunchArgument {
         description: Option<String>,
         _kwargs: Option<&pyo3::types::PyDict>,
     ) -> PyResult<Self> {
-        use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+        use crate::python::bridge::with_launch_context;
 
         // Convert default_value PyObject to string (may be string, substitution, or list)
         let default_str = default_value
             .map(|dv| Self::pyobject_to_string(py, &dv))
             .transpose()?;
 
-        // Register the default value in LAUNCH_CONFIGURATIONS if not already set
+        // Register the default value in LaunchContext if not already set
         if let Some(ref default_val) = default_str {
-            let mut configs = LAUNCH_CONFIGURATIONS.lock();
-            // Only set if not already present (CLI args and include args take precedence)
-            if !configs.contains_key(&name) {
-                configs.insert(name.clone(), default_val.clone());
-                log::debug!(
-                    "Registered launch configuration '{}' with default value '{}'",
-                    name,
-                    default_val
-                );
-            } else {
-                log::debug!(
-                    "Launch configuration '{}' already set to '{}', not overriding with default '{}'",
-                    name,
-                    configs.get(&name).unwrap(),
-                    default_val
-                );
-            }
+            with_launch_context(|ctx| {
+                // Only set if not already present (CLI args and include args take precedence)
+                if ctx.get_configuration(&name).is_none() {
+                    ctx.set_configuration(name.clone(), default_val.clone());
+                    log::debug!(
+                        "Registered launch configuration '{}' with default value '{}'",
+                        name,
+                        default_val
+                    );
+                } else {
+                    log::debug!(
+                        "Launch configuration '{}' already set, not overriding with default '{}'",
+                        name,
+                        default_val
+                    );
+                }
+            });
         }
 
         Ok(Self {
@@ -125,8 +125,8 @@ impl OpaqueFunction {
             log::debug!("OpaqueFunction has function, executing it");
             // Create a mock LaunchContext that provides access to launch configurations
             // This allows OpaqueFunction code to call LaunchConfiguration().perform(context)
-            use crate::python::bridge::{get_current_ros_namespace, LAUNCH_CONFIGURATIONS};
-            let configs = LAUNCH_CONFIGURATIONS.lock().clone();
+            use crate::python::bridge::{get_current_ros_namespace, with_launch_context};
+            let configs = with_launch_context(|ctx| ctx.configurations());
             let ros_namespace = get_current_ros_namespace();
 
             log::debug!("OpaqueFunction context: ros_namespace='{}'", ros_namespace);
@@ -737,28 +737,28 @@ fn pyobject_to_string_for_include_args(py: Python, obj: &PyAny) -> PyResult<Stri
         return Ok(result);
     }
 
-    // CRITICAL: For LaunchConfiguration, resolve it using LAUNCH_CONFIGURATIONS
+    // CRITICAL: For LaunchConfiguration, resolve it using LaunchContext
     // This is different from regular parameter handling where we preserve the substitution
     let type_name = obj.get_type().name()?;
     if type_name == "LaunchConfiguration" {
-        use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+        use crate::python::bridge::with_launch_context;
 
         // Try to get the variable name
         if let Ok(name_obj) = obj.getattr("variable_name") {
             if let Ok(var_name) = name_obj.extract::<Vec<String>>() {
                 if var_name.len() == 1 {
-                    // Look up the value in LAUNCH_CONFIGURATIONS
-                    let configs = LAUNCH_CONFIGURATIONS.lock();
-                    if let Some(value) = configs.get(&var_name[0]) {
+                    // Look up the value in LaunchContext
+                    let resolved = with_launch_context(|ctx| ctx.get_configuration(&var_name[0]));
+                    if let Some(value) = resolved {
                         log::debug!(
                             "Resolving LaunchConfiguration('{}') for include arg: '{}'",
                             var_name[0],
                             value
                         );
-                        return Ok(value.clone());
+                        return Ok(value);
                     } else {
                         log::warn!(
-                            "LaunchConfiguration('{}') not found in LAUNCH_CONFIGURATIONS for include arg",
+                            "LaunchConfiguration('{}') not found in context for include arg",
                             var_name[0]
                         );
                     }

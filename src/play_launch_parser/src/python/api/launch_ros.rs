@@ -530,11 +530,12 @@ impl ComposableNodeContainer {
 
         // Debug: Log if name is empty
         if name_str.is_empty() {
-            use crate::python::bridge::LAUNCH_CONFIGURATIONS;
-            let configs = LAUNCH_CONFIGURATIONS.lock();
+            use crate::python::bridge::with_launch_context;
+            let config_keys =
+                with_launch_context(|ctx| ctx.configurations().keys().cloned().collect::<Vec<_>>());
             log::warn!(
                 "ComposableNodeContainer has empty name! Available configs: {:?}",
-                configs.keys().collect::<Vec<_>>()
+                config_keys
             );
         }
 

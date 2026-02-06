@@ -2,7 +2,7 @@
 
 #![allow(non_local_definitions)] // pyo3 macros generate non-local impls
 
-use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+use crate::python::bridge::with_launch_context;
 use pyo3::prelude::*;
 
 /// Mock IfCondition class
@@ -83,17 +83,17 @@ impl IfCondition {
     ///
     /// Truthy values: "true", "True", "1", "yes", "Yes", "on", "On"
     /// Falsy values: "false", "False", "0", "no", "No", "off", "Off", ""
-    /// Substitutions: "$(var name)" are resolved from LAUNCH_CONFIGURATIONS before evaluation
+    /// Substitutions: "$(var name)" are resolved from LaunchContext before evaluation
     fn is_truthy(value: &str) -> bool {
         // Resolve LaunchConfiguration substitutions
         let resolved_value = if value.starts_with("$(var ") && value.ends_with(')') {
             // Extract variable name from "$(var variable_name)"
             let var_name = &value[6..value.len() - 1]; // Skip "$(var " and ")"
 
-            // Look up in global launch configurations
-            let configs = LAUNCH_CONFIGURATIONS.lock();
-            if let Some(resolved) = configs.get(var_name) {
-                resolved.clone()
+            // Look up in LaunchContext via thread-local
+            let resolved = with_launch_context(|ctx| ctx.get_configuration(var_name));
+            if let Some(val) = resolved {
+                val
             } else {
                 // Variable not found - treat as empty/falsy
                 log::warn!(

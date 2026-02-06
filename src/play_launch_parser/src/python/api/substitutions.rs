@@ -2,56 +2,11 @@
 
 #![allow(non_local_definitions)] // pyo3 macros generate non-local impls
 
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::prelude::*;
 
 // ============================================================================
 // Helper Functions for Context Management
 // ============================================================================
-
-/// Create a LaunchContext populated with data from Python context
-///
-/// Extracts the `launch_configurations` dictionary from the Python context
-/// and populates a Rust LaunchContext with the values. This enables proper
-/// resolution of nested substitutions like `$(var other_var)`.
-///
-/// # Arguments
-/// * `py_context` - Python context object (MockLaunchContext)
-///
-/// # Returns
-/// * `PyResult<LaunchContext>` - Populated Rust context or error
-///
-/// # Example
-/// ```ignore
-/// let ctx = create_context_from_python(py_context)?;
-/// let value = ctx.get_configuration("my_var");
-/// ```
-fn create_context_from_python(
-    py_context: &PyAny,
-) -> PyResult<crate::substitution::context::LaunchContext> {
-    use crate::substitution::context::LaunchContext;
-
-    // Extract launch_configurations from Python context
-    let launch_configs = py_context
-        .getattr("launch_configurations")?
-        .downcast::<PyDict>()?;
-
-    // Create Rust context
-    let mut ctx = LaunchContext::new();
-
-    // Populate with launch configurations
-    for (key, value) in launch_configs.iter() {
-        let key_str: String = key.extract()?;
-        let value_str: String = value.extract()?;
-        ctx.set_configuration(key_str, value_str);
-    }
-
-    // TODO: Also extract and populate:
-    // - Environment variables (if needed beyond std::env)
-    // - ROS namespace stack
-    // - Global parameters
-
-    Ok(ctx)
-}
 
 /// Parse and resolve substitution string with micro-optimization
 ///
@@ -136,33 +91,23 @@ impl LaunchConfiguration {
     /// Perform the substitution - extract the actual value from launch configurations
     ///
     /// In ROS 2, this method is called with a launch context to resolve the value.
-    /// We extract the Python context to get launch_configurations and resolve any
-    /// nested substitutions using a populated Rust LaunchContext.
-    fn perform(&self, context: &PyAny) -> PyResult<String> {
-        use crate::python::bridge::LAUNCH_CONFIGURATIONS;
+    /// Uses the thread-local LaunchContext which already has all configurations
+    /// with proper scope chain resolution.
+    fn perform(&self, _context: &PyAny) -> PyResult<String> {
+        use crate::python::bridge::with_launch_context;
 
-        // Get value from LAUNCH_CONFIGURATIONS
-        let configs = LAUNCH_CONFIGURATIONS.lock();
-        let value = if let Some(v) = configs.get(&self.variable_name) {
-            v.clone()
-        } else if let Some(ref default) = self.default {
-            default.clone()
-        } else {
-            // Return empty string if not found (ROS 2 behavior)
-            String::new()
-        };
-        drop(configs); // Release lock early
-
-        // Create Rust context from Python context
-        let rust_context = create_context_from_python(context)?;
-
-        // Resolve any nested substitutions
-        let result = resolve_substitution_string(&value, &rust_context).map_err(|e| {
-            pyo3::exceptions::PyValueError::new_err(format!(
-                "Failed to resolve substitutions in '{}': {}",
-                value, e
-            ))
-        })?;
+        // Get value from LaunchContext (already resolves nested substitutions)
+        let result = with_launch_context(|ctx| {
+            if let Some(value) = ctx.get_configuration(&self.variable_name) {
+                value
+            } else if let Some(ref default) = self.default {
+                // Resolve nested substitutions in the default value
+                resolve_substitution_string(default, ctx).unwrap_or_else(|_| default.clone())
+            } else {
+                // Return empty string if not found (ROS 2 behavior)
+                String::new()
+            }
+        });
 
         log::debug!(
             "LaunchConfiguration('{}').perform() -> '{}'",

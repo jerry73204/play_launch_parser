@@ -2,19 +2,17 @@
 //!
 //! Executes Python launch files with PyO3 mocks to capture node definitions.
 
-use crate::{error::Result, python::bridge::LAUNCH_CONFIGURATIONS};
-use indexmap::IndexMap;
+use crate::error::Result;
 use pyo3::prelude::*;
 
 /// Executes Python launch files with mock API
-pub struct PythonLaunchExecutor {
-    global_params: IndexMap<String, String>,
-}
+#[derive(Default)]
+pub struct PythonLaunchExecutor;
 
 impl PythonLaunchExecutor {
-    /// Create new executor with global parameters
-    pub fn new(global_params: IndexMap<String, String>) -> Self {
-        Self { global_params }
+    /// Create new executor
+    pub fn new() -> Self {
+        Self
     }
 
     /// Execute a Python launch file and capture entities
@@ -104,14 +102,8 @@ if not _ok:
             py.run(isolation_code, None, None)?;
             log::debug!("Installed aggressive Python environment isolation for launch* mocks");
 
-            // Populate LAUNCH_CONFIGURATIONS with launch arguments for LaunchConfiguration resolution
-            {
-                let mut configs = LAUNCH_CONFIGURATIONS.lock();
-                configs.clear();
-                for (k, v) in &self.global_params {
-                    configs.insert(k.clone(), v.clone());
-                }
-            }
+            // Launch configurations are already in the thread-local LaunchContext
+            // (set by execute_python_file() before calling this executor)
 
             // Execute the Python file directly with exec() instead of runpy
             // This gives us complete control over the execution environment
@@ -181,20 +173,21 @@ fn process_launch_arguments(_py: Python, _launch_desc: &PyObject) -> PyResult<()
     use crate::{
         python::bridge::{
             update_captured_containers, update_captured_load_nodes, update_captured_nodes,
-            LAUNCH_CONFIGURATIONS,
+            with_launch_context,
         },
-        substitution::{
-            context::LaunchContext, parser::parse_substitutions, types::resolve_substitutions,
-        },
+        substitution::{parser::parse_substitutions, types::resolve_substitutions},
     };
 
-    // Create a LaunchContext from current LAUNCH_CONFIGURATIONS
-    let configs = LAUNCH_CONFIGURATIONS.lock();
-    let mut ctx = LaunchContext::new();
-    for (key, value) in configs.iter() {
+    // Snapshot configurations from the thread-local LaunchContext
+    // (includes CLI args, include args, and DeclareLaunchArgument defaults)
+    // We snapshot because update_captured_* also borrows the context via thread-local
+    let configs = with_launch_context(|ctx| ctx.configurations());
+
+    // Build a temporary context for substitution resolution
+    let mut ctx = crate::substitution::context::LaunchContext::new();
+    for (key, value) in &configs {
         ctx.set_configuration(key.clone(), value.clone());
     }
-    drop(configs);
 
     // Re-resolve container names that contain unresolved substitutions
     update_captured_containers(|containers| {

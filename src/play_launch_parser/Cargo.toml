@@ -26,7 +26,6 @@ once_cell = "1.19"
 
 # Performance optimizations (Phase 7.1)
 dashmap = "5.5"           # Concurrent HashMap for caching
-parking_lot = "0.12"      # Faster mutexes
 
 # Performance optimizations (Phase 7.3)
 rayon = "1.8"             # Parallel processing
@@ -35,7 +34,7 @@ rayon = "1.8"             # Parallel processing
 lru = "0.16.3"            # LRU cache for substitution parsing
 
 # Parser parity fixes
-indexmap = "2.0"          # Preserves insertion order for global_parameters
+indexmap = "2.0"          # Preserves insertion order for configurations
 
 [dev-dependencies]
 tempfile = "3.8"
