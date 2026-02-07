@@ -77,7 +77,7 @@ impl NodeAction {
                 "composable_node" | "composable-node" => {
                     // Composable nodes are children of node_container
                     // For now, we log and skip them (not yet fully supported)
-                    log::info!("Found composable_node in container (not yet fully supported)");
+                    log::debug!("Found composable_node in container (not yet fully supported)");
                 }
                 other => {
                     return Err(ParseError::UnexpectedElement {

@@ -10,7 +10,7 @@ impl LaunchTraverser {
         include_args: &HashMap<String, String>,
         ros_namespace: Option<String>,
     ) -> Result<()> {
-        log::info!("Including XML launch file: {}", resolved_path.display());
+        log::debug!("Including XML launch file: {}", resolved_path.display());
         if let Some(ref ns) = ros_namespace {
             log::debug!("Applying ROS namespace '{}' to XML include", ns);
         }

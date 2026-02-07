@@ -18,7 +18,7 @@ impl PythonLaunchExecutor {
     /// Execute a Python launch file and capture entities
     pub fn execute(&self, launch_file_path: &str) -> Result<()> {
         Python::with_gil(|py| {
-            log::info!("Executing Python launch file: {}", launch_file_path);
+            log::debug!("Executing Python launch file: {}", launch_file_path);
 
             // Register PyO3 mock modules in sys.modules
             crate::python::api::register_modules(py)?;

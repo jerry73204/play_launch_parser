@@ -280,14 +280,14 @@ impl LaunchTraverser {
             "composable_node" | "composable-node" => {
                 // Composable nodes are loaded into containers
                 // Standalone composable nodes should be inside a node_container
-                log::info!("Skipping standalone composable_node (should be in node_container)");
+                log::debug!("Skipping standalone composable_node (should be in node_container)");
             }
             "load_composable_node" | "load-composable-node" => {
                 // Parse load_composable_node action and convert to captures
                 let action = LoadComposableNodeAction::from_entity(entity, &self.context)?;
                 let captures = action.to_captures(&self.context)?;
 
-                log::info!(
+                log::debug!(
                     "Loaded {} composable node(s) into container via load_composable_node",
                     captures.len()
                 );

@@ -314,16 +314,12 @@ impl ComposableNodeAction {
                             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
 
                         // Load YAML parameter file and extract parameters
-                        log::warn!(
-                            "DEBUG container.rs: Found param file='{}', checking if YAML",
-                            from_resolved
-                        );
+                        log::debug!("Found param file='{}', checking if YAML", from_resolved);
                         if from_resolved.ends_with(".yaml") || from_resolved.ends_with(".yml") {
-                            log::warn!("DEBUG container.rs: Loading YAML file");
                             match extract_params_from_yaml(Path::new(&from_resolved), context) {
                                 Ok(yaml_params) => {
-                                    log::warn!(
-                                        "DEBUG container.rs: Loaded {} parameters from {}",
+                                    log::debug!(
+                                        "Loaded {} parameters from {}",
                                         yaml_params.len(),
                                         from_resolved
                                     );
@@ -331,7 +327,7 @@ impl ComposableNodeAction {
                                 }
                                 Err(e) => {
                                     log::warn!(
-                                        "DEBUG container.rs: Failed to load YAML parameter file {}: {}",
+                                        "Failed to load YAML parameter file {}: {}",
                                         from_resolved,
                                         e
                                     );

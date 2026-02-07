@@ -45,7 +45,7 @@ impl LaunchTraverser {
             return Ok(()); // Skip circular includes
         }
 
-        log::info!("Including launch file: {}", resolved_path.display());
+        log::debug!("Including launch file: {}", resolved_path.display());
 
         // Log include arguments being passed
         if !include.args.is_empty() {
@@ -58,7 +58,7 @@ impl LaunchTraverser {
         if let Some(ext) = resolved_path.extension().and_then(|s| s.to_str()) {
             match ext {
                 "py" => {
-                    log::info!("Including Python launch file: {}", resolved_path.display());
+                    log::debug!("Including Python launch file: {}", resolved_path.display());
 
                     // Create args for the Python file (include args override current context)
                     let mut python_args = self.context.configurations();
@@ -76,7 +76,7 @@ impl LaunchTraverser {
                 "yaml" | "yml" => {
                     // YAML files in <include> are always launch files
                     // (parameter files are handled in <param from="..."> context)
-                    log::info!("Including YAML launch file: {}", resolved_path.display());
+                    log::debug!("Including YAML launch file: {}", resolved_path.display());
                     self.process_yaml_launch_file(&resolved_path)?;
                     return Ok(());
                 }

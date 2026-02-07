@@ -55,13 +55,13 @@ impl LaunchTraverser {
         if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
             match ext {
                 "py" => {
-                    log::info!("Executing Python launch file: {}", path.display());
+                    log::debug!("Executing Python launch file: {}", path.display());
                     return self.execute_python_file(path, &self.context.configurations());
                 }
                 "yaml" | "yml" => {
                     // YAML files in traverse_file are always launch files
                     // (parameter files are handled in <param from="..."> context)
-                    log::info!("Processing YAML launch file: {}", path.display());
+                    log::debug!("Processing YAML launch file: {}", path.display());
                     self.process_yaml_launch_file(path)?;
                     return Ok(());
                 }

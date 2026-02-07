@@ -1799,8 +1799,8 @@ impl LoadComposableNodes {
                         .and_then(|attr| attr.extract::<String>().ok())
                 })
                 .collect();
-            log::warn!(
-                "DEBUG LoadComposableNodes: target='{}', {} nodes: {:?}",
+            log::debug!(
+                "LoadComposableNodes: target='{}', {} nodes: {:?}",
                 target_str,
                 composable_node_descriptions.len(),
                 node_names
@@ -1901,8 +1901,8 @@ impl LoadComposableNodes {
                 Vec::new()
             };
 
-            log::warn!(
-                "DEBUG capture_composable_nodes: node='{}', extracted {} parameters",
+            log::debug!(
+                "capture_composable_nodes: node='{}', {} parameters",
                 node_name,
                 parameters.len()
             );
@@ -2083,43 +2083,30 @@ impl LoadComposableNodes {
         let mut parsed_params = Vec::new();
 
         if let Ok(params_list) = params_obj.downcast::<pyo3::types::PyList>() {
-            log::warn!(
-                "DEBUG extract_parameters: params_list has {} items",
-                params_list.len()
-            );
+            log::trace!("extract_parameters: {} items", params_list.len());
 
             for (idx, param_item) in params_list.iter().enumerate() {
                 if let Ok(param_dict) = param_item.downcast::<pyo3::types::PyDict>() {
-                    log::warn!(
-                        "DEBUG extract_parameters: item {} is dict with {} keys",
+                    log::trace!(
+                        "extract_parameters: item {} is dict with {} keys",
                         idx,
                         param_dict.len()
                     );
 
-                    // Log first few keys for debugging
-                    let keys: Vec<String> = param_dict
-                        .keys()
-                        .iter()
-                        .take(5)
-                        .filter_map(|k| k.extract::<String>().ok())
-                        .collect();
-                    log::warn!("DEBUG extract_parameters: first 5 keys: {:?}", keys);
                     // Check if this dict represents a parameter file
                     if param_dict.len() == 1 {
                         if let Some((key, value)) = param_dict.iter().next() {
                             let key_str = key.extract::<String>().unwrap_or_default();
-                            log::warn!("DEBUG: single-key dict with key='{}'", key_str);
 
                             // Check if the value is a file path
                             if let Ok(path_str) = value.extract::<String>() {
-                                log::warn!("DEBUG: value is string: {}", path_str);
                                 if is_yaml_file(&path_str) {
-                                    log::warn!("DEBUG: Loading YAML file: {}", path_str);
                                     match load_yaml_params(&path_str) {
                                         Ok(yaml_params) => {
-                                            log::warn!(
-                                                "DEBUG: Loaded {} parameters",
-                                                yaml_params.len()
+                                            log::trace!(
+                                                "Loaded {} parameters from YAML {}",
+                                                yaml_params.len(),
+                                                path_str
                                             );
                                             parsed_params.extend(yaml_params);
                                             continue; // Skip normal dict processing
@@ -2134,6 +2121,7 @@ impl LoadComposableNodes {
                                     }
                                 }
                             }
+                            let _ = key_str; // used for debugging if needed
                         }
                     }
 
@@ -2144,34 +2132,23 @@ impl LoadComposableNodes {
                         parsed_params.push((key_str, value_str));
                     }
                 } else {
-                    // Try to get Python type name for debugging
                     let type_name = param_item.get_type().name().unwrap_or("<unknown>");
-                    log::warn!(
-                        "DEBUG extract_parameters: item {} is not dict or string, type={}",
-                        idx,
-                        type_name
-                    );
+                    log::trace!("extract_parameters: item {} type={}", idx, type_name);
 
                     // Check if it's a ParameterFile object
                     if type_name.contains("ParameterFile")
                         || type_name.contains("parameter_descriptions")
                     {
-                        log::warn!("DEBUG extract_parameters: item {} is ParameterFile", idx);
                         // Call __str__() to get the file path
                         if let Ok(str_method) = param_item.call_method0("__str__") {
                             if let Ok(path_str) = str_method.extract::<String>() {
-                                log::warn!(
-                                    "DEBUG extract_parameters: ParameterFile path: {}",
-                                    path_str
-                                );
                                 // Check if it's a YAML parameter file
                                 if is_yaml_file(&path_str) {
-                                    log::warn!("DEBUG: is_yaml_file returned true");
                                     // Load and expand YAML parameter file
                                     match load_yaml_params(&path_str) {
                                         Ok(yaml_params) => {
-                                            log::warn!(
-                                                "DEBUG: Loaded {} parameters from {}",
+                                            log::trace!(
+                                                "Loaded {} parameters from ParameterFile {}",
                                                 yaml_params.len(),
                                                 path_str
                                             );
@@ -2189,7 +2166,6 @@ impl LoadComposableNodes {
                                         }
                                     }
                                 } else {
-                                    log::warn!("DEBUG: is_yaml_file returned false");
                                     // Non-YAML file path - store as reference
                                     parsed_params.push(("__param_file".to_string(), path_str));
                                 }
@@ -2198,15 +2174,13 @@ impl LoadComposableNodes {
                     }
                     // Try extracting as string anyway
                     else if let Ok(path_str) = param_item.extract::<String>() {
-                        log::warn!("DEBUG: extract_parameters got string: {}", path_str);
                         // Check if it's a YAML parameter file
                         if is_yaml_file(&path_str) {
-                            log::warn!("DEBUG: is_yaml_file returned true");
                             // Load and expand YAML parameter file
                             match load_yaml_params(&path_str) {
                                 Ok(yaml_params) => {
-                                    log::warn!(
-                                        "DEBUG: Loaded {} parameters from {}",
+                                    log::trace!(
+                                        "Loaded {} parameters from {}",
                                         yaml_params.len(),
                                         path_str
                                     );
@@ -2219,7 +2193,6 @@ impl LoadComposableNodes {
                                 }
                             }
                         } else {
-                            log::warn!("DEBUG: is_yaml_file returned false");
                             // Non-YAML file path - store as reference
                             parsed_params.push(("__param_file".to_string(), path_str));
                         }
