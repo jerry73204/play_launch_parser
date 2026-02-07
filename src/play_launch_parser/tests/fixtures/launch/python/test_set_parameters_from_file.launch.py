@@ -9,15 +9,15 @@ from launch_ros.actions import Node, SetParametersFromFile
 def generate_launch_description():
     return launch.LaunchDescription([
         # Declare arguments
-        DeclareLaunchArgument('config_dir', default_value='/tmp'),
+        DeclareLaunchArgument('config_dir', default_value='/test_config'),
         DeclareLaunchArgument('params_file', default_value='params.yaml'),
 
         # Test 1: SetParametersFromFile with simple string path (applies to all nodes)
-        SetParametersFromFile('/tmp/global_params.yaml'),
+        SetParametersFromFile('/test_config/global_params.yaml'),
 
         # Test 2: SetParametersFromFile with specific node_name
         SetParametersFromFile(
-            '/tmp/node1_params.yaml',
+            '/test_config/node1_params.yaml',
             node_name='node1'
         ),
 
@@ -33,7 +33,7 @@ def generate_launch_description():
         # Test 4: SetParametersFromFile with LaunchConfiguration for filename
         SetParametersFromFile(
             PathJoinSubstitution([
-                TextSubstitution(text='/tmp/'),
+                TextSubstitution(text='/test_config/'),
                 LaunchConfiguration('params_file')
             ])
         ),

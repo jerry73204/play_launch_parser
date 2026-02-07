@@ -1,5 +1,6 @@
 use play_launch_parser::parse_launch_file;
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, io::Write, path::PathBuf};
+use tempfile::NamedTempFile;
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -11,6 +12,17 @@ static PYTHON_TEST_LOCK: Mutex<()> = Mutex::new(());
 /// Recovers from poisoned mutex if a previous test panicked
 fn python_test_guard() -> MutexGuard<'static, ()> {
     PYTHON_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Create a temporary launch file with a .launch.py suffix for inline test content.
+/// Returns a NamedTempFile that stays alive (and on disk) while the returned value exists.
+fn write_temp_launch_file(content: &str) -> NamedTempFile {
+    let mut f = tempfile::Builder::new()
+        .suffix(".launch.py")
+        .tempfile()
+        .unwrap();
+    f.write_all(content.as_bytes()).unwrap();
+    f
 }
 
 /// Helper to get fixture path from crate tests directory
@@ -1346,7 +1358,13 @@ fn test_conditional_substitutions() {
     let _guard = python_test_guard();
     let fixture = get_fixture_path("python/test_conditional_substitutions.launch.py");
 
-    let args = HashMap::new();
+    // Get the fixtures directory path for FileContent test data files
+    let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/launch/python");
+    let fixture_dir_str = fixture_dir.to_str().unwrap();
+
+    let mut args = HashMap::new();
+    args.insert("config_dir".to_string(), fixture_dir_str.to_string());
     let result = parse_launch_file(&fixture, args);
 
     assert!(
@@ -1443,13 +1461,13 @@ fn test_conditional_substitutions() {
         "Nested IfElseSubstitution should evaluate correctly"
     );
 
-    // Test FileContent with simple path
+    // Test FileContent with PathJoinSubstitution (config_dir + test_content.txt)
     let node_file_content_simple = nodes
         .iter()
         .find(|n| n["name"] == "node_file_content_simple")
         .expect("node_file_content_simple should exist");
 
-    // FileContent reads from /tmp/test_content.txt which contains "/file_content_namespace"
+    // FileContent reads from <fixtures_dir>/test_content.txt which contains "/file_content_namespace"
     assert_eq!(
         node_file_content_simple["namespace"].as_str().unwrap(),
         "/file_content_namespace",
@@ -1463,7 +1481,7 @@ fn test_conditional_substitutions() {
         .expect("node_file_content_path_join should exist");
 
     // FileContent(PathJoinSubstitution([LaunchConfiguration('config_dir'), 'namespace.txt']))
-    // Should resolve to: FileContent('/tmp/namespace.txt') which contains "/config_namespace"
+    // Should resolve to: FileContent('<fixtures_dir>/namespace.txt') which contains "/config_namespace"
     assert_eq!(
         node_file_content_path_join["namespace"].as_str().unwrap(),
         "/config_namespace",
@@ -2338,11 +2356,10 @@ def generate_launch_description():
     ])
 "#;
 
-    let temp_file = std::env::temp_dir().join("test_set_env_var.launch.py");
-    std::fs::write(&temp_file, launch_content).unwrap();
+    let temp_file = write_temp_launch_file(launch_content);
 
     let args = HashMap::new();
-    let result = parse_launch_file(&temp_file, args);
+    let result = parse_launch_file(temp_file.path(), args);
 
     assert!(
         result.is_ok(),
@@ -2357,8 +2374,6 @@ def generate_launch_description():
     assert!(json["node"].is_array());
     let nodes = json["node"].as_array().unwrap();
     assert_eq!(nodes.len(), 1, "Should have 1 node");
-
-    std::fs::remove_file(&temp_file).ok();
 }
 
 #[test]
@@ -2398,11 +2413,10 @@ def generate_launch_description():
     ])
 "#;
 
-    let temp_file = std::env::temp_dir().join("test_append_env_var.launch.py");
-    std::fs::write(&temp_file, launch_content).unwrap();
+    let temp_file = write_temp_launch_file(launch_content);
 
     let args = HashMap::new();
-    let result = parse_launch_file(&temp_file, args);
+    let result = parse_launch_file(temp_file.path(), args);
 
     assert!(
         result.is_ok(),
@@ -2417,8 +2431,6 @@ def generate_launch_description():
     assert!(json["node"].is_array());
     let nodes = json["node"].as_array().unwrap();
     assert_eq!(nodes.len(), 1, "Should have 1 node");
-
-    std::fs::remove_file(&temp_file).ok();
 }
 
 #[test]
@@ -2453,11 +2465,10 @@ def generate_launch_description():
     ])
 "#;
 
-    let temp_file = std::env::temp_dir().join("test_execute_process.launch.py");
-    std::fs::write(&temp_file, launch_content).unwrap();
+    let temp_file = write_temp_launch_file(launch_content);
 
     let args = HashMap::new();
-    let result = parse_launch_file(&temp_file, args);
+    let result = parse_launch_file(temp_file.path(), args);
 
     assert!(
         result.is_ok(),
@@ -2472,8 +2483,6 @@ def generate_launch_description():
     assert!(json["node"].is_array());
     let nodes = json["node"].as_array().unwrap();
     assert_eq!(nodes.len(), 1, "Should have 1 node");
-
-    std::fs::remove_file(&temp_file).ok();
 }
 
 #[test]
@@ -2488,7 +2497,7 @@ from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('config_file', default_value='/tmp/config.yaml'),
+        DeclareLaunchArgument('config_file', default_value='/test_config/config.yaml'),
         DeclareLaunchArgument('log_level', default_value='info'),
         
         # Test 1: Plain string arguments
@@ -2521,11 +2530,10 @@ def generate_launch_description():
     ])
 "#;
 
-    let temp_file = std::env::temp_dir().join("test_node_arguments.launch.py");
-    std::fs::write(&temp_file, launch_content).unwrap();
+    let temp_file = write_temp_launch_file(launch_content);
 
     let args = HashMap::new();
-    let result = parse_launch_file(&temp_file, args);
+    let result = parse_launch_file(temp_file.path(), args);
 
     assert!(
         result.is_ok(),
@@ -2565,8 +2573,6 @@ def generate_launch_description():
         mixed_node["args"].is_array(),
         "mixed_args_node should have args"
     );
-
-    std::fs::remove_file(&temp_file).ok();
 }
 
 #[test]
@@ -2617,11 +2623,10 @@ def generate_launch_description():
     ])
 "#;
 
-    let temp_file = std::env::temp_dir().join("test_phase_15_combined.launch.py");
-    std::fs::write(&temp_file, launch_content).unwrap();
+    let temp_file = write_temp_launch_file(launch_content);
 
     let args = HashMap::new();
-    let result = parse_launch_file(&temp_file, args);
+    let result = parse_launch_file(temp_file.path(), args);
 
     assert!(
         result.is_ok(),
@@ -2640,6 +2645,4 @@ def generate_launch_description():
     let node = &nodes[0];
     assert_eq!(node["name"].as_str().unwrap(), "comprehensive_test_node");
     assert!(node["args"].is_array(), "Node should have args");
-
-    std::fs::remove_file(&temp_file).ok();
 }

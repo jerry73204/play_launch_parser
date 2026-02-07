@@ -15,7 +15,7 @@ async def example_coroutine(context):
 def generate_launch_description():
     return launch.LaunchDescription([
         # Test 1: SetROSLogDir
-        SetROSLogDir('/tmp/ros_logs'),
+        SetROSLogDir('/test_config/ros_logs'),
 
         # Test 2: SetRemap for topic remapping
         SetRemap(src='/old_topic', dst='/new_topic'),

@@ -19,7 +19,7 @@ def generate_launch_description():
         # Declare arguments
         DeclareLaunchArgument('mode', default_value='debug'),
         DeclareLaunchArgument('enable_feature', default_value='true'),
-        DeclareLaunchArgument('config_dir', default_value='/tmp'),
+        DeclareLaunchArgument('config_dir', default_value='.'),
 
         # Test EqualsSubstitution
         Node(
@@ -109,13 +109,17 @@ def generate_launch_description():
             ),
         ),
 
-        # Test FileContent with simple path (will fail gracefully if file doesn't exist)
+        # Test FileContent with simple path using config_dir
         Node(
             package='demo_nodes_cpp',
             executable='talker',
             name='node_file_content_simple',
-            # Try to read from /tmp/test_content.txt (will be empty if missing)
-            namespace=FileContent('/tmp/test_content.txt'),
+            namespace=FileContent(
+                PathJoinSubstitution([
+                    LaunchConfiguration('config_dir'),
+                    'test_content.txt'
+                ])
+            ),
         ),
 
         # Test FileContent with PathJoinSubstitution
