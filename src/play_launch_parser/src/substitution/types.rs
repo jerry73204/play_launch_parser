@@ -259,21 +259,41 @@ pub fn resolve_substitutions(
 }
 
 /// Simple expression evaluator for $(eval expr)
-/// Supports: +, -, *, /, %, parentheses, integers, and floats
+/// Supports: +, -, *, /, %, parentheses, integers, floats, string comparison, and string concatenation
 fn evaluate_expression(expr: &str) -> Result<String, SubstitutionError> {
     let expr = expr.trim();
+
+    // Strip outer double-quote wrapping from XML $(eval "'...' + '...'") pattern.
+    // In XML, $(eval &quot;'str1' + 'str2'&quot;) produces outer double quotes around
+    // single-quoted operands. Only strip when inner content uses single quotes,
+    // to avoid breaking expressions like "foo" == "foo" or "" + 'x' + "".
+    let expr = if expr.len() >= 4
+        && expr.starts_with('"')
+        && expr.ends_with('"')
+        && expr[1..].trim_start().starts_with('\'')
+        && expr[..expr.len() - 1].trim_end().ends_with('\'')
+    {
+        &expr[1..expr.len() - 1]
+    } else {
+        expr
+    };
 
     // Check for string comparison operators BEFORE stripping outer quotes
     // If the expression contains comparison operators, the quotes are part of the string literals
     if expr.contains("==") || expr.contains("!=") {
-        // Only strip outer quotes if they truly wrap the ENTIRE expression
-        // Check if the opening quote's matching closing quote is at the end
+        // Only strip outer single-quotes if they truly wrap the ENTIRE expression
         let expr = if should_strip_outer_quotes(expr) {
             &expr[1..expr.len() - 1]
         } else {
             expr
         };
         return evaluate_string_comparison(expr);
+    }
+
+    // Check for string concatenation: 'str1' + 'str2' + ...
+    // Must check before numeric evaluation since '+' is also arithmetic
+    if is_string_concatenation(expr) {
+        return evaluate_string_concat(expr);
     }
 
     // For numeric expressions, strip outer quotes if present
@@ -373,6 +393,62 @@ fn evaluate_string_comparison(expr: &str) -> Result<String, SubstitutionError> {
         "Invalid comparison expression: {}",
         expr
     )))
+}
+
+/// Check if an expression is string concatenation (has '+' and quoted string operands)
+///
+/// Returns true for patterns like: `'str1' + 'str2'`, `"a" + "b" + "c"`
+/// Returns false for numeric expressions like: `1 + 2`, `(3 + 4) * 2`
+///
+/// Note: Outer double quotes should already be stripped by evaluate_expression before calling this.
+fn is_string_concatenation(expr: &str) -> bool {
+    let trimmed = expr.trim();
+    // Must contain '+' and at least one quoted string operand
+    if !trimmed.contains('+') {
+        return false;
+    }
+    // Split by '+' outside of quotes and check if any operand is a quoted string
+    let parts = split_concat_operands(trimmed);
+    parts.iter().any(|p| {
+        let p = p.trim();
+        (p.starts_with('\'') && p.ends_with('\'')) || (p.starts_with('"') && p.ends_with('"'))
+    })
+}
+
+/// Evaluate string concatenation expression: 'str1' + 'str2' + ...
+fn evaluate_string_concat(expr: &str) -> Result<String, SubstitutionError> {
+    let mut result = String::new();
+    for part in split_concat_operands(expr) {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        result.push_str(&strip_quotes(part));
+    }
+    Ok(result)
+}
+
+/// Split a concatenation expression by '+' while respecting quoted strings.
+/// E.g., `'hello+world' + 'foo'` → [`'hello+world'`, `'foo'`]
+fn split_concat_operands(expr: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+
+    for (i, ch) in expr.char_indices() {
+        match ch {
+            '\'' if !in_double_quote => in_single_quote = !in_single_quote,
+            '"' if !in_single_quote => in_double_quote = !in_double_quote,
+            '+' if !in_single_quote && !in_double_quote => {
+                parts.push(&expr[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&expr[start..]);
+    parts
 }
 
 /// Strip surrounding quotes from a string
@@ -1225,5 +1301,58 @@ mod tests {
             assert!(result.is_ok());
             assert_eq!(result.unwrap(), "success");
         }
+    }
+
+    // String concatenation tests
+    #[test]
+    fn test_eval_string_concat_simple() {
+        let sub = Substitution::Eval(vec![Substitution::Text("'foo' + 'bar'".to_string())]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "foobar");
+    }
+
+    #[test]
+    fn test_eval_string_concat_multi() {
+        let sub = Substitution::Eval(vec![Substitution::Text(
+            "'[' + 'Module1, ' + 'Module2, ' + ']'".to_string(),
+        )]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "[Module1, Module2, ]");
+    }
+
+    #[test]
+    fn test_eval_string_concat_with_var() {
+        // $(eval '$(var prefix)' + '_suffix') — var already resolved by the time eval sees it
+        let sub = Substitution::Eval(vec![
+            Substitution::Text("'".to_string()),
+            Substitution::LaunchConfiguration(vec![Substitution::Text("prefix".to_string())]),
+            Substitution::Text("' + '_suffix'".to_string()),
+        ]);
+        let mut context = LaunchContext::new();
+        context.set_configuration("prefix".to_string(), "hello".to_string());
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "hello_suffix");
+    }
+
+    #[test]
+    fn test_eval_string_concat_empty_quotes() {
+        let sub = Substitution::Eval(vec![Substitution::Text(
+            "\"\" + 'content' + \"\"".to_string(),
+        )]);
+        let context = LaunchContext::new();
+        let result = sub.resolve(&context).unwrap();
+        assert_eq!(result, "content");
+    }
+
+    #[test]
+    fn test_is_string_concatenation() {
+        assert!(is_string_concatenation("'a' + 'b'"));
+        assert!(is_string_concatenation("\"a\" + \"b\""));
+        assert!(is_string_concatenation("'[' + 'Module, ' + ']'"));
+        assert!(!is_string_concatenation("1 + 2"));
+        assert!(!is_string_concatenation("(3 + 4) * 2"));
+        assert!(!is_string_concatenation("'hello'"));
     }
 }

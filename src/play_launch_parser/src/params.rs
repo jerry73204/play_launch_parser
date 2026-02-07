@@ -8,21 +8,84 @@ use serde_yaml::Value;
 use std::{fs, path::Path};
 
 /// Load a parameter file and resolve all substitutions in its contents.
-/// Returns the resolved YAML content as a string.
+/// Returns the resolved YAML content as a string, preserving comments and formatting.
 pub fn load_and_resolve_param_file(
     path: &Path,
     context: &LaunchContext,
 ) -> Result<String, ParseError> {
     let content = fs::read_to_string(path)?;
-    let mut yaml: Value = serde_yaml::from_str(&content)
-        .map_err(|e| ParseError::InvalidSubstitution(format!("YAML parse error: {}", e)))?;
 
-    // Recursively resolve all substitutions in the YAML structure
-    resolve_yaml_substitutions(&mut yaml, context)?;
+    // If the file has no substitutions, return raw content (preserves comments/formatting)
+    if !content.contains("$(") {
+        return Ok(content);
+    }
 
-    // Serialize back to YAML string
-    serde_yaml::to_string(&yaml)
-        .map_err(|e| ParseError::InvalidSubstitution(format!("YAML serialize error: {}", e)))
+    // Resolve substitutions line by line to preserve comments and formatting
+    let mut resolved_lines = Vec::new();
+    for line in content.lines() {
+        if line.contains("$(") {
+            // Resolve substitutions in this line while preserving surrounding text
+            let resolved = resolve_line_substitutions(line, context)?;
+            resolved_lines.push(resolved);
+        } else {
+            resolved_lines.push(line.to_string());
+        }
+    }
+    // Preserve trailing newline if original had one
+    let mut result = resolved_lines.join("\n");
+    if content.ends_with('\n') {
+        result.push('\n');
+    }
+    Ok(result)
+}
+
+/// Resolve substitutions in a single line of text.
+/// Handles patterns like `$(var name)` while preserving surrounding text.
+fn resolve_line_substitutions(line: &str, context: &LaunchContext) -> Result<String, ParseError> {
+    let mut result = String::new();
+    let mut remaining = line;
+
+    while let Some(start) = remaining.find("$(") {
+        // Add text before the substitution
+        result.push_str(&remaining[..start]);
+
+        // Find the matching closing paren
+        let after_start = &remaining[start..];
+        if let Some(end) = find_matching_paren(after_start) {
+            let sub_str = &after_start[..end + 1];
+            // Parse and resolve the substitution
+            let subs = crate::substitution::parse_substitutions(sub_str)?;
+            let resolved = resolve_substitutions(&subs, context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+            result.push_str(&resolved);
+            remaining = &after_start[end + 1..];
+        } else {
+            // No matching paren, keep as-is
+            result.push_str(after_start);
+            remaining = "";
+        }
+    }
+    result.push_str(remaining);
+    Ok(result)
+}
+
+/// Find the matching closing paren for a $(...) substitution.
+/// Returns the index of the closing ')'.
+fn find_matching_paren(s: &str) -> Option<usize> {
+    let mut depth = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Extract parameters from a YAML file and resolve substitutions.

@@ -17,12 +17,6 @@ impl NodeCapture {
         // Generate ROS command line (now includes global params)
         let cmd = self.generate_command(global_params);
 
-        // Extract ROS args (everything after --ros-args)
-        let ros_args = cmd
-            .iter()
-            .position(|s| s == "--ros-args")
-            .map(|pos| cmd[pos + 1..].to_vec());
-
         // Extract parameter files from command (--params-file arguments)
         let params_files = self.extract_params_files_from_cmd(&cmd);
 
@@ -58,7 +52,7 @@ impl NodeCapture {
             remaps: self.remappings.clone(),
             respawn: None,
             respawn_delay: None,
-            ros_args,
+            ros_args: None, // Python parser doesn't populate ros_args
         })
     }
 
@@ -120,23 +114,7 @@ impl NodeCapture {
             }
         }
 
-        // 6. Remappings
-        for (from, to) in &self.remappings {
-            cmd.push("-r".to_string());
-            cmd.push(format!("{}:={}", from, to));
-        }
-
-        // 7. Parameters (normalize booleans to Python convention: True/False)
-        for (name, value) in &self.parameters {
-            cmd.push("-p".to_string());
-            cmd.push(format!(
-                "{}:={}",
-                name,
-                crate::record::generator::normalize_param_value(value)
-            ));
-        }
-
-        // 8. Global parameters
+        // 6. Global parameters (before node params to match Python parser ordering)
         if let Some(ref params) = global_params {
             for (key, value) in params {
                 cmd.push("-p".to_string());
@@ -148,10 +126,26 @@ impl NodeCapture {
             }
         }
 
-        // 9. Parameter files
+        // 7. Node-specific parameters (normalize booleans to Python convention: True/False)
+        for (name, value) in &self.parameters {
+            cmd.push("-p".to_string());
+            cmd.push(format!(
+                "{}:={}",
+                name,
+                crate::record::generator::normalize_param_value(value)
+            ));
+        }
+
+        // 8. Parameter files
         for params_file in &self.params_files {
             cmd.push("--params-file".to_string());
             cmd.push(params_file.clone());
+        }
+
+        // 9. Remappings (after params to match Python parser ordering)
+        for (from, to) in &self.remappings {
+            cmd.push("-r".to_string());
+            cmd.push(format!("{}:={}", from, to));
         }
 
         cmd

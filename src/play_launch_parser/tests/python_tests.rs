@@ -370,7 +370,10 @@ fn test_parse_python_parameters() {
         .unwrap()
         .as_str()
         .unwrap();
-    assert_eq!(bool_value, "True", "Bool param should match (Python convention)");
+    assert_eq!(
+        bool_value, "True",
+        "Bool param should match (Python convention)"
+    );
 
     // Check second node with nested parameters (uses dot notation)
     let node = &nodes[1];
@@ -1938,10 +1941,10 @@ fn test_additional_substitutions() {
         .iter()
         .find(|n| n["name"] == "node_combined_exec")
         .unwrap();
-    // Package uses LaunchConfiguration, preserved as substitution
+    // Package uses LaunchConfiguration — resolved from context when available
     assert_eq!(
         node_combined_exec["package"].as_str().unwrap(),
-        "$(var package_name)"
+        "demo_nodes_cpp"
     );
 
     // Test 8: Node with combined FindPackage and Parameter

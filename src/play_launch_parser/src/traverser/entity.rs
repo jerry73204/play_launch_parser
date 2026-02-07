@@ -189,14 +189,29 @@ impl LaunchTraverser {
             }
             "let" => {
                 let let_action = LetAction::from_entity(entity)?;
+                // Parse and resolve substitutions in the value (e.g., $(eval ...), $(var ...))
+                // Fall back to raw value if resolution fails (e.g., missing packages)
+                let resolved_value = if let Ok(value_subs) = parse_substitutions(&let_action.value)
+                {
+                    resolve_substitutions(&value_subs, &self.context).unwrap_or_else(|e| {
+                        log::debug!(
+                            "Could not resolve <let> value for {}: {}, using raw value",
+                            let_action.name,
+                            e
+                        );
+                        let_action.value.clone()
+                    })
+                } else {
+                    let_action.value.clone()
+                };
                 log::debug!(
                     "Setting {} = {} in context",
                     let_action.name,
-                    let_action.value
+                    resolved_value
                 );
-                // Set variable in context (acts like arg)
+                // Set resolved variable in context (acts like arg)
                 self.context
-                    .set_configuration(let_action.name, let_action.value);
+                    .set_configuration(let_action.name, resolved_value);
             }
             "set_env" | "set-env" => {
                 let set_env = SetEnvAction::from_entity(entity)?;

@@ -322,7 +322,35 @@ impl Node {
                 continue;
             }
 
-            // Case 4: Try calling __str__ on the object (for substitutions)
+            // Case 4: ParameterFile object — load YAML and expand inline
+            let type_name = param_any.get_type().name().unwrap_or("");
+            if type_name.contains("ParameterFile") {
+                if let Ok(str_val) = param_any.call_method0("__str__") {
+                    if let Ok(path) = str_val.extract::<String>() {
+                        if is_yaml_file(&path) {
+                            match load_yaml_params(&path) {
+                                Ok(yaml_params) => {
+                                    log::debug!(
+                                        "Loaded {} parameters from ParameterFile {}",
+                                        yaml_params.len(),
+                                        path
+                                    );
+                                    parsed_params.extend(yaml_params);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to load ParameterFile {}: {}", path, e);
+                                    parsed_params.push(("__param_file".to_string(), path));
+                                }
+                            }
+                        } else {
+                            parsed_params.push(("__param_file".to_string(), path));
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Case 5: Try calling __str__ on the object (for substitutions)
             if let Ok(str_val) = param_any.call_method0("__str__") {
                 if let Ok(s) = str_val.extract::<String>() {
                     parsed_params.push(("substitution".to_string(), s));
@@ -1410,35 +1438,27 @@ impl LifecycleNode {
     fn parse_parameters(&self, py: Python) -> PyResult<Vec<(String, String)>> {
         let mut parsed_params = Vec::new();
 
-        log::warn!(
-            "DEBUG parse_parameters: Processing {} parameter objects",
+        log::debug!(
+            "LifecycleNode parse_parameters: Processing {} parameter objects",
             self.parameters.len()
         );
 
-        for (idx, param_obj) in self.parameters.iter().enumerate() {
+        for param_obj in self.parameters.iter() {
             let param_any = param_obj.as_ref(py);
 
             // Try to extract as dict (most common case for parameters)
             if let Ok(param_dict) = param_any.downcast::<pyo3::types::PyDict>() {
-                log::warn!(
-                    "DEBUG parse_parameters: param {} is dict with {} keys",
-                    idx,
-                    param_dict.len()
-                );
                 for (key, value) in param_dict.iter() {
                     let key_str = key.extract::<String>()?;
                     // Convert value to string
                     let value_str = Self::pyobject_to_string(value)?;
                     parsed_params.push((key_str, value_str));
                 }
+                continue;
             }
+
             // Try to extract as string (path to YAML parameter file)
-            else if let Ok(path_str) = param_any.extract::<String>() {
-                log::warn!(
-                    "DEBUG parse_parameters: param {} is string: {}",
-                    idx,
-                    path_str
-                );
+            if let Ok(path_str) = param_any.extract::<String>() {
                 // Check if it's a YAML parameter file
                 if is_yaml_file(&path_str) {
                     // Load and expand YAML parameter file
@@ -1453,13 +1473,47 @@ impl LifecycleNode {
                         }
                         Err(e) => {
                             log::warn!("Failed to load parameter file {}: {}", path_str, e);
-                            // Fallback: store as __param_file for backward compatibility
                             parsed_params.push(("__param_file".to_string(), path_str));
                         }
                     }
                 } else {
-                    // Non-YAML file path - store as reference
                     parsed_params.push(("__param_file".to_string(), path_str));
+                }
+                continue;
+            }
+
+            // ParameterFile object — load YAML and expand inline
+            let type_name = param_any.get_type().name().unwrap_or("");
+            if type_name.contains("ParameterFile") {
+                if let Ok(str_val) = param_any.call_method0("__str__") {
+                    if let Ok(path) = str_val.extract::<String>() {
+                        if is_yaml_file(&path) {
+                            match load_yaml_params(&path) {
+                                Ok(yaml_params) => {
+                                    log::debug!(
+                                        "Loaded {} parameters from ParameterFile {}",
+                                        yaml_params.len(),
+                                        path
+                                    );
+                                    parsed_params.extend(yaml_params);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to load ParameterFile {}: {}", path, e);
+                                    parsed_params.push(("__param_file".to_string(), path));
+                                }
+                            }
+                        } else {
+                            parsed_params.push(("__param_file".to_string(), path));
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Try calling __str__ on the object (for substitutions)
+            if let Ok(str_val) = param_any.call_method0("__str__") {
+                if let Ok(s) = str_val.extract::<String>() {
+                    parsed_params.push(("substitution".to_string(), s));
                 }
             }
         }
@@ -2449,19 +2503,18 @@ fn yaml_value_to_string(value: &serde_yaml::Value) -> String {
     match value {
         Value::Bool(b) => b.to_string(),
         Value::Number(n) => {
-            // Preserve float format with decimal point for ROS type checking
-            if let Some(f) = n.as_f64() {
-                // Check if it's actually an integer value
-                if f.fract() == 0.0 && f.abs() < (i64::MAX as f64) {
-                    // Integer value - format without decimal
-                    format!("{}", f as i64)
+            // Preserve original YAML type: integers stay integers, floats stay floats
+            if n.is_i64() {
+                format!("{}", n.as_i64().unwrap())
+            } else if n.is_u64() {
+                format!("{}", n.as_u64().unwrap())
+            } else if let Some(f) = n.as_f64() {
+                // Float value - ensure decimal point for ROS type checking
+                let s = f.to_string();
+                if s.contains('.') {
+                    s
                 } else {
-                    // Float value - ensure decimal point
-                    if f.to_string().contains('.') {
-                        f.to_string()
-                    } else {
-                        format!("{}.0", f)
-                    }
+                    format!("{}.0", s)
                 }
             } else {
                 n.to_string()

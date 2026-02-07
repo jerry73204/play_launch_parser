@@ -170,6 +170,20 @@ impl CommandGenerator {
             )
         };
 
+        // Resolve args attribute (command-line arguments before --ros-args)
+        let args: Option<Vec<String>> = if let Some(ref args_subs) = node.args {
+            let resolved = resolve_substitutions(args_subs, context)?;
+            let arg_list: Vec<String> =
+                resolved.split_whitespace().map(|s| s.to_string()).collect();
+            if arg_list.is_empty() {
+                None
+            } else {
+                Some(arg_list)
+            }
+        } else {
+            None
+        };
+
         // Build command using already-resolved values (matching Python parser behavior)
         let cmd = Self::build_node_command(
             &package,
@@ -180,10 +194,11 @@ impl CommandGenerator {
             &params,
             &global_params,
             &params_file_paths,
+            &args,
         )?;
 
         Ok(NodeRecord {
-            args: None,
+            args,
             cmd,
             env,
             exec_name: Some(executable.clone()),
@@ -249,6 +264,7 @@ impl CommandGenerator {
         params: &[(String, String)],
         global_params: &Option<Vec<(String, String)>>,
         params_file_paths: &[String],
+        args: &Option<Vec<String>>,
     ) -> Result<Vec<String>, GenerationError> {
         let mut cmd = Vec::new();
 
@@ -256,7 +272,12 @@ impl CommandGenerator {
         let exec_path = Self::resolve_executable_path(package, executable)?;
         cmd.push(exec_path);
 
-        // 2. ROS args delimiter
+        // 2. Custom arguments (before --ros-args, matches Python parser behavior)
+        if let Some(ref arg_list) = args {
+            cmd.extend(arg_list.iter().cloned());
+        }
+
+        // 3. ROS args delimiter
         cmd.push("--ros-args".to_string());
 
         // 3. Node name — only add if explicitly set (matches Python parser behavior)
@@ -274,19 +295,7 @@ impl CommandGenerator {
             }
         }
 
-        // 5. Remappings
-        for (from, to) in remaps {
-            cmd.push("-r".to_string());
-            cmd.push(format!("{}:={}", from, to));
-        }
-
-        // 6. Parameters (normalize booleans to Python convention: True/False)
-        for (name, value) in params {
-            cmd.push("-p".to_string());
-            cmd.push(format!("{}:={}", name, normalize_param_value(value)));
-        }
-
-        // 7. Global parameters
+        // 5. Global parameters (before node params to match Python parser ordering)
         if let Some(ref gp) = global_params {
             for (key, value) in gp {
                 cmd.push("-p".to_string());
@@ -294,10 +303,22 @@ impl CommandGenerator {
             }
         }
 
-        // 8. Parameter files
+        // 6. Parameter files (before node-specific params to match Python parser ordering)
         for params_file in params_file_paths {
             cmd.push("--params-file".to_string());
             cmd.push(params_file.clone());
+        }
+
+        // 7. Node-specific parameters (normalize booleans to Python convention: True/False)
+        for (name, value) in params {
+            cmd.push("-p".to_string());
+            cmd.push(format!("{}:={}", name, normalize_param_value(value)));
+        }
+
+        // 8. Remappings (after params to match Python parser ordering)
+        for (from, to) in remaps {
+            cmd.push("-r".to_string());
+            cmd.push(format!("{}:={}", from, to));
         }
 
         Ok(cmd)
@@ -418,6 +439,7 @@ mod tests {
             param_files: vec![],
             remappings: vec![],
             environment: vec![],
+            args: None,
             output: None,
             respawn: None,
             respawn_delay: None,
@@ -449,6 +471,7 @@ mod tests {
             param_files: vec![],
             remappings: vec![],
             environment: vec![],
+            args: None,
             output: None,
             respawn: None,
             respawn_delay: None,
@@ -475,6 +498,7 @@ mod tests {
                 to: vec![Substitution::Text("/chat".to_string())],
             }],
             environment: vec![],
+            args: None,
             output: None,
             respawn: None,
             respawn_delay: None,

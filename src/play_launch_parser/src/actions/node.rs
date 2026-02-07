@@ -18,6 +18,7 @@ pub struct NodeAction {
     pub param_files: Vec<Vec<Substitution>>,
     pub remappings: Vec<Remapping>,
     pub environment: Vec<(String, String)>,
+    pub args: Option<Vec<Substitution>>,
     pub output: Option<String>,
     pub respawn: Option<Vec<Substitution>>,
     pub respawn_delay: Option<Vec<Substitution>>,
@@ -87,6 +88,12 @@ impl NodeAction {
             }
         }
 
+        // Parse args attribute (command-line arguments before --ros-args)
+        let args = entity
+            .get_attr_str("args", true)?
+            .map(|s| parse_substitutions(&s))
+            .transpose()?;
+
         Ok(Self {
             package,
             executable,
@@ -96,6 +103,7 @@ impl NodeAction {
             param_files,
             remappings,
             environment,
+            args,
             output: entity.get_attr("output", true)?,
             respawn: entity
                 .get_attr_str("respawn", true)?
@@ -165,6 +173,16 @@ impl NodeAction {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        // Resolve args attribute (command-line arguments before --ros-args)
+        let arguments = if let Some(ref args_subs) = self.args {
+            let resolved = resolve_substitutions(args_subs, context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+            // Split by whitespace to get individual arguments (matches Python behavior)
+            resolved.split_whitespace().map(|s| s.to_string()).collect()
+        } else {
+            Vec::new()
+        };
+
         Ok(NodeCapture {
             package,
             executable,
@@ -173,7 +191,7 @@ impl NodeAction {
             parameters,
             params_files,
             remappings,
-            arguments: Vec::new(), // XML nodes don't have arguments
+            arguments,
             env_vars: self.environment.clone(),
         })
     }

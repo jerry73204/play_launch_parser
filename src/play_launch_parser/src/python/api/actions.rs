@@ -937,7 +937,23 @@ impl SetLaunchConfiguration {
             name.to_string()
         };
 
-        log::debug!("Python Launch SetLaunchConfiguration: {}=<value>", name_str);
+        // Convert value to string
+        let value_str =
+            crate::python::api::utils::pyobject_to_string(py, &value).unwrap_or_default();
+
+        log::debug!(
+            "Python Launch SetLaunchConfiguration: {}={}",
+            name_str,
+            value_str
+        );
+
+        // Store in thread-local LaunchContext so subsequent LaunchConfiguration lookups resolve
+        if let Some(ctx_ptr) = crate::python::bridge::get_current_launch_context() {
+            // SAFETY: pointer valid during Python execution
+            let ctx = unsafe { &mut *ctx_ptr };
+            ctx.set_configuration(name_str, value_str);
+        }
+
         Ok(Self { name, value })
     }
 

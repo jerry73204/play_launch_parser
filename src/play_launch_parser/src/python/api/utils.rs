@@ -143,8 +143,37 @@ pub fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
         }
     }
 
-    // For other substitution objects (LaunchConfiguration, etc.), use __str__()
-    // This preserves substitutions like "$(var node_name)" in the record.json output
+    // Check if this is a LaunchConfiguration — try resolving from thread-local context
+    // Some LaunchConfigurations (e.g., container_executable) are set via SetLaunchConfiguration
+    // and should be resolved at parse time rather than preserved as $(var name)
+    {
+        let type_name = obj_ref.get_type().name().unwrap_or("");
+        if type_name == "LaunchConfiguration" {
+            if let Ok(str_result) = obj_ref.call_method0("__str__") {
+                if let Ok(s) = str_result.extract::<String>() {
+                    // s is "$(var name)" — extract 'name' and look up in context
+                    if let Some(var_name) =
+                        s.strip_prefix("$(var ").and_then(|s| s.strip_suffix(')'))
+                    {
+                        // Use get_current_launch_context to avoid panic when no context is set
+                        if let Some(ctx_ptr) = crate::python::bridge::get_current_launch_context() {
+                            // SAFETY: pointer valid during Python execution as guaranteed by
+                            // set_current_launch_context
+                            let ctx = unsafe { &*ctx_ptr };
+                            if let Some(value) = ctx.get_configuration(var_name) {
+                                return Ok(value);
+                            }
+                        }
+                    }
+                    // Not in context — preserve as $(var name) for runtime resolution
+                    return Ok(s);
+                }
+            }
+        }
+    }
+
+    // For other substitution objects, use __str__()
+    // This preserves substitutions in the record.json output
     // The substitutions will be resolved later during actual launch execution
     if let Ok(str_result) = obj_ref.call_method0("__str__") {
         if let Ok(s) = str_result.extract::<String>() {
