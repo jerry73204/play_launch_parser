@@ -66,21 +66,22 @@ fn parse_launch_arg(s: &str) -> Result<(String, String), String> {
 }
 
 fn find_launch_file(package: &str, file: &str) -> Result<PathBuf, String> {
-    // Simplified package finding for MVP
-    // TODO: Use ament_index for proper resolution
-    let share_path = PathBuf::from("/opt/ros/humble/share")
-        .join(package)
-        .join("launch")
-        .join(file);
-
-    if share_path.exists() {
-        Ok(share_path)
-    } else {
-        Err(format!(
-            "Launch file not found: {} in package {}",
-            file, package
-        ))
+    if let Ok(ament_paths) = std::env::var("AMENT_PREFIX_PATH") {
+        for prefix in ament_paths.split(':') {
+            let path = PathBuf::from(prefix)
+                .join("share")
+                .join(package)
+                .join("launch")
+                .join(file);
+            if path.exists() {
+                return Ok(path);
+            }
+        }
     }
+    Err(format!(
+        "Launch file not found: {} in package {}",
+        file, package
+    ))
 }
 
 fn main() {

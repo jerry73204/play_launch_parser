@@ -211,12 +211,9 @@ impl LaunchConfigurationEquals {
         }
     }
 
-    pub fn evaluate(&self, py: Python) -> PyResult<bool> {
-        // In real implementation, this would look up the launch configuration
-        // For now, we'll just return a placeholder
-        // TODO: Integrate with LaunchContext to actually look up the value
-        let _ = py; // Use py to avoid unused warning
-        Ok(false)
+    pub fn evaluate(&self, _py: Python) -> PyResult<bool> {
+        let actual = with_launch_context(|ctx| ctx.get_configuration(&self.variable_name));
+        Ok(actual.as_deref() == Some(self.expected_value.as_str()))
     }
 
     fn __repr__(&self) -> String {
@@ -252,12 +249,9 @@ impl LaunchConfigurationNotEquals {
         }
     }
 
-    pub fn evaluate(&self, py: Python) -> PyResult<bool> {
-        // In real implementation, this would look up the launch configuration
-        // For now, we'll just return a placeholder
-        // TODO: Integrate with LaunchContext to actually look up the value
-        let _ = py; // Use py to avoid unused warning
-        Ok(true)
+    pub fn evaluate(&self, _py: Python) -> PyResult<bool> {
+        let actual = with_launch_context(|ctx| ctx.get_configuration(&self.variable_name));
+        Ok(actual.as_deref() != Some(self.expected_value.as_str()))
     }
 
     fn __repr__(&self) -> String {
