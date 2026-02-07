@@ -141,24 +141,17 @@ impl LaunchTraverser {
             self.context.capture_load_node(load_node.clone());
         }
 
-        // CRITICAL: Merge configurations from included file back to parent context
-        // This ensures that <arg> defaults defined in included files are visible to parent
-        // Example: included file has <arg name="use_multithread" default="true"/>
-        //          Parent file needs to see use_multithread=true for conditionals
-        let included_configs = included_traverser.context.configurations();
-        log::debug!(
-            "Included file has {} configurations to merge",
-            included_configs.len()
-        );
-        for (key, value) in included_configs {
-            // Only set if not already defined in parent (parent takes precedence)
-            if self.context.get_configuration(&key).is_none() {
-                log::debug!("Merging config from included file: {} = {}", key, value);
-                self.context.set_configuration(key, value);
-            } else {
-                log::debug!("Skipping {} (already set in parent)", key);
-            }
+        // CRITICAL: Merge global parameters from included file back to parent context
+        // SetParameter actions in Python files (called from XML includes) write to the
+        // child context. We must propagate them back so into_record_json() can find them.
+        for (key, value) in included_traverser.context.global_parameters() {
+            self.context.set_global_parameter(key, value);
         }
+
+        // NOTE: Do NOT merge configurations from included file back to parent context.
+        // In ROS 2, included files have isolated scope — their <arg> defaults and internal
+        // variables should not leak to the parent. Merging them causes bugs when sibling
+        // includes declare args with the same name (e.g., "node_name") but different defaults.
 
         Ok(())
     }

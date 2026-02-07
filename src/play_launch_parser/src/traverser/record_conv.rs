@@ -55,11 +55,16 @@ impl LaunchTraverser {
             }
             log::debug!("Backfilled {} captured nodes", backfilled_count);
 
-            // Backfill XML nodes from self.records
+            // Backfill XML nodes from self.records (both global_params field and cmd)
             let mut backfilled_count = 0;
             for node in self.records.iter_mut() {
                 if node.global_params.is_none() {
                     node.global_params = Some(global_params_vec.clone());
+                    // Also insert global params into cmd (they were missing at parse time)
+                    for (key, value) in global_params_vec {
+                        node.cmd.push("-p".to_string());
+                        node.cmd.push(format!("{}:={}", key, value));
+                    }
                     backfilled_count += 1;
                 }
             }

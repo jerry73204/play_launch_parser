@@ -618,7 +618,7 @@ test_node:
         let global_params = record.node[0].global_params.as_ref().unwrap();
         assert!(global_params
             .iter()
-            .any(|(k, v)| k == "use_sim_time" && v == "true"));
+            .any(|(k, v)| k == "use_sim_time" && v == "True"));
     }
 
     #[test]
@@ -638,7 +638,7 @@ test_node:
         let global_params = record.node[0].global_params.as_ref().unwrap();
         assert!(global_params
             .iter()
-            .any(|(k, v)| k == "use_sim_time" && v == "true"));
+            .any(|(k, v)| k == "use_sim_time" && v == "True"));
     }
 
     #[test]
@@ -659,7 +659,7 @@ test_node:
         assert_eq!(global_params.len(), 2);
         assert!(global_params
             .iter()
-            .any(|(k, v)| k == "use_sim_time" && v == "true"));
+            .any(|(k, v)| k == "use_sim_time" && v == "True"));
         assert!(global_params
             .iter()
             .any(|(k, v)| k == "log_level" && v == "debug"));
@@ -684,7 +684,7 @@ test_node:
             let global_params = node_record.global_params.as_ref().unwrap();
             assert!(global_params
                 .iter()
-                .any(|(k, v)| k == "use_sim_time" && v == "true"));
+                .any(|(k, v)| k == "use_sim_time" && v == "True"));
         }
     }
 

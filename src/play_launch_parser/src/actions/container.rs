@@ -120,14 +120,23 @@ impl ContainerAction {
         context: &LaunchContext,
     ) -> Result<ComposableNodeContainerRecord> {
         // Generate the command line for the container executable
+        let exec_path =
+            crate::python::bridge::find_package_executable(&self.package, &self.executable)
+                .unwrap_or_else(|| {
+                    format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable)
+                });
         let mut cmd = vec![
-            format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable),
+            exec_path,
             "--ros-args".to_string(),
             "-r".to_string(),
             format!("__node:={}", self.name),
-            "-r".to_string(),
-            format!("__ns:={}", self.namespace),
         ];
+
+        // Only add namespace if non-root (matches Python parser behavior)
+        if !self.namespace.is_empty() && self.namespace != "/" {
+            cmd.push("-r".to_string());
+            cmd.push(format!("__ns:={}", self.namespace));
+        }
 
         // Add global parameters to the command (already filtered to SetParameter values)
         for (key, value) in context.global_parameters() {
@@ -181,14 +190,23 @@ impl ContainerAction {
         use crate::record::NodeRecord;
 
         // Generate the command line for the container executable
+        let exec_path =
+            crate::python::bridge::find_package_executable(&self.package, &self.executable)
+                .unwrap_or_else(|| {
+                    format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable)
+                });
         let mut cmd = vec![
-            format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable),
+            exec_path,
             "--ros-args".to_string(),
             "-r".to_string(),
             format!("__node:={}", self.name),
-            "-r".to_string(),
-            format!("__ns:={}", self.namespace),
         ];
+
+        // Only add namespace if non-root (matches Python parser behavior)
+        if !self.namespace.is_empty() && self.namespace != "/" {
+            cmd.push("-r".to_string());
+            cmd.push(format!("__ns:={}", self.namespace));
+        }
 
         // Add global parameters to the command (already filtered to SetParameter values)
         for (key, value) in context.global_parameters() {

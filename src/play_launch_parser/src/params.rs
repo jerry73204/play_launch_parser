@@ -171,7 +171,15 @@ fn flatten_params(prefix: &str, map: &serde_yaml::Mapping, output: &mut Vec<(Str
                     output.push((full_key, n.to_string()));
                 }
                 Value::Bool(b) => {
-                    output.push((full_key, b.to_string()));
+                    // Use Python convention: True/False
+                    output.push((
+                        full_key,
+                        if *b {
+                            "True".to_string()
+                        } else {
+                            "False".to_string()
+                        },
+                    ));
                 }
                 Value::Sequence(seq) => {
                     // Arrays get serialized as JSON
@@ -222,7 +230,7 @@ my_node:
         assert_eq!(param2, Some(&("param2".to_string(), "42".to_string())));
 
         let param3 = params.iter().find(|(k, _)| k == "param3");
-        assert_eq!(param3, Some(&("param3".to_string(), "true".to_string())));
+        assert_eq!(param3, Some(&("param3".to_string(), "True".to_string())));
     }
 
     #[test]

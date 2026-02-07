@@ -1606,6 +1606,11 @@ impl LifecycleTransition {
 pub struct PushRosNamespace {
     #[allow(dead_code)] // Stored for API compatibility
     namespace: PyObject,
+    /// Whether this PushRosNamespace actually pushed a namespace onto the stack.
+    /// Empty or root ("/") namespaces are no-ops in push_namespace(), so
+    /// GroupAction must know whether to pop for each PushRosNamespace action.
+    #[pyo3(get)]
+    did_push: bool,
 }
 
 #[pymethods]
@@ -1623,11 +1628,14 @@ impl PushRosNamespace {
 
         log::debug!("Python Launch PushRosNamespace: '{}'", namespace_str);
 
-        // Push onto the namespace stack
+        // Push onto the namespace stack and track whether it actually pushed
         use crate::python::bridge::push_ros_namespace;
-        push_ros_namespace(namespace_str);
+        let did_push = push_ros_namespace(namespace_str);
 
-        Ok(Self { namespace })
+        Ok(Self {
+            namespace,
+            did_push,
+        })
     }
 
     fn __repr__(&self) -> String {

@@ -254,21 +254,9 @@ impl LaunchTraverser {
 
                 // Add load_node records for each composable node
                 let load_node_records = container_action.to_load_node_records(&self.context);
-                log::warn!(
-                    "DEBUG: Adding {} load_node records from container '{}' to self.load_nodes",
-                    load_node_records.len(),
-                    container_action.name
-                );
-                for record in &load_node_records {
-                    log::warn!(
-                        "DEBUG: Adding load_node '{}' with {} params",
-                        record.node_name,
-                        record.params.len()
-                    );
-                }
                 self.load_nodes.extend(load_node_records);
 
-                log::info!(
+                log::debug!(
                     "Parsed container '{}' with {} composable nodes",
                     container_action.name,
                     container_action.composable_nodes.len()

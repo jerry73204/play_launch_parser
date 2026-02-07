@@ -370,7 +370,7 @@ fn test_parse_python_parameters() {
         .unwrap()
         .as_str()
         .unwrap();
-    assert_eq!(bool_value, "true", "Bool param should match");
+    assert_eq!(bool_value, "True", "Bool param should match (Python convention)");
 
     // Check second node with nested parameters (uses dot notation)
     let node = &nodes[1];

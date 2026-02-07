@@ -420,34 +420,42 @@ impl GroupAction {
         // This ensures that namespace pushes from one GroupAction don't leak into the next
         // when multiple GroupActions are created in sequence (e.g., in a list comprehension).
 
-        // Count consecutive PushRosNamespace actions from the beginning
-        let mut push_count = 0;
+        // Count PushRosNamespace actions that ACTUALLY pushed a namespace.
+        // PushRosNamespace("") or PushRosNamespace("/") are no-ops in push_namespace(),
+        // so we must only pop for those that actually changed the namespace stack depth.
+        // Each PushRosNamespace stores a `did_push` field indicating whether its push was effective.
+        let mut actual_push_count = 0;
         for action in &actions {
-            // Check if this is a PushRosNamespace instance
             if let Ok(type_name) = action
                 .getattr(py, "__class__")
                 .and_then(|cls| cls.getattr(py, "__name__"))
                 .and_then(|name| name.extract::<String>(py))
             {
                 if type_name == "PushRosNamespace" {
-                    push_count += 1;
+                    // Check if this PushRosNamespace actually pushed
+                    if let Ok(did_push) = action.getattr(py, "did_push") {
+                        if did_push.extract::<bool>(py).unwrap_or(true) {
+                            actual_push_count += 1;
+                        }
+                    } else {
+                        // Fallback: assume it pushed if we can't check
+                        actual_push_count += 1;
+                    }
                 } else if type_name != "IncludeLaunchDescription" {
-                    // Stop counting if we hit a non-Push, non-Include action
                     break;
                 }
             }
         }
 
-        // Pop the namespaces that were pushed by this GroupAction's PushRosNamespace actions
-        // This simulates the GroupAction's scope cleanup
-        if push_count > 0 {
+        // Pop only the namespaces that were actually pushed
+        if actual_push_count > 0 {
             use crate::python::bridge::pop_ros_namespace;
-            for _ in 0..push_count {
+            for _ in 0..actual_push_count {
                 pop_ros_namespace();
             }
             log::debug!(
                 "GroupAction popped {} namespaces for scope cleanup",
-                push_count
+                actual_push_count
             );
         }
 

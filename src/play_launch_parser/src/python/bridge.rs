@@ -44,7 +44,16 @@ impl NodeCapture {
             name: self.name.clone(),
             namespace: self.namespace.clone(),
             package: Some(self.package.clone()),
-            params: self.parameters.clone(),
+            params: self
+                .parameters
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        crate::record::generator::normalize_param_value(v),
+                    )
+                })
+                .collect(),
             params_files,
             remaps: self.remappings.clone(),
             respawn: None,
@@ -117,17 +126,25 @@ impl NodeCapture {
             cmd.push(format!("{}:={}", from, to));
         }
 
-        // 7. Parameters
+        // 7. Parameters (normalize booleans to Python convention: True/False)
         for (name, value) in &self.parameters {
             cmd.push("-p".to_string());
-            cmd.push(format!("{}:={}", name, value));
+            cmd.push(format!(
+                "{}:={}",
+                name,
+                crate::record::generator::normalize_param_value(value)
+            ));
         }
 
         // 8. Global parameters
         if let Some(ref params) = global_params {
             for (key, value) in params {
                 cmd.push("-p".to_string());
-                cmd.push(format!("{}:={}", key, value));
+                cmd.push(format!(
+                    "{}:={}",
+                    key,
+                    crate::record::generator::normalize_param_value(value)
+                ));
             }
         }
 
@@ -161,20 +178,30 @@ impl ContainerCapture {
 
         // Generate command if not provided
         let cmd = if self.cmd.is_empty() {
+            let exec_path = find_package_executable(&package, &executable)
+                .unwrap_or_else(|| format!("/opt/ros/humble/lib/{}/{}", package, executable));
             let mut cmd = vec![
-                format!("/opt/ros/humble/lib/{}/{}", package, executable),
+                exec_path,
                 "--ros-args".to_string(),
                 "-r".to_string(),
                 format!("__node:={}", self.name),
-                "-r".to_string(),
-                format!("__ns:={}", self.namespace),
             ];
+
+            // Only add namespace if non-root (matches Python parser behavior)
+            if !self.namespace.is_empty() && self.namespace != "/" {
+                cmd.push("-r".to_string());
+                cmd.push(format!("__ns:={}", self.namespace));
+            }
 
             // Add global parameters to command
             if let Some(ref params) = global_params {
                 for (key, value) in params {
                     cmd.push("-p".to_string());
-                    cmd.push(format!("{}:={}", key, value));
+                    cmd.push(format!(
+                        "{}:={}",
+                        key,
+                        crate::record::generator::normalize_param_value(value)
+                    ));
                 }
             }
 
@@ -187,7 +214,7 @@ impl ContainerCapture {
             args: None,
             cmd,
             env: None,
-            exec_name: Some(format!("{}-1", executable)),
+            exec_name: Some(self.name.clone()),
             executable,
             global_params: global_params.clone(),
             name: self.name.clone(),
@@ -275,11 +302,17 @@ impl LoadNodeCapture {
 /// relative vs absolute namespace semantics correctly:
 /// - Relative "ns1" → appended to current (e.g., "/" → "/ns1")
 /// - Absolute "/ns1" → used as-is
-pub fn push_ros_namespace(namespace: String) {
+pub fn push_ros_namespace(namespace: String) -> bool {
     with_launch_context(|ctx| {
+        let depth_before = ctx.namespace_depth();
         log::debug!("Pushing ROS namespace to LaunchContext: '{}'", namespace);
         ctx.push_namespace(namespace);
-    });
+        let did_push = ctx.namespace_depth() > depth_before;
+        if !did_push {
+            log::debug!("Namespace push was a no-op (empty or root namespace)");
+        }
+        did_push
+    })
 }
 
 /// Pop a namespace from the ROS namespace stack
@@ -419,7 +452,7 @@ where
 /// 1. `{AMENT_PREFIX_PATH}/{package}/lib/{package}/{executable}`
 /// 2. `/opt/ros/{ROS_DISTRO}/lib/{package}/{executable}`
 /// 3. Common ROS 2 distributions (jazzy, iron, humble, galactic, foxy)
-fn find_package_executable(package_name: &str, executable: &str) -> Option<String> {
+pub(crate) fn find_package_executable(package_name: &str, executable: &str) -> Option<String> {
     // Try AMENT_PREFIX_PATH first (for local installs)
     if let Ok(prefix_path) = std::env::var("AMENT_PREFIX_PATH") {
         for prefix in prefix_path.split(':') {

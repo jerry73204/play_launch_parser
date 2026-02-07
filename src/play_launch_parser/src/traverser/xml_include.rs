@@ -87,18 +87,16 @@ impl LaunchTraverser {
         };
         included_traverser.traverse_entity(&root)?;
 
-        // Copy XML arguments into self.context so subsequent Python files can see them
-        for (key, value) in included_traverser.context.configurations() {
-            // Only add if not already present (don't override existing values)
-            if self.context.get_configuration(&key).is_none() {
-                log::debug!(
-                    "Copying XML argument '{}' = '{}' to parent context",
-                    key,
-                    value
-                );
-                self.context.set_configuration(key, value);
-            }
+        // CRITICAL: Merge global parameters from included file back to parent context
+        // SetParameter actions in Python files (called from XML includes) write to the
+        // child context. We must propagate them back so into_record_json() can find them.
+        for (key, value) in included_traverser.context.global_parameters() {
+            self.context.set_global_parameter(key, value);
         }
+
+        // NOTE: Do NOT merge configurations from included file back to parent context.
+        // In ROS 2, included files have isolated scope — their <arg> defaults and internal
+        // variables should not leak to the parent.
 
         // Apply ROS namespace if provided (for includes from Python OpaqueFunction)
         if let Some(ref ns) = ros_namespace {

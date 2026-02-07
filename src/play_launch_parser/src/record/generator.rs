@@ -9,6 +9,16 @@ use crate::{
 };
 use std::path::Path;
 
+/// Normalize boolean values to Python convention (True/False instead of true/false).
+/// This matches the Python parser's output format which uses Python's str(bool) convention.
+pub(crate) fn normalize_param_value(value: &str) -> String {
+    match value {
+        "true" => "True".to_string(),
+        "false" => "False".to_string(),
+        _ => value.to_string(),
+    }
+}
+
 pub struct CommandGenerator;
 
 impl CommandGenerator {
@@ -16,8 +26,6 @@ impl CommandGenerator {
         node: &NodeAction,
         context: &LaunchContext,
     ) -> Result<NodeRecord, GenerationError> {
-        let cmd = Self::generate_node_command(node, context)?;
-
         let package = resolve_substitutions(&node.package, context)?;
         let executable = resolve_substitutions(&node.executable, context)?;
 
@@ -64,13 +72,13 @@ impl CommandGenerator {
             }
         };
 
-        // Process inline parameters
+        // Process inline parameters (normalize booleans to Python convention)
         let mut params: Vec<(String, String)> = node
             .parameters
             .iter()
             .map(|p| {
                 let resolved_value = resolve_substitutions(&p.value, context)?;
-                Ok((p.name.clone(), resolved_value))
+                Ok((p.name.clone(), normalize_param_value(&resolved_value)))
             })
             .collect::<Result<Vec<_>, GenerationError>>()?;
 
@@ -79,6 +87,7 @@ impl CommandGenerator {
         // - Temp files (/tmp/launch_params_*): Expand into inline params
         // - Regular files: Store resolved YAML content
         let mut params_files = Vec::new();
+        let mut params_file_paths = Vec::new();
         for param_file_subs in &node.param_files {
             let param_file_path = resolve_substitutions(param_file_subs, context)?;
 
@@ -106,6 +115,7 @@ impl CommandGenerator {
                         },
                     )?;
                 params_files.push(resolved_contents);
+                params_file_paths.push(param_file_path);
             }
         }
 
@@ -147,18 +157,36 @@ impl CommandGenerator {
         };
 
         // Get global parameters from context (already filtered to SetParameter values)
+        // Normalize booleans to Python convention (True/False)
         let global_params = if context.global_parameters().is_empty() {
             None
         } else {
-            // context.global_parameters() returns owned HashMap, convert to Vec
-            Some(context.global_parameters().into_iter().collect::<Vec<_>>())
+            Some(
+                context
+                    .global_parameters()
+                    .into_iter()
+                    .map(|(k, v)| (k, normalize_param_value(&v)))
+                    .collect::<Vec<_>>(),
+            )
         };
+
+        // Build command using already-resolved values (matching Python parser behavior)
+        let cmd = Self::build_node_command(
+            &package,
+            &executable,
+            &name,
+            &namespace,
+            &remaps,
+            &params,
+            &global_params,
+            &params_file_paths,
+        )?;
 
         Ok(NodeRecord {
             args: None,
             cmd,
             env,
-            exec_name: name.clone().or_else(|| Some(executable.clone())),
+            exec_name: Some(executable.clone()),
             executable,
             global_params,
             name,
@@ -205,58 +233,83 @@ impl CommandGenerator {
         node: &NodeAction,
         context: &LaunchContext,
     ) -> Result<Vec<String>, GenerationError> {
+        let record = Self::generate_node_record(node, context)?;
+        Ok(record.cmd)
+    }
+
+    /// Build command line from already-resolved values
+    /// Matches the pattern used by NodeCapture::generate_command() in bridge.rs
+    #[allow(clippy::too_many_arguments)]
+    fn build_node_command(
+        package: &str,
+        executable: &str,
+        name: &Option<String>,
+        namespace: &Option<String>,
+        remaps: &[(String, String)],
+        params: &[(String, String)],
+        global_params: &Option<Vec<(String, String)>>,
+        params_file_paths: &[String],
+    ) -> Result<Vec<String>, GenerationError> {
         let mut cmd = Vec::new();
 
         // 1. Resolve executable path
-        let package = resolve_substitutions(&node.package, context)?;
-        let executable = resolve_substitutions(&node.executable, context)?;
-        let exec_path = Self::resolve_executable_path(&package, &executable)?;
+        let exec_path = Self::resolve_executable_path(package, executable)?;
         cmd.push(exec_path);
 
         // 2. ROS args delimiter
         cmd.push("--ros-args".to_string());
 
-        // 3. Node name
-        cmd.push("-r".to_string());
-        if let Some(name_subs) = &node.name {
-            let node_name = resolve_substitutions(name_subs, context)?;
+        // 3. Node name — only add if explicitly set (matches Python parser behavior)
+        // When name is None, ROS 2 defaults to executable name, no __node:= needed
+        if let Some(ref node_name) = name {
+            cmd.push("-r".to_string());
             cmd.push(format!("__node:={}", node_name));
-        } else {
-            // Use executable as node name, no clone needed - format! takes &str
-            cmd.push(format!("__node:={}", executable));
         }
 
-        // 4. Namespace
-        let namespace = if let Some(ns_subs) = &node.namespace {
-            resolve_substitutions(ns_subs, context)?
-        } else {
-            "/".to_string()
-        };
-        cmd.push("-r".to_string());
-        cmd.push(format!("__ns:={}", namespace));
+        // 4. Namespace — only add if non-root (matches Python parser behavior)
+        if let Some(ref ns) = namespace {
+            if !ns.is_empty() && ns != "/" {
+                cmd.push("-r".to_string());
+                cmd.push(format!("__ns:={}", ns));
+            }
+        }
 
         // 5. Remappings
-        for remap in &node.remappings {
-            let from = resolve_substitutions(&remap.from, context)?;
-            let to = resolve_substitutions(&remap.to, context)?;
+        for (from, to) in remaps {
             cmd.push("-r".to_string());
             cmd.push(format!("{}:={}", from, to));
         }
 
-        // 6. Parameters
-        for param in &node.parameters {
-            let value = resolve_substitutions(&param.value, context)?;
+        // 6. Parameters (normalize booleans to Python convention: True/False)
+        for (name, value) in params {
             cmd.push("-p".to_string());
-            cmd.push(format!("{}:={}", param.name, value));
+            cmd.push(format!("{}:={}", name, normalize_param_value(value)));
+        }
+
+        // 7. Global parameters
+        if let Some(ref gp) = global_params {
+            for (key, value) in gp {
+                cmd.push("-p".to_string());
+                cmd.push(format!("{}:={}", key, normalize_param_value(value)));
+            }
+        }
+
+        // 8. Parameter files
+        for params_file in params_file_paths {
+            cmd.push("--params-file".to_string());
+            cmd.push(params_file.clone());
         }
 
         Ok(cmd)
     }
 
     fn resolve_executable_path(package: &str, executable: &str) -> Result<String, GenerationError> {
-        // Simplified for MVP: just construct path
-        // TODO: Use ament_index for proper resolution
-        Ok(format!("/opt/ros/humble/lib/{}/{}", package, executable))
+        if let Some(path) = crate::python::bridge::find_package_executable(package, executable) {
+            Ok(path)
+        } else {
+            // Fallback to hardcoded path
+            Ok(format!("/opt/ros/humble/lib/{}/{}", package, executable))
+        }
     }
 
     pub fn generate_executable_record(
@@ -304,11 +357,17 @@ impl CommandGenerator {
         };
 
         // Get global parameters from context (already filtered to SetParameter values)
+        // Normalize booleans to Python convention (True/False)
         let global_params = if context.global_parameters().is_empty() {
             None
         } else {
-            // context.global_parameters() returns owned HashMap, convert to Vec
-            Some(context.global_parameters().into_iter().collect::<Vec<_>>())
+            Some(
+                context
+                    .global_parameters()
+                    .into_iter()
+                    .map(|(k, v)| (k, normalize_param_value(&v)))
+                    .collect::<Vec<_>>(),
+            )
         };
 
         Ok(NodeRecord {
@@ -367,11 +426,13 @@ mod tests {
         let context = LaunchContext::new();
         let cmd = CommandGenerator::generate_node_command(&node, &context).unwrap();
 
-        assert_eq!(cmd[0], "/opt/ros/humble/lib/demo_nodes_cpp/talker");
+        // Executable path resolved via find_package_executable or fallback
+        assert!(cmd[0].ends_with("/demo_nodes_cpp/talker"));
         assert_eq!(cmd[1], "--ros-args");
-        assert!(cmd.contains(&"-r".to_string()));
-        assert!(cmd.contains(&"__node:=talker".to_string()));
-        assert!(cmd.contains(&"__ns:=/".to_string()));
+        // No __node:= when name is None (matches Python parser - ROS 2 defaults to executable)
+        assert!(!cmd.iter().any(|s| s.starts_with("__node:=")));
+        // No __ns when namespace is root (matches Python parser)
+        assert!(!cmd.contains(&"__ns:=/".to_string()));
     }
 
     #[test]
