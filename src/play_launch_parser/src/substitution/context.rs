@@ -21,6 +21,42 @@ thread_local! {
     static RESOLUTION_DEPTH: Cell<usize> = const { Cell::new(0) };
 }
 
+/// RAII guard that increments the resolution depth on creation and restores on drop.
+/// Ensures the depth counter is always restored even on panic or early return.
+struct ResolutionDepthGuard {
+    previous: usize,
+}
+
+impl ResolutionDepthGuard {
+    /// Increment the resolution depth. Returns `None` if max depth exceeded.
+    fn try_new() -> Option<Self> {
+        RESOLUTION_DEPTH.with(|depth| {
+            let current = depth.get();
+            if current >= MAX_RESOLUTION_DEPTH {
+                None
+            } else {
+                depth.set(current + 1);
+                Some(Self { previous: current })
+            }
+        })
+    }
+}
+
+impl Drop for ResolutionDepthGuard {
+    fn drop(&mut self) {
+        RESOLUTION_DEPTH.with(|depth| {
+            depth.set(self.previous);
+        });
+    }
+}
+
+/// Snapshot of scoped state (namespace depth + remapping count) for save/restore.
+/// Used by `save_scope()` / `restore_scope()` to ensure cleanup on early returns.
+pub struct ScopeSnapshot {
+    namespace_depth: usize,
+    remapping_count: usize,
+}
+
 /// Metadata for a declared argument
 #[derive(Debug, Clone)]
 pub struct ArgumentMetadata {
@@ -197,34 +233,22 @@ impl LaunchContext {
     pub fn get_configuration_lenient(&self, name: &str) -> Option<String> {
         // 1. Check local scope first
         if let Some(subs) = self.local_configurations.get(name) {
-            return Some(RESOLUTION_DEPTH.with(|depth| {
-                let current = depth.get();
-                if current >= MAX_RESOLUTION_DEPTH {
-                    return reconstruct_substitution_string(subs);
-                }
-                depth.set(current + 1);
-                let result = resolve_substitutions(subs, self)
-                    .unwrap_or_else(|_| reconstruct_substitution_string(subs));
-                depth.set(current);
-                result
-            }));
+            return Some(match ResolutionDepthGuard::try_new() {
+                None => reconstruct_substitution_string(subs),
+                Some(_guard) => resolve_substitutions(subs, self)
+                    .unwrap_or_else(|_| reconstruct_substitution_string(subs)),
+            });
         }
 
         // 2. Walk parent chain
         let mut current = &self.parent;
         while let Some(parent) = current {
             if let Some(subs) = parent.configurations.get(name) {
-                return Some(RESOLUTION_DEPTH.with(|depth| {
-                    let current_depth = depth.get();
-                    if current_depth >= MAX_RESOLUTION_DEPTH {
-                        return reconstruct_substitution_string(subs);
-                    }
-                    depth.set(current_depth + 1);
-                    let result = resolve_substitutions(subs, self)
-                        .unwrap_or_else(|_| reconstruct_substitution_string(subs));
-                    depth.set(current_depth);
-                    result
-                }));
+                return Some(match ResolutionDepthGuard::try_new() {
+                    None => reconstruct_substitution_string(subs),
+                    Some(_guard) => resolve_substitutions(subs, self)
+                        .unwrap_or_else(|_| reconstruct_substitution_string(subs)),
+                });
             }
             current = &parent.parent;
         }
@@ -384,6 +408,21 @@ impl LaunchContext {
     /// Used to clean up all remappings added within a scope (e.g., group)
     pub fn restore_remapping_count(&mut self, count: usize) {
         self.local_remappings.truncate(count);
+    }
+
+    /// Save the current scope state (namespace depth + remapping count).
+    /// Use with `restore_scope()` to ensure cleanup even on early returns.
+    pub fn save_scope(&self) -> ScopeSnapshot {
+        ScopeSnapshot {
+            namespace_depth: self.namespace_depth(),
+            remapping_count: self.remapping_count(),
+        }
+    }
+
+    /// Restore scope state from a previously saved snapshot.
+    pub fn restore_scope(&mut self, snapshot: ScopeSnapshot) {
+        self.restore_namespace_depth(snapshot.namespace_depth);
+        self.restore_remapping_count(snapshot.remapping_count);
     }
 
     /// Declare argument in local scope only

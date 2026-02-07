@@ -342,7 +342,7 @@ thread_local! {
 
 /// Set the current LaunchContext for this thread
 /// SAFETY: The caller must ensure the LaunchContext lives for the duration of Python execution
-pub fn set_current_launch_context(ctx: &mut LaunchContext) {
+fn set_current_launch_context(ctx: &mut LaunchContext) {
     CURRENT_LAUNCH_CONTEXT.with(|cell| {
         *cell.borrow_mut() = Some(ctx as *mut LaunchContext);
     });
@@ -355,10 +355,31 @@ pub fn get_current_launch_context() -> Option<*mut LaunchContext> {
 }
 
 /// Clear the current LaunchContext for this thread
-pub fn clear_current_launch_context() {
+fn clear_current_launch_context() {
     CURRENT_LAUNCH_CONTEXT.with(|cell| {
         *cell.borrow_mut() = None;
     });
+}
+
+/// RAII guard that sets the thread-local LaunchContext on creation and clears it on drop.
+/// This ensures the context is always cleared even if the code between set and clear panics
+/// or returns early.
+pub struct LaunchContextGuard;
+
+impl LaunchContextGuard {
+    /// Set the thread-local LaunchContext for the duration of this guard's lifetime.
+    ///
+    /// SAFETY: The caller must ensure the LaunchContext outlives this guard.
+    pub fn new(ctx: &mut LaunchContext) -> Self {
+        set_current_launch_context(ctx);
+        Self
+    }
+}
+
+impl Drop for LaunchContextGuard {
+    fn drop(&mut self) {
+        clear_current_launch_context();
+    }
 }
 
 /// Execute a closure with access to the current LaunchContext

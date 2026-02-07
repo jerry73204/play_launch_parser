@@ -167,9 +167,8 @@ impl LaunchTraverser {
             "group" => {
                 let group = GroupAction::from_entity(entity)?;
 
-                // Save namespace depth and remapping count to restore after group
-                let initial_depth = self.context.namespace_depth();
-                let initial_remap_count = self.context.remapping_count();
+                // Save scope state — restored after group regardless of success/failure
+                let scope = self.context.save_scope();
 
                 // Push namespace if specified
                 if let Some(ns_subs) = &group.namespace {
@@ -178,14 +177,12 @@ impl LaunchTraverser {
                     self.context.push_namespace(namespace);
                 }
 
-                // Traverse children with scoped namespace and remappings
-                for child in entity.children() {
-                    self.traverse_entity(&child)?;
-                }
-
-                // Restore namespace depth and remappings (scoped to this group)
-                self.context.restore_namespace_depth(initial_depth);
-                self.context.restore_remapping_count(initial_remap_count);
+                // Traverse children, then always restore scope
+                let result = entity
+                    .children()
+                    .try_for_each(|child| self.traverse_entity(&child));
+                self.context.restore_scope(scope);
+                result?;
             }
             "let" => {
                 let let_action = LetAction::from_entity(entity)?;

@@ -47,9 +47,8 @@ impl LaunchTraverser {
             log::debug!("Added ros_namespace='{}' to context", current_ns);
         }
 
-        // Set the thread-local context for Python API to access
-        use crate::python::bridge::{clear_current_launch_context, set_current_launch_context};
-        set_current_launch_context(&mut self.context);
+        // Set the thread-local context for Python API to access (cleared on guard drop)
+        let _ctx_guard = crate::python::bridge::LaunchContextGuard::new(&mut self.context);
 
         let executor = PythonLaunchExecutor::new();
         let path_str = path.to_str().ok_or_else(|| {
@@ -57,8 +56,8 @@ impl LaunchTraverser {
         })?;
         let exec_result = executor.execute(path_str);
 
-        // Clear the thread-local context after execution
-        clear_current_launch_context();
+        // Guard clears context on drop (including on early return/panic)
+        drop(_ctx_guard);
 
         // Propagate execution errors
         exec_result.map_err(|e| ParseError::PythonError(e.to_string()))?;
@@ -148,15 +147,14 @@ impl LaunchTraverser {
                 if let Some(ext) = resolved_include_path.extension().and_then(|s| s.to_str()) {
                     match ext {
                         "py" => {
-                            // For Python includes, push namespace onto context
+                            // Save scope so namespace is restored after include
+                            let scope = self.context.save_scope();
                             if let Some(ref ns) = ros_ns {
                                 self.context.push_namespace(ns.clone());
                             }
                             let result =
                                 self.execute_python_file(&resolved_include_path, &include_args);
-                            if ros_ns.is_some() {
-                                self.context.pop_namespace();
-                            }
+                            self.context.restore_scope(scope);
                             result
                         }
                         "xml" => {
