@@ -3,11 +3,9 @@ use crate::{
     actions::IncludeAction,
     error::{ParseError, Result},
     file_cache::read_file_cached,
-    record,
     substitution::{parse_substitutions, resolve_substitutions},
     xml,
 };
-use rayon::prelude::*;
 use std::path::Path;
 
 impl LaunchTraverser {
@@ -154,66 +152,5 @@ impl LaunchTraverser {
         // includes declare args with the same name (e.g., "node_name") but different defaults.
 
         Ok(())
-    }
-
-    /// Process multiple includes in parallel using rayon
-    /// Returns aggregated (nodes, containers, load_nodes)
-    pub(crate) fn process_includes_parallel(
-        &self,
-        includes: Vec<IncludeAction>,
-    ) -> Result<(
-        Vec<record::NodeRecord>,
-        Vec<record::ComposableNodeContainerRecord>,
-        Vec<record::LoadNodeRecord>,
-    )> {
-        // Capture current file and include chain for parallel tasks
-        let current_file = self.context.current_file().cloned();
-        let include_chain = self.include_chain.clone();
-
-        // Process includes in parallel using rayon
-        let results: Vec<Result<_>> = includes
-            .par_iter()
-            .map(|include| {
-                // Each thread gets its own traverser with preserved context
-                // We clone the context for each thread (context is cheap to clone after Phase 7.2)
-                let mut thread_context = self.context.clone();
-
-                // Preserve current file for relative path resolution
-                if let Some(ref file) = current_file {
-                    thread_context.set_current_file(file.clone());
-                }
-
-                let mut traverser = LaunchTraverser {
-                    context: thread_context,
-                    include_chain: include_chain.clone(), // Each thread gets its own chain
-                    records: Vec::new(),
-                    containers: Vec::new(),
-                    load_nodes: Vec::new(),
-                };
-
-                // Process the include
-                traverser.process_include(include)?;
-
-                Ok((
-                    traverser.records,
-                    traverser.containers,
-                    traverser.load_nodes,
-                ))
-            })
-            .collect();
-
-        // Merge results from all parallel tasks
-        let mut all_records = Vec::new();
-        let mut all_containers = Vec::new();
-        let mut all_load_nodes = Vec::new();
-
-        for result in results {
-            let (records, containers, load_nodes) = result?;
-            all_records.extend(records);
-            all_containers.extend(containers);
-            all_load_nodes.extend(load_nodes);
-        }
-
-        Ok((all_records, all_containers, all_load_nodes))
     }
 }

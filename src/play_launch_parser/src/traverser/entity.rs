@@ -23,80 +23,8 @@ impl LaunchTraverser {
 
         match entity.type_name() {
             "launch" => {
-                // Root element, traverse children
-                // Collect consecutive includes and process them in parallel for maximum performance
-                // Note: We collect here because we need random access for include batching
-                let children: Vec<_> = entity.children().collect();
-                let mut i = 0;
-
-                while i < children.len() {
-                    // Check if this is the start of a sequence of includes
-                    if children[i].type_name() == "include"
-                        && should_process_entity(&children[i], &self.context)?
-                    {
-                        // Collect consecutive includes, but stop at YAML includes
-                        // YAML includes modify context and must be processed sequentially
-                        let mut includes = Vec::new();
-                        while i < children.len()
-                            && children[i].type_name() == "include"
-                            && should_process_entity(&children[i], &self.context)?
-                        {
-                            let include = IncludeAction::from_entity(&children[i])?;
-
-                            // Check if this is a YAML include by resolving its file path
-                            let file_path_str = resolve_substitutions(&include.file, &self.context)
-                                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-                            let is_yaml =
-                                file_path_str.ends_with(".yaml") || file_path_str.ends_with(".yml");
-
-                            if is_yaml {
-                                // Process any collected includes first
-                                if includes.len() > 1 {
-                                    log::debug!(
-                                        "Processing {} includes in parallel (before YAML)",
-                                        includes.len()
-                                    );
-                                    let (records, containers, load_nodes) =
-                                        self.process_includes_parallel(includes)?;
-                                    self.records.extend(records);
-                                    self.containers.extend(containers);
-                                    self.load_nodes.extend(load_nodes);
-                                } else if includes.len() == 1 {
-                                    self.process_include(&includes[0])?;
-                                }
-                                includes = Vec::new();
-
-                                // Process YAML include sequentially (modifies context)
-                                log::debug!(
-                                    "Processing YAML include sequentially: {}",
-                                    file_path_str
-                                );
-                                self.process_include(&include)?;
-                                i += 1;
-                                break; // Exit inner loop to restart include collection
-                            } else {
-                                includes.push(include);
-                                i += 1;
-                            }
-                        }
-
-                        // Process any remaining includes
-                        if includes.len() > 1 {
-                            log::debug!("Processing {} includes in parallel", includes.len());
-                            let (records, containers, load_nodes) =
-                                self.process_includes_parallel(includes)?;
-                            self.records.extend(records);
-                            self.containers.extend(containers);
-                            self.load_nodes.extend(load_nodes);
-                        } else if includes.len() == 1 {
-                            // Single include, process sequentially
-                            self.process_include(&includes[0])?;
-                        }
-                    } else {
-                        // Not an include, process normally
-                        self.traverse_entity(&children[i])?;
-                        i += 1;
-                    }
+                for child in entity.children() {
+                    self.traverse_entity(&child)?;
                 }
             }
             "arg" => {
