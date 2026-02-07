@@ -71,84 +71,55 @@ impl NodeCapture {
         params_files
     }
 
-    /// Generate ROS 2 command line
+    /// Generate ROS 2 command line using the shared `build_ros_command()`.
     fn generate_command(&self, global_params: &Option<Vec<(String, String)>>) -> Vec<String> {
-        // 1. Base command: Try to resolve full executable path, fallback to ros2 run
-        let mut cmd =
-            if let Some(exec_path) = find_package_executable(&self.package, &self.executable) {
-                vec![exec_path]
-            } else {
-                // Fallback to ros2 run if path resolution fails
-                log::warn!(
-                    "Could not resolve executable path for {}/{}, using 'ros2 run'",
-                    self.package,
-                    self.executable
-                );
-                vec![
-                    "ros2".to_string(),
-                    "run".to_string(),
-                    self.package.clone(),
-                    self.executable.clone(),
-                ]
-            };
+        use crate::record::generator::build_ros_command;
 
-        // 2. Add custom arguments if any
-        if !self.arguments.is_empty() {
+        // Resolve executable path, with ros2 run fallback
+        let exec_path = if let Some(path) = find_package_executable(&self.package, &self.executable)
+        {
+            path
+        } else {
+            log::warn!(
+                "Could not resolve executable path for {}/{}, using 'ros2 run'",
+                self.package,
+                self.executable
+            );
+            // ros2 run fallback: return early with custom command format
+            let mut cmd = vec![
+                "ros2".to_string(),
+                "run".to_string(),
+                self.package.clone(),
+                self.executable.clone(),
+            ];
             cmd.extend(self.arguments.clone());
-        }
-
-        // 3. ROS args delimiter
-        cmd.push("--ros-args".to_string());
-
-        // 4. Node name
-        if let Some(ref name) = self.name {
-            cmd.push("-r".to_string());
-            cmd.push(format!("__node:={}", name));
-        }
-
-        // 5. Namespace
-        if let Some(ref ns) = self.namespace {
-            if !ns.is_empty() && ns != "/" {
+            cmd.push("--ros-args".to_string());
+            if let Some(ref name) = self.name {
                 cmd.push("-r".to_string());
-                cmd.push(format!("__ns:={}", ns));
+                cmd.push(format!("__node:={}", name));
             }
-        }
-
-        // 6. Global parameters (before node params to match Python parser ordering)
-        if let Some(ref params) = global_params {
-            for (key, value) in params {
-                cmd.push("-p".to_string());
-                cmd.push(format!(
-                    "{}:={}",
-                    key,
-                    crate::record::generator::normalize_param_value(value)
-                ));
+            if let Some(ref ns) = self.namespace {
+                if !ns.is_empty() && ns != "/" {
+                    cmd.push("-r".to_string());
+                    cmd.push(format!("__ns:={}", ns));
+                }
             }
-        }
+            return cmd;
+        };
 
-        // 7. Node-specific parameters (normalize booleans to Python convention: True/False)
-        for (name, value) in &self.parameters {
-            cmd.push("-p".to_string());
-            cmd.push(format!(
-                "{}:={}",
-                name,
-                crate::record::generator::normalize_param_value(value)
-            ));
-        }
+        let empty_gp = Vec::new();
+        let gp = global_params.as_deref().unwrap_or(&empty_gp);
 
-        // 8. Parameter files
-        for params_file in &self.params_files {
-            cmd.push("--params-file".to_string());
-            cmd.push(params_file.clone());
-        }
-
-        // 9. Remappings (after params to match Python parser ordering)
-        for (from, to) in &self.remappings {
-            cmd.push("-r".to_string());
-            cmd.push(format!("{}:={}", from, to));
-        }
-
-        cmd
+        build_ros_command(
+            &exec_path,
+            self.name.as_deref(),
+            self.namespace.as_deref(),
+            gp,
+            &self.parameters,
+            &self.params_files,
+            &self.remappings,
+            &self.arguments,
+        )
     }
 }
 
@@ -172,34 +143,27 @@ impl ContainerCapture {
 
         // Generate command if not provided
         let cmd = if self.cmd.is_empty() {
-            let exec_path = find_package_executable(&package, &executable)
-                .unwrap_or_else(|| format!("/opt/ros/humble/lib/{}/{}", package, executable));
-            let mut cmd = vec![
-                exec_path,
-                "--ros-args".to_string(),
-                "-r".to_string(),
-                format!("__node:={}", self.name),
-            ];
+            use crate::record::generator::{build_ros_command, resolve_exec_path};
 
-            // Only add namespace if non-root (matches Python parser behavior)
-            if !self.namespace.is_empty() && self.namespace != "/" {
-                cmd.push("-r".to_string());
-                cmd.push(format!("__ns:={}", self.namespace));
-            }
+            let exec_path = resolve_exec_path(&package, &executable);
+            let empty_gp = Vec::new();
+            let gp = global_params.as_deref().unwrap_or(&empty_gp);
+            let ns_ref = if self.namespace.is_empty() || self.namespace == "/" {
+                None
+            } else {
+                Some(self.namespace.as_str())
+            };
 
-            // Add global parameters to command
-            if let Some(ref params) = global_params {
-                for (key, value) in params {
-                    cmd.push("-p".to_string());
-                    cmd.push(format!(
-                        "{}:={}",
-                        key,
-                        crate::record::generator::normalize_param_value(value)
-                    ));
-                }
-            }
-
-            cmd
+            build_ros_command(
+                &exec_path,
+                Some(self.name.as_str()),
+                ns_ref,
+                gp,
+                &[],
+                &[],
+                &[],
+                &[],
+            )
         } else {
             self.cmd.clone()
         };
@@ -240,33 +204,16 @@ impl LoadNodeCapture {
         );
 
         // Merge global parameters with node-specific parameters
-        // Global parameters are added first, then node-specific parameters
-        // (node-specific parameters can override global ones)
-        let mut merged_params = Vec::new();
+        let empty_gp = Vec::new();
+        let gp = global_params.as_deref().unwrap_or(&empty_gp);
+        log::debug!(
+            "LoadNodeCapture::to_record: {} global params for node '{}'",
+            gp.len(),
+            self.node_name
+        );
 
-        // Add global parameters
-        if let Some(ref gp) = global_params {
-            log::debug!(
-                "LoadNodeCapture::to_record: {} global params for node '{}'",
-                gp.len(),
-                self.node_name
-            );
-            for (key, value) in gp {
-                merged_params.push((key.clone(), value.clone()));
-            }
-        }
-
-        // Add node-specific parameters (may override global params)
-        for (key, value) in &self.parameters {
-            // Check if this key already exists in merged_params
-            if let Some(existing) = merged_params.iter_mut().find(|(k, _)| k == key) {
-                // Override global parameter with node-specific value
-                existing.1 = value.clone();
-            } else {
-                // Add new parameter
-                merged_params.push((key.clone(), value.clone()));
-            }
-        }
+        let merged_params =
+            crate::record::generator::merge_params_with_global(gp, &self.parameters);
 
         log::debug!(
             "LoadNodeCapture::to_record: Final merged_params count={} for node '{}'",

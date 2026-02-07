@@ -19,6 +19,105 @@ pub(crate) fn normalize_param_value(value: &str) -> String {
     }
 }
 
+/// Resolve executable path by trying package resolution, falling back to hardcoded path.
+pub(crate) fn resolve_exec_path(package: &str, executable: &str) -> String {
+    crate::python::bridge::find_package_executable(package, executable)
+        .unwrap_or_else(|| format!("/opt/ros/humble/lib/{}/{}", package, executable))
+}
+
+/// Build a ROS 2 command line from already-resolved values.
+///
+/// Canonical parameter order (matches Python parser):
+/// 1. exec_path
+/// 2. args (before --ros-args)
+/// 3. --ros-args
+/// 4. -r __node:=name (if present)
+/// 5. -r __ns:=ns (if non-empty and not "/")
+/// 6. -p key:=value global params (normalized)
+/// 7. --params-file path
+/// 8. -p key:=value node params (normalized)
+/// 9. -r from:=to remappings
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_ros_command(
+    exec_path: &str,
+    name: Option<&str>,
+    namespace: Option<&str>,
+    global_params: &[(String, String)],
+    params: &[(String, String)],
+    params_files: &[String],
+    remaps: &[(String, String)],
+    args: &[String],
+) -> Vec<String> {
+    let mut cmd = vec![exec_path.to_string()];
+
+    // 2. Custom arguments (before --ros-args)
+    for arg in args {
+        cmd.push(arg.clone());
+    }
+
+    // 3. ROS args delimiter
+    cmd.push("--ros-args".to_string());
+
+    // 4. Node name
+    if let Some(node_name) = name {
+        cmd.push("-r".to_string());
+        cmd.push(format!("__node:={}", node_name));
+    }
+
+    // 5. Namespace (only if non-root)
+    if let Some(ns) = namespace {
+        if !ns.is_empty() && ns != "/" {
+            cmd.push("-r".to_string());
+            cmd.push(format!("__ns:={}", ns));
+        }
+    }
+
+    // 6. Global parameters (normalized)
+    for (key, value) in global_params {
+        cmd.push("-p".to_string());
+        cmd.push(format!("{}:={}", key, normalize_param_value(value)));
+    }
+
+    // 7. Parameter files
+    for params_file in params_files {
+        cmd.push("--params-file".to_string());
+        cmd.push(params_file.clone());
+    }
+
+    // 8. Node-specific parameters (normalized)
+    for (key, value) in params {
+        cmd.push("-p".to_string());
+        cmd.push(format!("{}:={}", key, normalize_param_value(value)));
+    }
+
+    // 9. Remappings
+    for (from, to) in remaps {
+        cmd.push("-r".to_string());
+        cmd.push(format!("{}:={}", from, to));
+    }
+
+    cmd
+}
+
+/// Merge global parameters with node-specific parameters.
+/// Global parameters come first, node-specific parameters can override by key.
+pub(crate) fn merge_params_with_global(
+    global_params: &[(String, String)],
+    node_params: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut merged: Vec<(String, String)> = global_params.to_vec();
+
+    for (key, value) in node_params {
+        if let Some(existing) = merged.iter_mut().find(|(k, _)| k == key) {
+            existing.1 = value.clone();
+        } else {
+            merged.push((key.clone(), value.clone()));
+        }
+    }
+
+    merged
+}
+
 pub struct CommandGenerator;
 
 impl CommandGenerator {
@@ -252,8 +351,8 @@ impl CommandGenerator {
         Ok(record.cmd)
     }
 
-    /// Build command line from already-resolved values
-    /// Matches the pattern used by NodeCapture::generate_command() in bridge.rs
+    /// Build command line from already-resolved values.
+    /// Delegates to the shared `build_ros_command()` function.
     #[allow(clippy::too_many_arguments)]
     fn build_node_command(
         package: &str,
@@ -266,71 +365,22 @@ impl CommandGenerator {
         params_file_paths: &[String],
         args: &Option<Vec<String>>,
     ) -> Result<Vec<String>, GenerationError> {
-        let mut cmd = Vec::new();
+        let exec_path = resolve_exec_path(package, executable);
+        let empty_gp = Vec::new();
+        let gp = global_params.as_deref().unwrap_or(&empty_gp);
+        let empty_args = Vec::new();
+        let arg_list = args.as_deref().unwrap_or(&empty_args);
 
-        // 1. Resolve executable path
-        let exec_path = Self::resolve_executable_path(package, executable)?;
-        cmd.push(exec_path);
-
-        // 2. Custom arguments (before --ros-args, matches Python parser behavior)
-        if let Some(ref arg_list) = args {
-            cmd.extend(arg_list.iter().cloned());
-        }
-
-        // 3. ROS args delimiter
-        cmd.push("--ros-args".to_string());
-
-        // 3. Node name — only add if explicitly set (matches Python parser behavior)
-        // When name is None, ROS 2 defaults to executable name, no __node:= needed
-        if let Some(ref node_name) = name {
-            cmd.push("-r".to_string());
-            cmd.push(format!("__node:={}", node_name));
-        }
-
-        // 4. Namespace — only add if non-root (matches Python parser behavior)
-        if let Some(ref ns) = namespace {
-            if !ns.is_empty() && ns != "/" {
-                cmd.push("-r".to_string());
-                cmd.push(format!("__ns:={}", ns));
-            }
-        }
-
-        // 5. Global parameters (before node params to match Python parser ordering)
-        if let Some(ref gp) = global_params {
-            for (key, value) in gp {
-                cmd.push("-p".to_string());
-                cmd.push(format!("{}:={}", key, normalize_param_value(value)));
-            }
-        }
-
-        // 6. Parameter files (before node-specific params to match Python parser ordering)
-        for params_file in params_file_paths {
-            cmd.push("--params-file".to_string());
-            cmd.push(params_file.clone());
-        }
-
-        // 7. Node-specific parameters (normalize booleans to Python convention: True/False)
-        for (name, value) in params {
-            cmd.push("-p".to_string());
-            cmd.push(format!("{}:={}", name, normalize_param_value(value)));
-        }
-
-        // 8. Remappings (after params to match Python parser ordering)
-        for (from, to) in remaps {
-            cmd.push("-r".to_string());
-            cmd.push(format!("{}:={}", from, to));
-        }
-
-        Ok(cmd)
-    }
-
-    fn resolve_executable_path(package: &str, executable: &str) -> Result<String, GenerationError> {
-        if let Some(path) = crate::python::bridge::find_package_executable(package, executable) {
-            Ok(path)
-        } else {
-            // Fallback to hardcoded path
-            Ok(format!("/opt/ros/humble/lib/{}/{}", package, executable))
-        }
+        Ok(build_ros_command(
+            &exec_path,
+            name.as_deref(),
+            namespace.as_deref(),
+            gp,
+            params,
+            params_file_paths,
+            remaps,
+            arg_list,
+        ))
     }
 
     pub fn generate_executable_record(

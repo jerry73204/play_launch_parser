@@ -119,52 +119,34 @@ impl ContainerAction {
         &self,
         context: &LaunchContext,
     ) -> Result<ComposableNodeContainerRecord> {
-        // Generate the command line for the container executable
-        let exec_path =
-            crate::python::bridge::find_package_executable(&self.package, &self.executable)
-                .unwrap_or_else(|| {
-                    format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable)
-                });
-        let mut cmd = vec![
-            exec_path,
-            "--ros-args".to_string(),
-            "-r".to_string(),
-            format!("__node:={}", self.name),
-        ];
+        use crate::record::generator::{build_ros_command, resolve_exec_path};
 
-        // Only add namespace if non-root (matches Python parser behavior)
-        if !self.namespace.is_empty() && self.namespace != "/" {
-            cmd.push("-r".to_string());
-            cmd.push(format!("__ns:={}", self.namespace));
-        }
-
-        // Add global parameters to the command (already filtered to SetParameter values)
-        for (key, value) in context.global_parameters() {
-            cmd.push("-p".to_string());
-            cmd.push(format!("{}:={}", key, value));
-        }
-
-        // Generate exec_name using container name (not executable)
-        // Python parser uses node name and strips counter suffixes
-        let exec_name = Some(self.name.clone());
-
-        // Collect global parameters (already filtered to SetParameter values)
-        let global_params_vec: Vec<(String, String)> = context
-            .global_parameters()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        let global_params = if global_params_vec.is_empty() {
+        let exec_path = resolve_exec_path(&self.package, &self.executable);
+        let gp: Vec<(String, String)> = context.global_parameters().into_iter().collect();
+        let ns_ref = if self.namespace.is_empty() || self.namespace == "/" {
             None
         } else {
-            Some(global_params_vec)
+            Some(self.namespace.as_str())
         };
+
+        let cmd = build_ros_command(
+            &exec_path,
+            Some(self.name.as_str()),
+            ns_ref,
+            &gp,
+            &[],
+            &[],
+            &[],
+            &[],
+        );
+
+        let global_params = if gp.is_empty() { None } else { Some(gp) };
 
         Ok(ComposableNodeContainerRecord {
             args: None,
             cmd,
             env: None,
-            exec_name,
+            exec_name: Some(self.name.clone()),
             executable: self.executable.clone(),
             global_params,
             name: self.name.clone(),
@@ -187,32 +169,29 @@ impl ContainerAction {
     }
 
     pub fn to_node_record(&self, context: &LaunchContext) -> Result<crate::record::NodeRecord> {
-        use crate::record::NodeRecord;
+        use crate::record::{
+            generator::{build_ros_command, resolve_exec_path},
+            NodeRecord,
+        };
 
-        // Generate the command line for the container executable
-        let exec_path =
-            crate::python::bridge::find_package_executable(&self.package, &self.executable)
-                .unwrap_or_else(|| {
-                    format!("/opt/ros/humble/lib/{}/{}", self.package, self.executable)
-                });
-        let mut cmd = vec![
-            exec_path,
-            "--ros-args".to_string(),
-            "-r".to_string(),
-            format!("__node:={}", self.name),
-        ];
+        let exec_path = resolve_exec_path(&self.package, &self.executable);
+        let gp: Vec<(String, String)> = context.global_parameters().into_iter().collect();
+        let ns_ref = if self.namespace.is_empty() || self.namespace == "/" {
+            None
+        } else {
+            Some(self.namespace.as_str())
+        };
 
-        // Only add namespace if non-root (matches Python parser behavior)
-        if !self.namespace.is_empty() && self.namespace != "/" {
-            cmd.push("-r".to_string());
-            cmd.push(format!("__ns:={}", self.namespace));
-        }
-
-        // Add global parameters to the command (already filtered to SetParameter values)
-        for (key, value) in context.global_parameters() {
-            cmd.push("-p".to_string());
-            cmd.push(format!("{}:={}", key, value));
-        }
+        let cmd = build_ros_command(
+            &exec_path,
+            Some(self.name.as_str()),
+            ns_ref,
+            &gp,
+            &[],
+            &[],
+            &[],
+            &[],
+        );
 
         Ok(NodeRecord {
             args: None,
@@ -423,17 +402,9 @@ impl ComposableNodeAction {
         };
 
         // Merge global parameters from context with node-specific parameters
-        let mut merged_params: Vec<(String, String)> =
-            context.global_parameters().into_iter().collect();
-
-        // Add node-specific parameters (may override global params)
-        for (key, value) in &self.parameters {
-            if let Some(existing) = merged_params.iter_mut().find(|(k, _)| k == key) {
-                existing.1 = value.clone();
-            } else {
-                merged_params.push((key.clone(), value.clone()));
-            }
-        }
+        let gp: Vec<(String, String)> = context.global_parameters().into_iter().collect();
+        let merged_params =
+            crate::record::generator::merge_params_with_global(&gp, &self.parameters);
 
         log::debug!(
             "to_load_node_record: node='{}', final merged_params.len()={}",
