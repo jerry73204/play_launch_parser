@@ -155,26 +155,6 @@ download-demos:
     cd ..
     echo "Run 'just build' to compile the demos"
 
-# Compare parser output with dump_launch (Python vs Rust)
-compare-output PACKAGE LAUNCH_FILE:
-    #!/usr/bin/env bash
-    set -e
-    source /opt/ros/{{ros_distro}}/setup.bash
-    source install/setup.bash
-
-    echo "Generating record with dump_launch (Python)..."
-    dump_launch launch {{PACKAGE}} {{LAUNCH_FILE}}
-    mv record.json record_python.json
-
-    echo "Generating record with play_launch_parser (Rust)..."
-    # TODO: Implement parser command
-    # play_launch_parser launch {{PACKAGE}} {{LAUNCH_FILE}}
-    # mv record.json record_rust.json
-
-    echo "Comparing outputs..."
-    # diff -u record_python.json record_rust.json
-    echo "Parser not yet implemented"
-
 # Test Rust parser with Autoware launch files
 test-autoware:
     #!/usr/bin/env bash
