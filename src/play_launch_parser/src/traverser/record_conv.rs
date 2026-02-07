@@ -63,7 +63,11 @@ impl LaunchTraverser {
                     // Also insert global params into cmd (they were missing at parse time)
                     for (key, value) in global_params_vec {
                         node.cmd.push("-p".to_string());
-                        node.cmd.push(format!("{}:={}", key, value));
+                        node.cmd.push(format!(
+                            "{}:={}",
+                            key,
+                            crate::record::generator::normalize_param_value(value)
+                        ));
                     }
                     backfilled_count += 1;
                 }

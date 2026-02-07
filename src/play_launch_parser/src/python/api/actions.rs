@@ -880,7 +880,7 @@ impl IncludeLaunchDescription {
             });
         }
 
-        log::info!(
+        log::debug!(
             "Python Launch IncludeLaunchDescription: file_path='{}' with {} args",
             file_path,
             args.len()
