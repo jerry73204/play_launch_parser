@@ -265,22 +265,55 @@ fn process_launch_arguments(_py: Python, _launch_desc: &PyObject) -> PyResult<()
                 }
             }
 
-            // Re-resolve parameters
-            for param in load_node.parameters.iter_mut() {
-                if param.1.contains("$(") {
-                    if let Ok(subs) = parse_substitutions(&param.1) {
+            // Re-resolve parameters and expand __param_file references
+            let mut expanded_params = Vec::new();
+            for param in load_node.parameters.iter() {
+                let key = param.0.clone();
+                let mut value = param.1.clone();
+
+                // Resolve substitutions in values
+                if value.contains("$(") {
+                    if let Ok(subs) = parse_substitutions(&value) {
                         if let Ok(resolved) = resolve_substitutions(&subs, &ctx) {
                             log::debug!(
                                 "Param '{}' -> '{}' for node '{}'",
-                                param.1,
+                                value,
                                 resolved,
                                 load_node.node_name
                             );
-                            param.1 = resolved;
+                            value = resolved;
                         }
                     }
                 }
+
+                // Expand __param_file entries: load YAML and inline parameters
+                if key == "__param_file" && (value.ends_with(".yaml") || value.ends_with(".yml")) {
+                    match crate::params::load_param_file(std::path::Path::new(&value)) {
+                        Ok(yaml_params) => {
+                            log::debug!(
+                                "Expanded __param_file '{}' -> {} parameters for node '{}'",
+                                value,
+                                yaml_params.len(),
+                                load_node.node_name
+                            );
+                            expanded_params.extend(yaml_params);
+                            continue;
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to load __param_file '{}' for node '{}': {}",
+                                value,
+                                load_node.node_name,
+                                e
+                            );
+                            // Keep as-is on failure
+                        }
+                    }
+                }
+
+                expanded_params.push((key, value));
             }
+            load_node.parameters = expanded_params;
         }
     });
 

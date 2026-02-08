@@ -1359,8 +1359,8 @@ fn test_conditional_substitutions() {
     let fixture = get_fixture_path("python/test_conditional_substitutions.launch.py");
 
     // Get the fixtures directory path for FileContent test data files
-    let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/launch/python");
+    let fixture_dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/launch/python");
     let fixture_dir_str = fixture_dir.to_str().unwrap();
 
     let mut args = HashMap::new();

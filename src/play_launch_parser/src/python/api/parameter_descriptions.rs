@@ -47,23 +47,12 @@ impl ParameterFile {
     }
 
     /// Get the parameter file path (converts to string if possible)
+    ///
+    /// Uses pyobject_to_string() to resolve substitutions (e.g., LaunchConfiguration)
+    /// from the thread-local context, returning the actual file path instead of
+    /// unresolved substitution syntax like "$(var config)".
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let obj_ref = self.param_file.as_ref(py);
-
-        // Try direct string extraction
-        if let Ok(s) = obj_ref.extract::<String>() {
-            return Ok(s);
-        }
-
-        // Try calling __str__ on the object (for substitutions)
-        if let Ok(str_result) = obj_ref.call_method0("__str__") {
-            if let Ok(s) = str_result.extract::<String>() {
-                return Ok(s);
-            }
-        }
-
-        // Fallback
-        Ok(obj_ref.to_string())
+        crate::python::api::utils::pyobject_to_string(py, &self.param_file)
     }
 }
 

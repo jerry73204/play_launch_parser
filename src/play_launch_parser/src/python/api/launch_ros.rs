@@ -353,7 +353,14 @@ impl Node {
             // Case 5: Try calling __str__ on the object (for substitutions)
             if let Ok(str_val) = param_any.call_method0("__str__") {
                 if let Ok(s) = str_val.extract::<String>() {
-                    parsed_params.push(("substitution".to_string(), s));
+                    if is_yaml_file(&s) {
+                        match load_yaml_params(&s) {
+                            Ok(yaml_params) => parsed_params.extend(yaml_params),
+                            Err(_) => parsed_params.push(("substitution".to_string(), s)),
+                        }
+                    } else {
+                        parsed_params.push(("substitution".to_string(), s));
+                    }
                 }
             }
         }
@@ -382,6 +389,41 @@ impl Node {
                 // Recursively parse nested dict
                 Self::parse_dict_params(nested_dict, &full_key, params)?;
             } else {
+                let type_name = value.get_type().name().unwrap_or("?");
+                if type_name == "dict" {
+                    // Value is a dict but downcast failed (e.g., from CPython yaml.safe_load)
+                    // Use PyAny dict API instead
+                    log::debug!(
+                        "parse_dict_params: '{}' has dict type but downcast failed, using items()",
+                        full_key
+                    );
+                    if let Ok(items) = value.call_method0("items") {
+                        if let Ok(iter) = items.iter() {
+                            for item in iter.flatten() {
+                                if let Ok((k, v)) = item.extract::<(String, &PyAny)>() {
+                                    let sub_key = if full_key.is_empty() {
+                                        k.clone()
+                                    } else {
+                                        format!("{}.{}", full_key, k)
+                                    };
+                                    // Recurse if the sub-value is also a dict
+                                    if v.get_type().name().unwrap_or("") == "dict" {
+                                        if let Ok(sub_dict) = v.downcast::<PyDict>() {
+                                            Self::parse_dict_params(sub_dict, &sub_key, params)?;
+                                        } else {
+                                            let val = Self::extract_param_value(v)?;
+                                            params.push((sub_key, val));
+                                        }
+                                    } else {
+                                        let val = Self::extract_param_value(v)?;
+                                        params.push((sub_key, val));
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                    }
+                }
                 // Extract value as string (handles various Python types)
                 let value_str = Self::extract_param_value(value)?;
                 params.push((full_key, value_str));
@@ -424,13 +466,24 @@ impl Node {
             }
         }
 
-        // Try list (convert to YAML-like string)
+        // Try list (convert to Python-style string with quoted string elements)
         if let Ok(list) = value.downcast::<PyList>() {
-            let items: Result<Vec<String>, _> =
-                list.iter().map(Self::extract_param_value).collect();
-            if let Ok(items) = items {
-                return Ok(format!("[{}]", items.join(", ")));
+            let mut formatted_items = Vec::new();
+            for item in list.iter() {
+                let val = Self::extract_param_value(item)?;
+                // Quote string elements (non-numeric, non-boolean) with single quotes
+                // to match Python parser output format: ['a', 'b'] not [a, b]
+                let is_numeric_or_bool = val.parse::<f64>().is_ok()
+                    || val.parse::<i64>().is_ok()
+                    || val == "true"
+                    || val == "false";
+                if is_numeric_or_bool {
+                    formatted_items.push(val);
+                } else {
+                    formatted_items.push(format!("'{}'", val));
+                }
             }
+            return Ok(format!("[{}]", formatted_items.join(", ")));
         }
 
         // For substitutions (including PythonExpression), use the centralized utility
@@ -1041,10 +1094,45 @@ impl ComposableNode {
                 continue;
             }
 
+            // ParameterFile object — load YAML and expand inline
+            let type_name = param_any.get_type().name().unwrap_or("");
+            if type_name.contains("ParameterFile") {
+                if let Ok(str_val) = param_any.call_method0("__str__") {
+                    if let Ok(path) = str_val.extract::<String>() {
+                        if is_yaml_file(&path) {
+                            match load_yaml_params(&path) {
+                                Ok(yaml_params) => {
+                                    log::debug!(
+                                        "Loaded {} parameters from ParameterFile {}",
+                                        yaml_params.len(),
+                                        path
+                                    );
+                                    parsed_params.extend(yaml_params);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to load ParameterFile {}: {}", path, e);
+                                    parsed_params.push(("__param_file".to_string(), path));
+                                }
+                            }
+                        } else {
+                            parsed_params.push(("__param_file".to_string(), path));
+                        }
+                    }
+                }
+                continue;
+            }
+
             // Try calling __str__ on the object (for substitutions)
             if let Ok(str_val) = param_any.call_method0("__str__") {
                 if let Ok(s) = str_val.extract::<String>() {
-                    parsed_params.push(("substitution".to_string(), s));
+                    if is_yaml_file(&s) {
+                        match load_yaml_params(&s) {
+                            Ok(yaml_params) => parsed_params.extend(yaml_params),
+                            Err(_) => parsed_params.push(("substitution".to_string(), s)),
+                        }
+                    } else {
+                        parsed_params.push(("substitution".to_string(), s));
+                    }
                 }
             }
         }
@@ -1513,7 +1601,14 @@ impl LifecycleNode {
             // Try calling __str__ on the object (for substitutions)
             if let Ok(str_val) = param_any.call_method0("__str__") {
                 if let Ok(s) = str_val.extract::<String>() {
-                    parsed_params.push(("substitution".to_string(), s));
+                    if is_yaml_file(&s) {
+                        match load_yaml_params(&s) {
+                            Ok(yaml_params) => parsed_params.extend(yaml_params),
+                            Err(_) => parsed_params.push(("substitution".to_string(), s)),
+                        }
+                    } else {
+                        parsed_params.push(("substitution".to_string(), s));
+                    }
                 }
             }
         }
@@ -2125,12 +2220,8 @@ impl LoadComposableNodes {
                         }
                     }
 
-                    // Normal dict processing
-                    for (key, value) in param_dict.iter() {
-                        let key_str = key.extract::<String>()?;
-                        let value_str = Self::pyobject_to_string(value)?;
-                        parsed_params.push((key_str, value_str));
-                    }
+                    // Normal dict processing (recursively flatten nested dicts)
+                    Node::parse_dict_params(param_dict, "", &mut parsed_params)?;
                 } else {
                     let type_name = param_item.get_type().name().unwrap_or("<unknown>");
                     log::trace!("extract_parameters: item {} type={}", idx, type_name);
@@ -2396,30 +2487,36 @@ fn load_yaml_params(path: &str) -> PyResult<Vec<(String, String)>> {
     })?;
 
     // Strip ROS 2 parameter file wrappers (/**:  and ros__parameters:)
-    let params_value = if let Value::Mapping(top_map) = &yaml {
-        // Look for the /**:  key (wildcard node matcher)
-        let ros_params = top_map.iter().find_map(|(k, v)| {
+    // Iterate ALL matching top-level keys (YAML files like default_adapi.param.yaml
+    // have multiple node-specific sections: /adapi/node/autoware_state, /adapi/node/motion)
+    let mut params = Vec::new();
+
+    if let Value::Mapping(top_map) = &yaml {
+        let mut found_node_keys = false;
+        for (k, v) in top_map {
             if let Value::String(key) = k {
                 if key == "/**" || key.starts_with('/') {
-                    // Found top-level node matcher, look for ros__parameters
+                    found_node_keys = true;
+                    // Found a node matcher, look for ros__parameters
                     if let Value::Mapping(node_map) = v {
-                        return node_map
+                        let params_value = node_map
                             .get(Value::String("ros__parameters".to_string()))
-                            .or(Some(v)); // Fallback to whole node_map if no ros__parameters
+                            .unwrap_or(v);
+                        flatten_yaml(params_value, "", &mut params);
+                    } else {
+                        flatten_yaml(v, "", &mut params);
                     }
                 }
             }
-            None
-        });
+        }
 
-        ros_params.unwrap_or(&yaml)
+        if !found_node_keys {
+            // No node-specific keys found, flatten the whole YAML
+            flatten_yaml(&yaml, "", &mut params);
+        }
     } else {
-        &yaml
-    };
-
-    // Flatten nested structure with dot notation
-    let mut params = Vec::new();
-    flatten_yaml(params_value, "", &mut params);
+        flatten_yaml(&yaml, "", &mut params);
+    }
 
     Ok(params)
 }
