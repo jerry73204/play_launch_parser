@@ -4,7 +4,7 @@ use crate::{
     error::{ParseError, Result},
     params::extract_params_from_yaml,
     record::{ComposableNodeContainerRecord, LoadNodeRecord},
-    substitution::{parse_substitutions, resolve_substitutions, LaunchContext},
+    substitution::{parse_substitutions, resolve_substitutions, LaunchContext, Substitution},
     xml::{Entity, XmlEntity},
 };
 use std::{collections::HashMap, path::Path};
@@ -16,6 +16,7 @@ pub struct ContainerAction {
     pub namespace: String,
     pub package: String,
     pub executable: String,
+    pub args: Option<Vec<Substitution>>,
     pub composable_nodes: Vec<ComposableNodeAction>,
 }
 
@@ -89,6 +90,12 @@ impl ContainerAction {
             context.current_namespace()
         };
 
+        // Parse args attribute (command-line arguments before --ros-args)
+        let args = entity
+            .get_attr_str("args", true)?
+            .map(|s| parse_substitutions(&s))
+            .transpose()?;
+
         // Parse composable_node children
         let mut composable_nodes = Vec::new();
         for child in entity.children() {
@@ -111,6 +118,7 @@ impl ContainerAction {
             namespace,
             package,
             executable,
+            args,
             composable_nodes,
         })
     }
@@ -129,6 +137,24 @@ impl ContainerAction {
             Some(self.namespace.as_str())
         };
 
+        // Resolve args attribute (command-line arguments before --ros-args)
+        let arguments: Option<Vec<String>> = if let Some(ref args_subs) = self.args {
+            let resolved = resolve_substitutions(args_subs, context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+            let arg_list: Vec<String> =
+                resolved.split_whitespace().map(|s| s.to_string()).collect();
+            if arg_list.is_empty() {
+                None
+            } else {
+                Some(arg_list)
+            }
+        } else {
+            None
+        };
+
+        let empty_args = Vec::new();
+        let arg_list = arguments.as_deref().unwrap_or(&empty_args);
+
         let cmd = build_ros_command(
             &exec_path,
             Some(self.name.as_str()),
@@ -137,13 +163,13 @@ impl ContainerAction {
             &[],
             &[],
             &[],
-            &[],
+            arg_list,
         );
 
         let global_params = if gp.is_empty() { None } else { Some(gp) };
 
         Ok(ComposableNodeContainerRecord {
-            args: None,
+            args: arguments,
             cmd,
             env: None,
             exec_name: Some(self.name.clone()),
@@ -182,6 +208,24 @@ impl ContainerAction {
             Some(self.namespace.as_str())
         };
 
+        // Resolve args attribute (command-line arguments before --ros-args)
+        let arguments: Option<Vec<String>> = if let Some(ref args_subs) = self.args {
+            let resolved = resolve_substitutions(args_subs, context)
+                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+            let arg_list: Vec<String> =
+                resolved.split_whitespace().map(|s| s.to_string()).collect();
+            if arg_list.is_empty() {
+                None
+            } else {
+                Some(arg_list)
+            }
+        } else {
+            None
+        };
+
+        let empty_args = Vec::new();
+        let arg_list = arguments.as_deref().unwrap_or(&empty_args);
+
         let cmd = build_ros_command(
             &exec_path,
             Some(self.name.as_str()),
@@ -190,11 +234,11 @@ impl ContainerAction {
             &[],
             &[],
             &[],
-            &[],
+            arg_list,
         );
 
         Ok(NodeRecord {
-            args: None,
+            args: arguments,
             cmd,
             env: None,
             exec_name: None,
