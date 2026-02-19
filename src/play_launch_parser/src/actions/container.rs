@@ -91,10 +91,14 @@ impl ContainerAction {
         };
 
         // Parse args attribute (command-line arguments before --ros-args)
-        let args = entity
-            .get_attr_str("args", true)?
-            .map(|s| parse_substitutions(&s))
-            .transpose()?;
+        let args_raw = entity.get_attr_str("args", true)?;
+        log::debug!(
+            "Container '{}' args_raw={:?}, all attrs={:?}",
+            name,
+            args_raw,
+            entity.attributes()
+        );
+        let args = args_raw.map(|s| parse_substitutions(&s)).transpose()?;
 
         // Parse composable_node children
         let mut composable_nodes = Vec::new();
