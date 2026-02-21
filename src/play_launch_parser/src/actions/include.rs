@@ -10,8 +10,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct IncludeAction {
     pub file: Vec<Substitution>,
-    /// Args as Vec to preserve order (later args can reference earlier ones)
-    pub args: Vec<(String, String)>,
+    /// Args as Vec to preserve order (later args can reference earlier ones).
+    /// Values are parsed substitutions (resolved at use site in process_include).
+    pub args: Vec<(String, Vec<Substitution>)>,
 }
 
 impl IncludeAction {
@@ -38,13 +39,14 @@ impl IncludeAction {
                             attribute: "name".to_string(),
                         })?;
 
-                let value: String = child.get_attr("value", false)?.ok_or_else(|| {
+                let value_str: String = child.get_attr("value", false)?.ok_or_else(|| {
                     ParseError::MissingAttribute {
                         element: "arg".to_string(),
                         attribute: "value".to_string(),
                     }
                 })?;
 
+                let value = parse_substitutions(&value_str)?;
                 args.push((name, value));
             }
         }
@@ -82,13 +84,15 @@ mod tests {
         let include = IncludeAction::from_entity(&entity).unwrap();
 
         assert_eq!(include.args.len(), 2);
+        assert_eq!(include.args[0].0, "param1");
         assert_eq!(
-            include.args[0],
-            ("param1".to_string(), "value1".to_string())
+            include.args[0].1,
+            vec![Substitution::Text("value1".to_string())]
         );
+        assert_eq!(include.args[1].0, "param2");
         assert_eq!(
-            include.args[1],
-            ("param2".to_string(), "value2".to_string())
+            include.args[1].1,
+            vec![Substitution::Text("value2".to_string())]
         );
     }
 

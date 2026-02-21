@@ -3,7 +3,7 @@ use crate::{
     actions::IncludeAction,
     error::{ParseError, Result},
     file_cache::read_file_cached,
-    substitution::{parse_substitutions, resolve_substitutions},
+    substitution::resolve_substitutions,
     xml,
 };
 use std::path::Path;
@@ -60,11 +60,9 @@ impl LaunchTraverser {
 
                     // Create args for the Python file (include args override current context)
                     let mut python_args = self.context.configurations();
-                    for (key, value) in &include.args {
-                        let resolved_value_subs = parse_substitutions(value)?;
-                        let resolved_value =
-                            resolve_substitutions(&resolved_value_subs, &self.context)
-                                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                    for (key, value_subs) in &include.args {
+                        let resolved_value = resolve_substitutions(value_subs, &self.context)
+                            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
                         log::trace!("  Include arg: {} = {}", key, resolved_value);
                         python_args.insert(key.clone(), resolved_value);
                     }
@@ -86,13 +84,12 @@ impl LaunchTraverser {
         // Start with current context and apply include args
         let mut include_context = self.context.child();
         include_context.set_current_file(resolved_path.clone());
-        for (key, value) in &include.args {
+        for (key, value_subs) in &include.args {
             // IMPORTANT: Resolve substitutions in the argument value using the include_context
             // (not the parent context) so that later args can reference earlier args
             // Example: <arg name="A" value="x"/>
             //          <arg name="B" value="$(var A)/y"/>  <-- B can reference A
-            let resolved_value_subs = parse_substitutions(value)?;
-            let resolved_value = resolve_substitutions(&resolved_value_subs, &include_context)
+            let resolved_value = resolve_substitutions(value_subs, &include_context)
                 .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
             log::debug!("[RUST] Setting include arg: {} = {}", key, resolved_value);
             include_context.set_configuration(key.clone(), resolved_value);

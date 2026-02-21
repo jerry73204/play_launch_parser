@@ -76,27 +76,43 @@ impl LoadComposableNodeAction {
             .composable_nodes
             .iter()
             .map(|node| {
-                // Extract the container namespace from the target
-                let container_namespace = if let Some(last_slash_idx) = normalized_target.rfind('/')
-                {
-                    if last_slash_idx == 0 {
-                        "/"
+                // Resolve node fields
+                let package = resolve_substitutions(&node.package, context).unwrap_or_default();
+                let plugin = resolve_substitutions(&node.plugin, context).unwrap_or_default();
+                let node_name = resolve_substitutions(&node.name, context).unwrap_or_default();
+                let namespace = if let Some(ref ns) = node.namespace {
+                    let ns_resolved = resolve_substitutions(ns, context).unwrap_or_default();
+                    if ns_resolved.starts_with('/') {
+                        ns_resolved
+                    } else if ns_resolved.is_empty() {
+                        context.current_namespace()
                     } else {
-                        &normalized_target[..last_slash_idx]
+                        let current_ns = context.current_namespace();
+                        if current_ns == "/" {
+                            format!("/{}", ns_resolved)
+                        } else {
+                            format!("{}/{}", current_ns, ns_resolved)
+                        }
                     }
                 } else {
-                    "/"
+                    // Extract the container namespace from the target
+                    if let Some(last_slash_idx) = normalized_target.rfind('/') {
+                        if last_slash_idx == 0 {
+                            "/".to_string()
+                        } else {
+                            normalized_target[..last_slash_idx].to_string()
+                        }
+                    } else {
+                        "/".to_string()
+                    }
                 };
 
                 LoadNodeCapture {
-                    package: node.package.clone(),
-                    plugin: node.plugin.clone(),
+                    package,
+                    plugin,
                     target_container_name: normalized_target.clone(),
-                    node_name: node.name.clone(),
-                    namespace: node
-                        .namespace
-                        .clone()
-                        .unwrap_or_else(|| container_namespace.to_string()),
+                    node_name,
+                    namespace,
                     parameters: node.parameters.clone(),
                     remappings: node.remappings.clone(),
                 }
@@ -134,16 +150,35 @@ impl LoadComposableNodeAction {
             .composable_nodes
             .iter()
             .map(|node| {
-                // Extract the container namespace from the target (everything except the last segment)
-                let container_namespace = if let Some(last_slash_idx) = normalized_target.rfind('/')
-                {
-                    if last_slash_idx == 0 {
-                        "/"
+                // Resolve node fields
+                let package = resolve_substitutions(&node.package, context).unwrap_or_default();
+                let plugin = resolve_substitutions(&node.plugin, context).unwrap_or_default();
+                let node_name = resolve_substitutions(&node.name, context).unwrap_or_default();
+                let namespace = if let Some(ref ns) = node.namespace {
+                    let ns_resolved = resolve_substitutions(ns, context).unwrap_or_default();
+                    if ns_resolved.starts_with('/') {
+                        ns_resolved
+                    } else if ns_resolved.is_empty() {
+                        context.current_namespace()
                     } else {
-                        &normalized_target[..last_slash_idx]
+                        let current_ns = context.current_namespace();
+                        if current_ns == "/" {
+                            format!("/{}", ns_resolved)
+                        } else {
+                            format!("{}/{}", current_ns, ns_resolved)
+                        }
                     }
                 } else {
-                    "/"
+                    // Extract the container namespace from the target
+                    if let Some(last_slash_idx) = normalized_target.rfind('/') {
+                        if last_slash_idx == 0 {
+                            "/".to_string()
+                        } else {
+                            normalized_target[..last_slash_idx].to_string()
+                        }
+                    } else {
+                        "/".to_string()
+                    }
                 };
 
                 // Merge global parameters with node-specific parameters
@@ -161,14 +196,11 @@ impl LoadComposableNodeAction {
 
                 // Build LoadNodeRecord
                 LoadNodeRecord {
-                    package: node.package.clone(),
-                    plugin: node.plugin.clone(),
+                    package,
+                    plugin,
                     target_container_name: normalized_target.clone(),
-                    node_name: node.name.clone(),
-                    namespace: node
-                        .namespace
-                        .clone()
-                        .unwrap_or_else(|| container_namespace.to_string()),
+                    node_name,
+                    namespace,
                     log_level: None,
                     remaps: node.remappings.clone(),
                     params: merged_params,
@@ -202,7 +234,9 @@ mod tests {
 
         let action = LoadComposableNodeAction::from_entity(&entity, &context).unwrap();
         assert_eq!(action.composable_nodes.len(), 1);
-        assert_eq!(action.composable_nodes[0].name, "my_node");
+        // Name is now Vec<Substitution> — resolve to verify
+        let name = resolve_substitutions(&action.composable_nodes[0].name, &context).unwrap();
+        assert_eq!(name, "my_node");
     }
 
     #[test]

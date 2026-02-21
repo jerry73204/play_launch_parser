@@ -96,4 +96,11 @@ impl<'a, 'input> XmlEntity<'a, 'input> {
             .map(XmlEntity::new)
         // No .collect() - returns iterator directly
     }
+
+    /// Return the 1-based line number of this element in the source document.
+    pub fn line_number(&self) -> usize {
+        let pos = self.node.range().start;
+        let text_pos = self.node.document().text_pos_at(pos);
+        text_pos.row as usize
+    }
 }

@@ -5,6 +5,7 @@ pub mod captures;
 pub mod condition;
 pub mod error;
 mod file_cache;
+pub mod ir;
 pub mod params;
 pub mod python;
 pub mod record;
@@ -85,6 +86,28 @@ pub fn parse_launch_file(path: &Path, cli_args: HashMap<String, String>) -> Resu
     let mut traverser = LaunchTraverser::new(cli_args);
     traverser.traverse_file(path)?;
     traverser.into_record_json()
+}
+
+/// Parse a launch file into its IR without evaluating conditions.
+///
+/// Returns a `LaunchProgram` tree that preserves all conditional branches,
+/// unevaluated substitution expressions, and include hierarchy.
+pub fn analyze_launch_file(path: &Path) -> Result<ir::LaunchProgram> {
+    let mut traverser = LaunchTraverser::new(HashMap::new());
+    traverser.build_ir_file(path)
+}
+
+/// Parse a launch file into its IR with the given arguments applied.
+///
+/// Arguments are applied to the context so that include file paths and
+/// conditional expressions that reference them can be resolved during
+/// IR construction. Conditions are still stored (not evaluated).
+pub fn analyze_launch_file_with_args(
+    path: &Path,
+    args: HashMap<String, String>,
+) -> Result<ir::LaunchProgram> {
+    let mut traverser = LaunchTraverser::new(args);
+    traverser.build_ir_file(path)
 }
 
 #[cfg(test)]

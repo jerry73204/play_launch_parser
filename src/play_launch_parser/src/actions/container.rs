@@ -12,10 +12,10 @@ use std::{collections::HashMap, path::Path};
 /// Container action representing a composable node container
 #[derive(Debug, Clone)]
 pub struct ContainerAction {
-    pub name: String,
-    pub namespace: String,
-    pub package: String,
-    pub executable: String,
+    pub name: Vec<Substitution>,
+    pub namespace: Option<Vec<Substitution>>,
+    pub package: Vec<Substitution>,
+    pub executable: Vec<Substitution>,
     pub args: Option<Vec<Substitution>>,
     pub composable_nodes: Vec<ComposableNodeAction>,
 }
@@ -23,78 +23,77 @@ pub struct ContainerAction {
 /// Composable node action
 #[derive(Debug, Clone)]
 pub struct ComposableNodeAction {
-    pub package: String,
-    pub plugin: String,
-    pub name: String,
-    pub namespace: Option<String>,
+    pub package: Vec<Substitution>,
+    pub plugin: Vec<Substitution>,
+    pub name: Vec<Substitution>,
+    pub namespace: Option<Vec<Substitution>>,
     pub parameters: Vec<(String, String)>,
     pub remappings: Vec<(String, String)>,
     pub extra_args: HashMap<String, String>,
 }
 
+/// Resolve a namespace value against context, handling absolute/relative logic.
+fn resolve_namespace(
+    ns_subs: Option<&Vec<Substitution>>,
+    context: &LaunchContext,
+) -> Result<String> {
+    if let Some(ns) = ns_subs {
+        let ns_resolved = resolve_substitutions(ns, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+
+        if ns_resolved.starts_with('/') {
+            Ok(ns_resolved)
+        } else if ns_resolved.is_empty() {
+            Ok(context.current_namespace())
+        } else {
+            let current_ns = context.current_namespace();
+            if current_ns == "/" {
+                Ok(format!("/{}", ns_resolved))
+            } else {
+                Ok(format!("{}/{}", current_ns, ns_resolved))
+            }
+        }
+    } else {
+        Ok(context.current_namespace())
+    }
+}
+
 impl ContainerAction {
     pub fn from_entity(entity: &XmlEntity, context: &LaunchContext) -> Result<Self> {
-        // Get container name
-        let name_subs =
+        // Get container name — parse only, don't resolve
+        let name_str =
             entity
                 .get_attr_str("name", false)?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "node_container".to_string(),
                     attribute: "name".to_string(),
                 })?;
-        let name_parsed = parse_substitutions(&name_subs)?;
-        let name = resolve_substitutions(&name_parsed, context)
-            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let name = parse_substitutions(&name_str)?;
 
         // Get package (defaults to "rclcpp_components" if not specified)
         let package = if let Some(pkg_str) = entity.get_attr_str("pkg", true)? {
-            let pkg_parsed = parse_substitutions(&pkg_str)?;
-            resolve_substitutions(&pkg_parsed, context)
-                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?
+            parse_substitutions(&pkg_str)?
         } else {
-            "rclcpp_components".to_string()
+            vec![Substitution::Text("rclcpp_components".to_string())]
         };
 
         // Get executable (defaults to "component_container" if not specified)
         let executable = if let Some(exec_str) = entity.get_attr_str("exec", true)? {
-            let exec_parsed = parse_substitutions(&exec_str)?;
-            resolve_substitutions(&exec_parsed, context)
-                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?
+            parse_substitutions(&exec_str)?
         } else {
-            "component_container".to_string()
+            vec![Substitution::Text("component_container".to_string())]
         };
 
-        // Get namespace, combining with accumulated namespace from context
-        let namespace = if let Some(ns_str) = entity.get_attr_str("namespace", true)? {
-            let ns_parsed = parse_substitutions(&ns_str)?;
-            let ns_resolved = resolve_substitutions(&ns_parsed, context)
-                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
-
-            // If namespace is absolute (starts with '/'), use it as-is
-            if ns_resolved.starts_with('/') {
-                ns_resolved
-            } else if ns_resolved.is_empty() {
-                // Empty namespace means use current namespace from context
-                context.current_namespace()
-            } else {
-                // Relative namespace: combine with current namespace from context
-                let current_ns = context.current_namespace();
-                if current_ns == "/" {
-                    format!("/{}", ns_resolved)
-                } else {
-                    format!("{}/{}", current_ns, ns_resolved)
-                }
-            }
-        } else {
-            // No namespace attribute: use current namespace from context
-            context.current_namespace()
-        };
+        // Get namespace — parse only, resolve at use site
+        let namespace = entity
+            .get_attr_str("namespace", true)?
+            .map(|s| parse_substitutions(&s))
+            .transpose()?;
 
         // Parse args attribute (command-line arguments before --ros-args)
         let args_raw = entity.get_attr_str("args", true)?;
         log::debug!(
-            "Container '{}' args_raw={:?}, all attrs={:?}",
-            name,
+            "Container args_raw={:?}, all attrs={:?}",
             args_raw,
             entity.attributes()
         );
@@ -133,12 +132,21 @@ impl ContainerAction {
     ) -> Result<ComposableNodeContainerRecord> {
         use crate::record::generator::{build_ros_command, resolve_exec_path};
 
-        let exec_path = resolve_exec_path(&self.package, &self.executable);
+        // Resolve deferred fields
+        let name = resolve_substitutions(&self.name, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let package = resolve_substitutions(&self.package, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let executable = resolve_substitutions(&self.executable, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let namespace = resolve_namespace(self.namespace.as_ref(), context)?;
+
+        let exec_path = resolve_exec_path(&package, &executable);
         let gp: Vec<(String, String)> = context.global_parameters().into_iter().collect();
-        let ns_ref = if self.namespace.is_empty() || self.namespace == "/" {
+        let ns_ref = if namespace.is_empty() || namespace == "/" {
             None
         } else {
-            Some(self.namespace.as_str())
+            Some(namespace.as_str())
         };
 
         // Resolve args attribute (command-line arguments before --ros-args)
@@ -161,7 +169,7 @@ impl ContainerAction {
 
         let cmd = build_ros_command(
             &exec_path,
-            Some(self.name.as_str()),
+            Some(name.as_str()),
             ns_ref,
             &gp,
             &[],
@@ -176,12 +184,12 @@ impl ContainerAction {
             args: arguments,
             cmd,
             env: None,
-            exec_name: Some(self.name.clone()),
-            executable: self.executable.clone(),
+            exec_name: Some(name.clone()),
+            executable,
             global_params,
-            name: self.name.clone(),
-            namespace: self.namespace.clone(),
-            package: self.package.clone(),
+            name: name.clone(),
+            namespace,
+            package,
             params: Vec::new(),
             params_files: Vec::new(),
             remaps: Vec::new(),
@@ -191,11 +199,17 @@ impl ContainerAction {
         })
     }
 
-    pub fn to_load_node_records(&self, context: &LaunchContext) -> Vec<LoadNodeRecord> {
-        self.composable_nodes
+    pub fn to_load_node_records(&self, context: &LaunchContext) -> Result<Vec<LoadNodeRecord>> {
+        // Resolve container name and namespace for passing to composable nodes
+        let name = resolve_substitutions(&self.name, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let namespace = resolve_namespace(self.namespace.as_ref(), context)?;
+
+        Ok(self
+            .composable_nodes
             .iter()
-            .map(|node| node.to_load_node_record(&self.name, &self.namespace, context))
-            .collect()
+            .map(|node| node.to_load_node_record(&name, &namespace, context))
+            .collect())
     }
 
     pub fn to_node_record(&self, context: &LaunchContext) -> Result<crate::record::NodeRecord> {
@@ -204,12 +218,21 @@ impl ContainerAction {
             NodeRecord,
         };
 
-        let exec_path = resolve_exec_path(&self.package, &self.executable);
+        // Resolve deferred fields
+        let name = resolve_substitutions(&self.name, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let package = resolve_substitutions(&self.package, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let executable = resolve_substitutions(&self.executable, context)
+            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let namespace = resolve_namespace(self.namespace.as_ref(), context)?;
+
+        let exec_path = resolve_exec_path(&package, &executable);
         let gp: Vec<(String, String)> = context.global_parameters().into_iter().collect();
-        let ns_ref = if self.namespace.is_empty() || self.namespace == "/" {
+        let ns_ref = if namespace.is_empty() || namespace == "/" {
             None
         } else {
-            Some(self.namespace.as_str())
+            Some(namespace.as_str())
         };
 
         // Resolve args attribute (command-line arguments before --ros-args)
@@ -232,7 +255,7 @@ impl ContainerAction {
 
         let cmd = build_ros_command(
             &exec_path,
-            Some(self.name.as_str()),
+            Some(name.as_str()),
             ns_ref,
             &gp,
             &[],
@@ -246,11 +269,11 @@ impl ContainerAction {
             cmd,
             env: None,
             exec_name: None,
-            executable: self.executable.clone(),
+            executable,
             global_params: None,
-            name: Some(self.name.clone()),
-            namespace: Some(self.namespace.clone()),
-            package: Some(self.package.clone()),
+            name: Some(name),
+            namespace: Some(namespace),
+            package: Some(package),
             params: Vec::new(),
             params_files: Vec::new(),
             remaps: Vec::new(),
@@ -263,7 +286,7 @@ impl ContainerAction {
 
 impl ComposableNodeAction {
     pub fn from_entity(entity: &XmlEntity, context: &LaunchContext) -> Result<Self> {
-        // Get required attributes
+        // Get required attributes — parse only, don't resolve
         let package_str =
             entity
                 .get_attr_str("pkg", false)?
@@ -271,9 +294,7 @@ impl ComposableNodeAction {
                     element: "composable_node".to_string(),
                     attribute: "pkg".to_string(),
                 })?;
-        let package_parsed = parse_substitutions(&package_str)?;
-        let package = resolve_substitutions(&package_parsed, context)
-            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let package = parse_substitutions(&package_str)?;
 
         let plugin_str =
             entity
@@ -282,11 +303,9 @@ impl ComposableNodeAction {
                     element: "composable_node".to_string(),
                     attribute: "plugin".to_string(),
                 })?;
-        let plugin_parsed = parse_substitutions(&plugin_str)?;
-        let plugin = resolve_substitutions(&plugin_parsed, context)
-            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let plugin = parse_substitutions(&plugin_str)?;
 
-        // Get name (required for composable nodes)
+        // Get name (required for composable nodes) — parse only
         let name_str =
             entity
                 .get_attr_str("name", false)?
@@ -294,38 +313,15 @@ impl ComposableNodeAction {
                     element: "composable_node".to_string(),
                     attribute: "name".to_string(),
                 })?;
-        let name_parsed = parse_substitutions(&name_str)?;
-        let name = resolve_substitutions(&name_parsed, context)
-            .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        let name = parse_substitutions(&name_str)?;
 
-        // Get optional namespace
-        let namespace = if let Some(ns_str) = entity.get_attr_str("namespace", true)? {
-            let ns_parsed = parse_substitutions(&ns_str)?;
-            let ns_resolved = resolve_substitutions(&ns_parsed, context)
-                .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+        // Get optional namespace — parse only
+        let namespace = entity
+            .get_attr_str("namespace", true)?
+            .map(|s| parse_substitutions(&s))
+            .transpose()?;
 
-            // Ensure namespace is absolute (starts with '/') or combine with current namespace
-            let normalized_ns = if ns_resolved.starts_with('/') {
-                // Already absolute
-                ns_resolved
-            } else if ns_resolved.is_empty() {
-                // Empty namespace means use current namespace from context
-                context.current_namespace()
-            } else {
-                // Relative namespace: combine with current namespace from context
-                let current_ns = context.current_namespace();
-                if current_ns == "/" {
-                    format!("/{}", ns_resolved)
-                } else {
-                    format!("{}/{}", current_ns, ns_resolved)
-                }
-            };
-            Some(normalized_ns)
-        } else {
-            None
-        };
-
-        // Parse children for params and remaps
+        // Parse children for params and remaps (still resolved eagerly — these are runtime values)
         let mut parameters = Vec::new();
         let mut remappings = Vec::new();
         let extra_args = HashMap::new();
@@ -433,9 +429,31 @@ impl ComposableNodeAction {
         container_namespace: &str,
         context: &LaunchContext,
     ) -> LoadNodeRecord {
+        // Resolve deferred fields
+        let package = resolve_substitutions(&self.package, context).unwrap_or_default();
+        let plugin = resolve_substitutions(&self.plugin, context).unwrap_or_default();
+        let name = resolve_substitutions(&self.name, context).unwrap_or_default();
+        let namespace = if let Some(ref ns) = self.namespace {
+            let ns_resolved = resolve_substitutions(ns, context).unwrap_or_default();
+            if ns_resolved.starts_with('/') {
+                ns_resolved
+            } else if ns_resolved.is_empty() {
+                context.current_namespace()
+            } else {
+                let current_ns = context.current_namespace();
+                if current_ns == "/" {
+                    format!("/{}", ns_resolved)
+                } else {
+                    format!("{}/{}", current_ns, ns_resolved)
+                }
+            }
+        } else {
+            container_namespace.to_string()
+        };
+
         log::debug!(
             "to_load_node_record: node='{}', self.parameters.len()={}",
-            self.name,
+            name,
             self.parameters.len()
         );
 
@@ -456,19 +474,16 @@ impl ComposableNodeAction {
 
         log::debug!(
             "to_load_node_record: node='{}', final merged_params.len()={}",
-            self.name,
+            name,
             merged_params.len()
         );
 
         LoadNodeRecord {
-            package: self.package.clone(),
-            plugin: self.plugin.clone(),
+            package,
+            plugin,
             target_container_name,
-            node_name: self.name.clone(),
-            namespace: self
-                .namespace
-                .clone()
-                .unwrap_or_else(|| container_namespace.to_string()),
+            node_name: name,
+            namespace,
             log_level: None,
             remaps: self.remappings.clone(),
             params: merged_params,
