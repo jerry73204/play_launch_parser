@@ -3,5 +3,8 @@
 pub mod generator;
 pub mod types;
 
-pub use generator::CommandGenerator;
+pub use generator::{
+    build_ros_command, merge_params_with_global, normalize_param_value, resolve_exec_path,
+    CommandGenerator,
+};
 pub use types::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord, RecordJson};

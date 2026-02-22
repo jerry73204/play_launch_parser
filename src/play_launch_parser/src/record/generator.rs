@@ -11,7 +11,7 @@ use std::path::Path;
 
 /// Normalize boolean values to Python convention (True/False instead of true/false).
 /// This matches the Python parser's output format which uses Python's str(bool) convention.
-pub(crate) fn normalize_param_value(value: &str) -> String {
+pub fn normalize_param_value(value: &str) -> String {
     match value {
         "true" => "True".to_string(),
         "false" => "False".to_string(),
@@ -20,7 +20,7 @@ pub(crate) fn normalize_param_value(value: &str) -> String {
 }
 
 /// Resolve executable path by trying package resolution, falling back to hardcoded path.
-pub(crate) fn resolve_exec_path(package: &str, executable: &str) -> String {
+pub fn resolve_exec_path(package: &str, executable: &str) -> String {
     crate::python::bridge::find_package_executable(package, executable)
         .unwrap_or_else(|| format!("/opt/ros/humble/lib/{}/{}", package, executable))
 }
@@ -38,7 +38,7 @@ pub(crate) fn resolve_exec_path(package: &str, executable: &str) -> String {
 /// 8. -p key:=value node params (normalized)
 /// 9. -r from:=to remappings
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn build_ros_command(
+pub fn build_ros_command(
     exec_path: &str,
     name: Option<&str>,
     namespace: Option<&str>,
@@ -101,7 +101,7 @@ pub(crate) fn build_ros_command(
 
 /// Merge global parameters with node-specific parameters.
 /// Global parameters come first, node-specific parameters can override by key.
-pub(crate) fn merge_params_with_global(
+pub fn merge_params_with_global(
     global_params: &[(String, String)],
     node_params: &[(String, String)],
 ) -> Vec<(String, String)> {

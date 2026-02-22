@@ -414,7 +414,7 @@ where
 /// 1. `{AMENT_PREFIX_PATH}/{package}/lib/{package}/{executable}`
 /// 2. `/opt/ros/{ROS_DISTRO}/lib/{package}/{executable}`
 /// 3. Common ROS 2 distributions (jazzy, iron, humble, galactic, foxy)
-pub(crate) fn find_package_executable(package_name: &str, executable: &str) -> Option<String> {
+pub fn find_package_executable(package_name: &str, executable: &str) -> Option<String> {
     // Try AMENT_PREFIX_PATH first (for local installs)
     if let Ok(prefix_path) = std::env::var("AMENT_PREFIX_PATH") {
         for prefix in prefix_path.split(':') {

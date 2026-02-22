@@ -39,7 +39,7 @@ fn evaluate_condition(condition: &str, context: &LaunchContext) -> Result<bool> 
 }
 
 /// Determine if a string value is "truthy"
-pub(crate) fn is_truthy(value: &str) -> bool {
+pub fn is_truthy(value: &str) -> bool {
     let normalized = value.trim().to_lowercase();
     matches!(
         normalized.as_str(),
