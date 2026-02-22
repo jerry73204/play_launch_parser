@@ -110,6 +110,19 @@ pub fn analyze_launch_file_with_args(
     traverser.build_ir_file(path)
 }
 
+/// Evaluate a launch file via its IR representation.
+///
+/// Builds the IR tree with `analyze_launch_file_with_args`, then walks the tree
+/// resolving expressions and conditions to produce the same `RecordJson` as
+/// `parse_launch_file()`. Only pure-XML launch files produce complete results;
+/// Python/YAML includes are skipped with a debug log.
+pub fn evaluate_launch_file(path: &Path, args: HashMap<String, String>) -> Result<RecordJson> {
+    let program = analyze_launch_file_with_args(path, args.clone())?;
+    let mut traverser = LaunchTraverser::new(args);
+    traverser.evaluate_ir(&program)?;
+    traverser.into_record_json()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

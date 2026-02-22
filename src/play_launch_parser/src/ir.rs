@@ -4,7 +4,7 @@
 //! Preserves conditional branches, substitution expressions, and include hierarchy
 //! for static analysis, evaluation, and annotation.
 
-use crate::substitution::Substitution;
+use crate::substitution::{resolve_substitutions, LaunchContext, Substitution};
 use std::path::PathBuf;
 
 /// A lazy string expression (unevaluated substitution chain).
@@ -31,6 +31,14 @@ impl Expr {
             }
         }
         None
+    }
+
+    /// Resolve this expression against a `LaunchContext`.
+    pub fn resolve(
+        &self,
+        context: &LaunchContext,
+    ) -> Result<String, crate::error::SubstitutionError> {
+        resolve_substitutions(&self.0, context)
     }
 }
 
@@ -161,6 +169,64 @@ pub enum ActionKind {
 pub struct LaunchProgram {
     pub source: PathBuf,
     pub body: Vec<Action>,
+}
+
+impl LaunchProgram {
+    /// Collect all declared argument names (recursive into groups and includes).
+    pub fn arguments(&self) -> Vec<&str> {
+        let mut result = Vec::new();
+        collect_arguments(&self.body, &mut result);
+        result
+    }
+
+    /// Collect all node-spawning actions (SpawnNode, SpawnExecutable, SpawnContainer).
+    pub fn all_nodes(&self) -> Vec<&Action> {
+        let mut result = Vec::new();
+        collect_nodes(&self.body, &mut result);
+        result
+    }
+}
+
+fn collect_arguments<'a>(actions: &'a [Action], out: &mut Vec<&'a str>) {
+    for action in actions {
+        match &action.kind {
+            ActionKind::DeclareArgument { name, .. } => {
+                out.push(name.as_str());
+            }
+            ActionKind::Group { body, .. } => {
+                collect_arguments(body, out);
+            }
+            ActionKind::Include {
+                body: Some(ref program),
+                ..
+            } => {
+                collect_arguments(&program.body, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_nodes<'a>(actions: &'a [Action], out: &mut Vec<&'a Action>) {
+    for action in actions {
+        match &action.kind {
+            ActionKind::SpawnNode { .. }
+            | ActionKind::SpawnExecutable { .. }
+            | ActionKind::SpawnContainer { .. } => {
+                out.push(action);
+            }
+            ActionKind::Group { body, .. } => {
+                collect_nodes(body, out);
+            }
+            ActionKind::Include {
+                body: Some(ref program),
+                ..
+            } => {
+                collect_nodes(&program.body, out);
+            }
+            _ => {}
+        }
+    }
 }
 
 // --- Supporting types ---

@@ -1,6 +1,7 @@
 mod entity;
 mod include;
 mod ir_builder;
+mod ir_evaluator;
 mod namespace;
 mod python_exec;
 mod record_conv;
