@@ -473,3 +473,147 @@ fn test_ir_set_remap() {
         other => panic!("Expected SetRemap, got {:?}", other),
     }
 }
+
+// --- YAML IR tests ---
+
+#[test]
+fn test_ir_yaml_arg_declarations() {
+    let mut yaml_file = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml_file
+        .write_all(
+            b"launch:\n  - arg:\n      name: my_var\n      default: my_value\n  - arg:\n      name: other_var\n      default: other_value\n",
+        )
+        .unwrap();
+    yaml_file.flush().unwrap();
+
+    let program = analyze_launch_file(yaml_file.path()).unwrap();
+    assert_eq!(program.body.len(), 2);
+
+    match &program.body[0].kind {
+        ActionKind::DeclareArgument { name, default, .. } => {
+            assert_eq!(name, "my_var");
+            assert_eq!(default.as_ref().unwrap().as_literal(), Some("my_value"));
+        }
+        other => panic!("Expected DeclareArgument, got {:?}", other),
+    }
+    match &program.body[1].kind {
+        ActionKind::DeclareArgument { name, default, .. } => {
+            assert_eq!(name, "other_var");
+            assert_eq!(default.as_ref().unwrap().as_literal(), Some("other_value"));
+        }
+        other => panic!("Expected DeclareArgument, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_ir_yaml_with_description() {
+    let mut yaml_file = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml_file
+        .write_all(
+            b"launch:\n  - arg:\n      name: robot_type\n      default: turtlebot\n      description: Type of robot to spawn\n",
+        )
+        .unwrap();
+    yaml_file.flush().unwrap();
+
+    let program = analyze_launch_file(yaml_file.path()).unwrap();
+    assert_eq!(program.body.len(), 1);
+
+    match &program.body[0].kind {
+        ActionKind::DeclareArgument {
+            name,
+            default,
+            description,
+            ..
+        } => {
+            assert_eq!(name, "robot_type");
+            assert_eq!(default.as_ref().unwrap().as_literal(), Some("turtlebot"));
+            assert_eq!(description.as_deref(), Some("Type of robot to spawn"));
+        }
+        other => panic!("Expected DeclareArgument, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_ir_yaml_empty_launch() {
+    let mut yaml_file = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml_file
+        .write_all(b"# empty launch file\nother_key: value\n")
+        .unwrap();
+    yaml_file.flush().unwrap();
+
+    let program = analyze_launch_file(yaml_file.path()).unwrap();
+    assert!(program.body.is_empty());
+}
+
+#[test]
+fn test_ir_yaml_include_produces_declare_argument() {
+    // YAML preset
+    let mut yaml_file = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml_file
+        .write_all(
+            b"launch:\n  - arg:\n      name: velocity_smoother_type\n      default: JointTrajectoryController\n",
+        )
+        .unwrap();
+    yaml_file.flush().unwrap();
+    let yaml_path = yaml_file.path().to_str().unwrap().to_string();
+
+    // XML includes the YAML preset
+    let xml = format!(
+        r#"<launch>
+            <include file="{}" />
+            <node pkg="my_pkg" exec="my_exec" name="$(var velocity_smoother_type)" />
+        </launch>"#,
+        yaml_path
+    );
+    let mut outer = NamedTempFile::with_suffix(".launch.xml").unwrap();
+    outer.write_all(xml.as_bytes()).unwrap();
+    outer.flush().unwrap();
+
+    let program = analyze_launch_file(outer.path()).unwrap();
+    assert_eq!(program.body.len(), 2);
+
+    // First action: Include with YAML body containing DeclareArgument (not OpaqueFunction)
+    match &program.body[0].kind {
+        ActionKind::Include { body, .. } => {
+            let body = body.as_ref().expect("Include body should be set");
+            assert_eq!(body.body.len(), 1);
+            match &body.body[0].kind {
+                ActionKind::DeclareArgument { name, default, .. } => {
+                    assert_eq!(name, "velocity_smoother_type");
+                    assert_eq!(
+                        default.as_ref().unwrap().as_literal(),
+                        Some("JointTrajectoryController")
+                    );
+                }
+                other => panic!("Expected DeclareArgument in YAML body, got {:?}", other),
+            }
+        }
+        other => panic!("Expected Include, got {:?}", other),
+    }
+
+    // Second action: SpawnNode
+    assert!(matches!(
+        &program.body[1].kind,
+        ActionKind::SpawnNode { .. }
+    ));
+}
+
+#[test]
+fn test_ir_yaml_arg_no_default() {
+    let mut yaml_file = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml_file
+        .write_all(b"launch:\n  - arg:\n      name: required_arg\n")
+        .unwrap();
+    yaml_file.flush().unwrap();
+
+    let program = analyze_launch_file(yaml_file.path()).unwrap();
+    assert_eq!(program.body.len(), 1);
+
+    match &program.body[0].kind {
+        ActionKind::DeclareArgument { name, default, .. } => {
+            assert_eq!(name, "required_arg");
+            assert!(default.is_none());
+        }
+        other => panic!("Expected DeclareArgument, got {:?}", other),
+    }
+}

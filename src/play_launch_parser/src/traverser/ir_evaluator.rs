@@ -191,7 +191,7 @@ impl LaunchTraverser {
         args: &[crate::ir::IncludeArg],
         body: Option<&LaunchProgram>,
     ) -> Result<()> {
-        // If body is None (Python/YAML include, or unresolved), skip
+        // If body is None (Python include or unresolved), skip
         let body = match body {
             Some(b) => b,
             None => {
@@ -199,14 +199,38 @@ impl LaunchTraverser {
                     .resolve(&self.context)
                     .unwrap_or_else(|_| "<unresolved>".to_string());
                 log::debug!(
-                    "Skipping include with no IR body (Python/YAML/unresolved): {}",
+                    "Skipping include with no IR body (Python/unresolved): {}",
                     file_str
                 );
                 return Ok(());
             }
         };
 
-        // Create child context
+        // YAML includes modify parent scope directly (no child context).
+        // This matches ROS 2 behavior where YAML preset files set variables
+        // visible to subsequent includes in the same file.
+        let is_yaml = body
+            .source
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| matches!(e, "yaml" | "yml"))
+            .unwrap_or(false);
+
+        if is_yaml {
+            for arg in args {
+                let resolved = arg
+                    .value
+                    .resolve(&self.context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                self.context.set_configuration(arg.name.clone(), resolved);
+            }
+            for action in &body.body {
+                self.evaluate_action(action)?;
+            }
+            return Ok(());
+        }
+
+        // Create child context (XML includes use isolated scope)
         let mut include_context = self.context.child();
         include_context.set_current_file(body.source.clone());
 

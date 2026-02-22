@@ -390,3 +390,107 @@ fn test_evaluate_nested_groups() {
         Some("/robot1/sensors".to_string())
     );
 }
+
+// --- YAML evaluator tests ---
+
+#[test]
+fn test_evaluate_yaml_include_parent_scope() {
+    // YAML preset file declares a variable
+    let mut yaml = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml.write_all(b"launch:\n  - arg:\n      name: my_var\n      default: preset_value\n")
+        .unwrap();
+    yaml.flush().unwrap();
+    let yaml_path = yaml.path().to_str().unwrap().to_string();
+
+    // XML includes YAML, then uses the variable in a node name
+    let xml = format!(
+        r#"<launch>
+            <include file="{}" />
+            <node pkg="my_pkg" exec="my_exec" name="$(var my_var)" />
+        </launch>"#,
+        yaml_path
+    );
+    let outer = write_xml(&xml);
+
+    let record = evaluate_launch_file(outer.path(), HashMap::new()).unwrap();
+    assert_eq!(record.node.len(), 1);
+    assert_eq!(record.node[0].name, Some("preset_value".to_string()));
+}
+
+#[test]
+fn test_evaluate_yaml_multiple_args() {
+    let mut yaml = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml.write_all(
+        b"launch:\n  - arg:\n      name: arg_a\n      default: alpha\n  - arg:\n      name: arg_b\n      default: beta\n",
+    )
+    .unwrap();
+    yaml.flush().unwrap();
+    let yaml_path = yaml.path().to_str().unwrap().to_string();
+
+    let xml = format!(
+        r#"<launch>
+            <include file="{}" />
+            <node pkg="pkg" exec="exec" name="$(var arg_a)_$(var arg_b)" />
+        </launch>"#,
+        yaml_path
+    );
+    let outer = write_xml(&xml);
+
+    let record = evaluate_launch_file(outer.path(), HashMap::new()).unwrap();
+    assert_eq!(record.node.len(), 1);
+    assert_eq!(record.node[0].name, Some("alpha_beta".to_string()));
+}
+
+#[test]
+fn test_evaluate_yaml_round_trip() {
+    // YAML preset
+    let mut yaml = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml.write_all(b"launch:\n  - arg:\n      name: my_var\n      default: yaml_default\n")
+        .unwrap();
+    yaml.flush().unwrap();
+    let yaml_path = yaml.path().to_str().unwrap().to_string();
+
+    // XML includes YAML
+    let xml = format!(
+        r#"<launch>
+            <include file="{}" />
+            <node pkg="test_pkg" exec="test_exec" name="$(var my_var)_node" />
+        </launch>"#,
+        yaml_path
+    );
+    let outer = write_xml(&xml);
+
+    let parsed = parse_launch_file(outer.path(), HashMap::new()).unwrap();
+    let evaluated = evaluate_launch_file(outer.path(), HashMap::new()).unwrap();
+
+    assert_eq!(parsed.node.len(), evaluated.node.len());
+    assert_eq!(parsed.node[0].name, evaluated.node[0].name);
+    assert_eq!(parsed.node[0].cmd, evaluated.node[0].cmd);
+}
+
+#[test]
+fn test_evaluate_yaml_cli_arg_override() {
+    // YAML preset declares a variable with default
+    let mut yaml = NamedTempFile::with_suffix(".launch.yaml").unwrap();
+    yaml.write_all(b"launch:\n  - arg:\n      name: mode\n      default: simulation\n")
+        .unwrap();
+    yaml.flush().unwrap();
+    let yaml_path = yaml.path().to_str().unwrap().to_string();
+
+    let xml = format!(
+        r#"<launch>
+            <include file="{}" />
+            <node pkg="pkg" exec="exec" name="$(var mode)_node" />
+        </launch>"#,
+        yaml_path
+    );
+    let outer = write_xml(&xml);
+
+    // Override the YAML default via CLI args
+    let mut args = HashMap::new();
+    args.insert("mode".to_string(), "real".to_string());
+
+    let record = evaluate_launch_file(outer.path(), args).unwrap();
+    assert_eq!(record.node.len(), 1);
+    assert_eq!(record.node[0].name, Some("real_node".to_string()));
+}

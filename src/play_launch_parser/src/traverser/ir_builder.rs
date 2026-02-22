@@ -41,21 +41,7 @@ impl LaunchTraverser {
                     });
                 }
                 "yaml" | "yml" => {
-                    // YAML launch files produce an OpaqueFunction placeholder for now
-                    let action = Action {
-                        kind: ActionKind::OpaqueFunction {
-                            description: format!("YAML launch file: {}", path.display()),
-                        },
-                        condition: None,
-                        span: Some(Span {
-                            file: source.clone(),
-                            line: 1,
-                        }),
-                    };
-                    return Ok(LaunchProgram {
-                        source,
-                        body: vec![action],
-                    });
+                    return self.build_ir_yaml(path);
                 }
                 _ => {}
             }
@@ -67,6 +53,77 @@ impl LaunchTraverser {
         let doc = roxmltree::Document::parse(&content)?;
         let root = crate::xml::XmlEntity::new(doc.root_element());
         let body = self.build_ir_entity(&root, &source)?;
+
+        Ok(LaunchProgram { source, body })
+    }
+
+    /// Build IR from a YAML launch file.
+    ///
+    /// YAML launch files in ROS 2 are primarily used as preset files that declare
+    /// arguments with default values. Unlike XML includes which use isolated scope,
+    /// YAML includes modify the parent scope — variables they declare become visible
+    /// to subsequent includes in the same file.
+    fn build_ir_yaml(&mut self, path: &Path) -> Result<LaunchProgram> {
+        use serde_yaml::Value;
+
+        let source = path.to_path_buf();
+        let content = read_file_cached(path)?;
+        let yaml: Value = serde_yaml::from_str(&content)
+            .map_err(|e| ParseError::InvalidSubstitution(format!("Invalid YAML: {}", e)))?;
+
+        let mut body = Vec::new();
+
+        if let Some(launch_list) = yaml.get("launch").and_then(|v| v.as_sequence()) {
+            for item in launch_list {
+                if let Some(arg_map) = item.get("arg").and_then(|v| v.as_mapping()) {
+                    if let Some(name) = arg_map
+                        .get(Value::String("name".to_string()))
+                        .and_then(|v| v.as_str())
+                    {
+                        let default_value = arg_map
+                            .get(Value::String("default".to_string()))
+                            .and_then(|v| v.as_str());
+                        let description = arg_map
+                            .get(Value::String("description".to_string()))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+
+                        let default_expr = default_value
+                            .map(|d| parse_substitutions(d).map(Expr))
+                            .transpose()?;
+
+                        body.push(Action {
+                            kind: ActionKind::DeclareArgument {
+                                name: name.to_string(),
+                                default: default_expr,
+                                description,
+                                choices: None,
+                            },
+                            condition: None,
+                            span: Some(Span {
+                                file: source.clone(),
+                                line: 1,
+                            }),
+                        });
+
+                        // Apply to context — YAML presets modify parent scope so
+                        // later substitutions (e.g. in include file paths) can resolve.
+                        self.context.declare_argument(ArgumentMetadata {
+                            name: name.to_string(),
+                            default: default_value.map(|s| s.to_string()),
+                            description: None,
+                            choices: None,
+                        });
+                        if let Some(default) = default_value {
+                            if self.context.get_configuration(name).is_none() {
+                                self.context
+                                    .set_configuration(name.to_string(), default.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(LaunchProgram { source, body })
     }
@@ -411,7 +468,28 @@ impl LaunchTraverser {
             return None;
         }
 
-        // Apply include args to a child context
+        // YAML includes modify parent scope — process directly on self
+        let is_yaml = resolved_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| matches!(e, "yaml" | "yml"))
+            .unwrap_or(false);
+
+        if is_yaml {
+            match self.build_ir_yaml(&resolved_path) {
+                Ok(program) => return Some(Box::new(program)),
+                Err(e) => {
+                    log::debug!(
+                        "IR: failed to build YAML IR for {}: {}",
+                        resolved_path.display(),
+                        e
+                    );
+                    return None;
+                }
+            }
+        }
+
+        // Apply include args to a child context (XML includes use isolated scope)
         let mut child_context = self.context.child();
         child_context.set_current_file(resolved_path.clone());
         for (key, value_subs) in &include.args {
