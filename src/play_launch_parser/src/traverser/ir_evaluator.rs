@@ -95,6 +95,10 @@ impl LaunchTraverser {
                 self.context.push_namespace(resolved);
             }
 
+            ActionKind::PopNamespace => {
+                self.context.pop_namespace();
+            }
+
             ActionKind::SetParameter { name, value } => {
                 let resolved = value
                     .resolve(&self.context)

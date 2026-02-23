@@ -362,8 +362,8 @@ impl LaunchTraverser {
 
             "push-ros-namespace" => {
                 let ns_str = entity
-                    .get_attr_str("namespace", false)?
-                    .or_else(|| entity.get_attr_str("ns", false).ok().flatten())
+                    .get_attr_str("namespace", true)?
+                    .or_else(|| entity.get_attr_str("ns", true).ok().flatten())
                     .ok_or_else(|| ParseError::MissingAttribute {
                         element: "push-ros-namespace".to_string(),
                         attribute: "namespace or ns".to_string(),
@@ -388,7 +388,13 @@ impl LaunchTraverser {
 
             "pop-ros-namespace" => {
                 self.context.pop_namespace();
-                // No IR action needed — scope managed during evaluation
+                let condition = extract_condition(entity)?;
+                let span = make_span(entity, current_file);
+                actions.push(Action {
+                    kind: ActionKind::PopNamespace,
+                    condition,
+                    span,
+                });
             }
 
             "node_container" | "node-container" => {

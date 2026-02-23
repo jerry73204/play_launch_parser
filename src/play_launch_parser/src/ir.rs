@@ -98,6 +98,9 @@ pub enum ActionKind {
     /// `<push-ros-namespace>` — pushes a namespace onto the namespace stack.
     PushNamespace { namespace: Expr },
 
+    /// `<pop-ros-namespace>` — pops the most recent namespace from the stack.
+    PopNamespace,
+
     // --- Global Parameters & Remappings ---
     /// `<set_parameter>` — sets a global parameter in scope.
     SetParameter { name: String, value: Expr },
