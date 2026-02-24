@@ -343,6 +343,19 @@ where
     unsafe { f(&mut *ctx_ptr) }
 }
 
+/// Execute a closure with access to the current LaunchContext, if one is set.
+///
+/// Returns `None` if no context is available (unlike `with_launch_context` which panics).
+pub fn try_with_launch_context<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce(&mut LaunchContext) -> R,
+{
+    let ctx_ptr = get_current_launch_context()?;
+    // SAFETY: The pointer is valid for the duration of Python execution
+    // as guaranteed by set_current_launch_context
+    Some(unsafe { f(&mut *ctx_ptr) })
+}
+
 /// Get a clone of all captured nodes from LaunchContext
 /// Panics if no context is set
 pub fn get_captured_nodes() -> Vec<NodeCapture> {

@@ -155,14 +155,12 @@ pub fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
                     if let Some(var_name) =
                         s.strip_prefix("$(var ").and_then(|s| s.strip_suffix(')'))
                     {
-                        // Use get_current_launch_context to avoid panic when no context is set
-                        if let Some(ctx_ptr) = crate::python::bridge::get_current_launch_context() {
-                            // SAFETY: pointer valid during Python execution as guaranteed by
-                            // set_current_launch_context
-                            let ctx = unsafe { &*ctx_ptr };
-                            if let Some(value) = ctx.get_configuration(var_name) {
-                                return Ok(value);
-                            }
+                        if let Some(value) = crate::python::bridge::try_with_launch_context(|ctx| {
+                            ctx.get_configuration(var_name)
+                        })
+                        .flatten()
+                        {
+                            return Ok(value);
                         }
                     }
                     // Not in context — preserve as $(var name) for runtime resolution
