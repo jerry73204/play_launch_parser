@@ -13,11 +13,12 @@ use std::{cell::RefCell, num::NonZeroUsize};
 // This is safe because parsing is context-independent - same input always produces same AST.
 // Resolution happens separately with the current context.
 //
-// Cache size: 1024 entries (typical usage: ~200-500 unique substitution strings)
-// Expected hit rate: >80% for launch files with repeated patterns
+// Expected hit rate: >80% for launch files with repeated patterns (typical: ~200-500 unique strings)
+const SUBSTITUTION_CACHE_SIZE: usize = 1024;
+
 thread_local! {
     static PARSE_CACHE: RefCell<LruCache<String, Vec<Substitution>>> =
-        RefCell::new(LruCache::new(NonZeroUsize::new(1024).unwrap()));
+        RefCell::new(LruCache::new(NonZeroUsize::new(SUBSTITUTION_CACHE_SIZE).unwrap()));
 }
 
 /// Parse substitution string like "$(var x)" or "text $(env Y) more"
