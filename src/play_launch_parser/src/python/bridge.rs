@@ -436,7 +436,7 @@ pub fn find_package_executable(package_name: &str, executable: &str) -> Option<S
     }
 
     // Fallback: Try common ROS 2 distributions
-    for distro in &["jazzy", "iron", "humble", "galactic", "foxy"] {
+    for distro in crate::substitution::types::KNOWN_ROS_DISTROS {
         let exec_path = format!("/opt/ros/{}/lib/{}/{}", distro, package_name, executable);
         if std::path::Path::new(&exec_path).exists() {
             log::debug!("Resolved executable: {} -> {}", executable, exec_path);

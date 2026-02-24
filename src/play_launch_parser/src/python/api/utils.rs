@@ -221,6 +221,48 @@ fn is_evaluating_substitution(obj: &PyAny) -> PyResult<bool> {
     ))
 }
 
+/// Try `perform(context)` on a PyObject, then fall back to string conversion.
+///
+/// Used by substitution structs that need to resolve operands which may themselves
+/// be substitutions (e.g., EqualsSubstitution comparing two LaunchConfigurations).
+pub fn perform_or_to_string(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
+    let obj_ref = obj.as_ref(py);
+
+    // Try perform() first (resolves nested substitutions)
+    if obj_ref.hasattr("perform")? {
+        if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
+            if let Ok(s) = result.extract::<String>() {
+                return Ok(s);
+            }
+        }
+    }
+
+    // Fallback to general string conversion
+    pyobject_to_string(py, obj)
+}
+
+/// Convert a PyObject to a boolean value.
+///
+/// Handles bool extraction, string-to-bool conversion ("true"/"1"/"yes"),
+/// and __str__() fallback. Used by And/Or/IfElse substitutions.
+pub fn pyobject_to_bool(obj: &PyObject, py: Python) -> PyResult<bool> {
+    if let Ok(b) = obj.extract::<bool>(py) {
+        return Ok(b);
+    }
+
+    if let Ok(s) = obj.extract::<String>(py) {
+        return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+    }
+
+    if let Ok(str_result) = obj.call_method0(py, "__str__") {
+        if let Ok(s) = str_result.extract::<String>(py) {
+            return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
+        }
+    }
+
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

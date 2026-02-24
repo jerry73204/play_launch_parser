@@ -4,6 +4,8 @@
 
 use pyo3::prelude::*;
 
+use crate::python::api::utils as sub_utils;
+
 // ============================================================================
 // Helper Functions for Context Management
 // ============================================================================
@@ -338,36 +340,9 @@ impl FindPackageShare {
 }
 
 impl FindPackageShare {
-    /// Find ROS 2 package share directory
-    /// Same logic as the Rust substitution system
+    /// Find ROS 2 package share directory (delegates to shared implementation with caching)
     fn find_package_share(package_name: &str) -> Option<String> {
-        // Try ROS_DISTRO environment variable first
-        if let Ok(distro) = std::env::var("ROS_DISTRO") {
-            let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);
-            if std::path::Path::new(&share_path).exists() {
-                return Some(share_path);
-            }
-        }
-
-        // Fallback: Try common ROS 2 distributions
-        for distro in &["jazzy", "iron", "humble", "galactic", "foxy"] {
-            let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);
-            if std::path::Path::new(&share_path).exists() {
-                return Some(share_path);
-            }
-        }
-
-        // Try AMENT_PREFIX_PATH
-        if let Ok(prefix_path) = std::env::var("AMENT_PREFIX_PATH") {
-            for prefix in prefix_path.split(':') {
-                let share_path = format!("{}/share/{}", prefix, package_name);
-                if std::path::Path::new(&share_path).exists() {
-                    return Some(share_path);
-                }
-            }
-        }
-
-        None
+        crate::substitution::types::find_package_share(package_name)
     }
 }
 
@@ -465,7 +440,7 @@ impl PythonExpression {
         // Convert each element to string and concatenate
         let mut result = String::new();
         for obj in expression {
-            let s = Self::pyobject_to_string(py, &obj)?;
+            let s = sub_utils::pyobject_to_string(py, &obj)?;
             result.push_str(&s);
         }
         Ok(Self { expression: result })
@@ -500,13 +475,6 @@ impl PythonExpression {
             // Fallback to __str__
             result.call_method0("__str__")?.extract::<String>()
         }
-    }
-}
-
-impl PythonExpression {
-    /// Convert a PyObject to a string (handles strings and substitutions)
-    fn pyobject_to_string(py: Python, obj: &PyObject) -> PyResult<String> {
-        crate::python::api::utils::pyobject_to_string(py, obj)
     }
 }
 
@@ -631,8 +599,8 @@ impl AndSubstitution {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let left_val = Self::to_bool(&self.left, py)?;
-        let right_val = Self::to_bool(&self.right, py)?;
+        let left_val = sub_utils::pyobject_to_bool(&self.left, py)?;
+        let right_val = sub_utils::pyobject_to_bool(&self.right, py)?;
         Ok(if left_val && right_val {
             "true"
         } else {
@@ -643,26 +611,6 @@ impl AndSubstitution {
 
     fn __repr__(&self) -> String {
         "AndSubstitution(...)".to_string()
-    }
-}
-
-impl AndSubstitution {
-    fn to_bool(obj: &PyObject, py: Python) -> PyResult<bool> {
-        if let Ok(b) = obj.extract::<bool>(py) {
-            return Ok(b);
-        }
-
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
-        }
-
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
-            }
-        }
-
-        Ok(false)
     }
 }
 
@@ -690,8 +638,8 @@ impl OrSubstitution {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let left_val = Self::to_bool(&self.left, py)?;
-        let right_val = Self::to_bool(&self.right, py)?;
+        let left_val = sub_utils::pyobject_to_bool(&self.left, py)?;
+        let right_val = sub_utils::pyobject_to_bool(&self.right, py)?;
         Ok(if left_val || right_val {
             "true"
         } else {
@@ -702,26 +650,6 @@ impl OrSubstitution {
 
     fn __repr__(&self) -> String {
         "OrSubstitution(...)".to_string()
-    }
-}
-
-impl OrSubstitution {
-    fn to_bool(obj: &PyObject, py: Python) -> PyResult<bool> {
-        if let Ok(b) = obj.extract::<bool>(py) {
-            return Ok(b);
-        }
-
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
-        }
-
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
-            }
-        }
-
-        Ok(false)
     }
 }
 
@@ -749,8 +677,8 @@ impl EqualsSubstitution {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let left_str = Self::to_string(&self.left, py)?;
-        let right_str = Self::to_string(&self.right, py)?;
+        let left_str = sub_utils::pyobject_to_string(py, &self.left)?;
+        let right_str = sub_utils::pyobject_to_string(py, &self.right)?;
         Ok(if left_str == right_str {
             "true"
         } else {
@@ -765,44 +693,14 @@ impl EqualsSubstitution {
 
     /// Perform the substitution - evaluate both sides and compare
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let left_str = Self::perform_obj(&self.left, py, context)?;
-        let right_str = Self::perform_obj(&self.right, py, context)?;
+        let left_str = sub_utils::perform_or_to_string(&self.left, py, context)?;
+        let right_str = sub_utils::perform_or_to_string(&self.right, py, context)?;
         Ok(if left_str == right_str {
             "true"
         } else {
             "false"
         }
         .to_string())
-    }
-}
-
-impl EqualsSubstitution {
-    fn to_string(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-
-        Ok(obj.to_string())
-    }
-
-    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-
-        // Try to call perform() if available
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-
-        // Fallback to __str__
-        Self::to_string(obj, py)
     }
 }
 
@@ -835,24 +733,14 @@ impl IfElseSubstitution {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let cond_val = Self::to_bool(&self.condition, py)?;
+        let cond_val = sub_utils::pyobject_to_bool(&self.condition, py)?;
         let obj = if cond_val {
             &self.if_value
         } else {
             &self.else_value
         };
 
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-
-        Ok(obj.to_string())
+        sub_utils::pyobject_to_string(py, obj)
     }
 
     fn __repr__(&self) -> String {
@@ -861,83 +749,15 @@ impl IfElseSubstitution {
 
     /// Perform the substitution - evaluate condition and return appropriate value
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let cond_val = Self::perform_bool(&self.condition, py, context)?;
+        let cond_str = sub_utils::perform_or_to_string(&self.condition, py, context)?;
+        let cond_val = matches!(cond_str.to_lowercase().as_str(), "true" | "1" | "yes");
         let obj = if cond_val {
             &self.if_value
         } else {
             &self.else_value
         };
 
-        Self::perform_str(obj, py, context)
-    }
-}
-
-impl IfElseSubstitution {
-    fn to_bool(obj: &PyObject, py: Python) -> PyResult<bool> {
-        if let Ok(b) = obj.extract::<bool>(py) {
-            return Ok(b);
-        }
-
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
-        }
-
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(matches!(s.to_lowercase().as_str(), "true" | "1" | "yes"));
-            }
-        }
-
-        Ok(false)
-    }
-
-    fn perform_bool(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<bool> {
-        let obj_ref = obj.as_ref(py);
-
-        // Try to call perform() if available
-        let val_str = if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                result.extract::<String>()?
-            } else {
-                Self::to_string_fallback(obj, py)?
-            }
-        } else {
-            Self::to_string_fallback(obj, py)?
-        };
-
-        // Convert string to boolean
-        Ok(matches!(
-            val_str.to_lowercase().as_str(),
-            "true" | "1" | "yes"
-        ))
-    }
-
-    fn perform_str(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-
-        // Try to call perform() if available
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-
-        // Fallback to extract or __str__
-        Self::to_string_fallback(obj, py)
-    }
-
-    fn to_string_fallback(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-
-        Ok(obj.to_string())
+        sub_utils::perform_or_to_string(obj, py, context)
     }
 }
 
@@ -965,8 +785,8 @@ impl NotEqualsSubstitution {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let left_str = Self::to_string(&self.left, py)?;
-        let right_str = Self::to_string(&self.right, py)?;
+        let left_str = sub_utils::pyobject_to_string(py, &self.left)?;
+        let right_str = sub_utils::pyobject_to_string(py, &self.right)?;
         Ok(if left_str != right_str {
             "true"
         } else {
@@ -981,44 +801,14 @@ impl NotEqualsSubstitution {
 
     /// Perform the substitution - evaluate both sides and compare
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let left_str = Self::perform_obj(&self.left, py, context)?;
-        let right_str = Self::perform_obj(&self.right, py, context)?;
+        let left_str = sub_utils::perform_or_to_string(&self.left, py, context)?;
+        let right_str = sub_utils::perform_or_to_string(&self.right, py, context)?;
         Ok(if left_str != right_str {
             "true"
         } else {
             "false"
         }
         .to_string())
-    }
-}
-
-impl NotEqualsSubstitution {
-    fn to_string(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-
-        Ok(obj.to_string())
-    }
-
-    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-
-        // Try to call perform() if available
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-
-        // Fallback to __str__
-        Self::to_string(obj, py)
     }
 }
 
@@ -1169,8 +959,8 @@ impl ExecutableInPackage {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let pkg_str = Self::pyobject_to_string(&self.package, py)?;
-        let exec_str = Self::pyobject_to_string(&self.executable, py)?;
+        let pkg_str = sub_utils::pyobject_to_string(py, &self.package)?;
+        let exec_str = sub_utils::pyobject_to_string(py, &self.executable)?;
 
         // Return a placeholder path that represents the executable location
         // In static analysis, we can't actually find the executable
@@ -1178,43 +968,19 @@ impl ExecutableInPackage {
     }
 
     fn __repr__(&self, py: Python) -> String {
-        let pkg_str =
-            Self::pyobject_to_string(&self.package, py).unwrap_or_else(|_| "<package>".to_string());
-        let exec_str = Self::pyobject_to_string(&self.executable, py)
+        let pkg_str = sub_utils::pyobject_to_string(py, &self.package)
+            .unwrap_or_else(|_| "<package>".to_string());
+        let exec_str = sub_utils::pyobject_to_string(py, &self.executable)
             .unwrap_or_else(|_| "<executable>".to_string());
         format!("ExecutableInPackage('{}', '{}')", pkg_str, exec_str)
     }
 
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let pkg_str = Self::perform_obj(&self.package, py, context)?;
-        let exec_str = Self::perform_obj(&self.executable, py, context)?;
+        let pkg_str = sub_utils::perform_or_to_string(&self.package, py, context)?;
+        let exec_str = sub_utils::perform_or_to_string(&self.executable, py, context)?;
 
         // Return a placeholder path
         Ok(format!("$(find-exec {} {})", pkg_str, exec_str))
-    }
-}
-
-impl ExecutableInPackage {
-    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-        Ok(obj.to_string())
-    }
-
-    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-        Self::pyobject_to_string(obj, py)
     }
 }
 
@@ -1241,43 +1007,19 @@ impl FindPackage {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let pkg_str = Self::pyobject_to_string(&self.package, py)?;
+        let pkg_str = sub_utils::pyobject_to_string(py, &self.package)?;
         Ok(format!("$(find-pkg-prefix {})", pkg_str))
     }
 
     fn __repr__(&self, py: Python) -> String {
-        let pkg_str =
-            Self::pyobject_to_string(&self.package, py).unwrap_or_else(|_| "<package>".to_string());
+        let pkg_str = sub_utils::pyobject_to_string(py, &self.package)
+            .unwrap_or_else(|_| "<package>".to_string());
         format!("FindPackage('{}')", pkg_str)
     }
 
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let pkg_str = Self::perform_obj(&self.package, py, context)?;
+        let pkg_str = sub_utils::perform_or_to_string(&self.package, py, context)?;
         Ok(format!("$(find-pkg-prefix {})", pkg_str))
-    }
-}
-
-impl FindPackage {
-    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-        Ok(obj.to_string())
-    }
-
-    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-        Self::pyobject_to_string(obj, py)
     }
 }
 
@@ -1304,43 +1046,19 @@ impl Parameter {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let name_str = Self::pyobject_to_string(&self.name, py)?;
+        let name_str = sub_utils::pyobject_to_string(py, &self.name)?;
         Ok(format!("$(param {})", name_str))
     }
 
     fn __repr__(&self, py: Python) -> String {
         let name_str =
-            Self::pyobject_to_string(&self.name, py).unwrap_or_else(|_| "<name>".to_string());
+            sub_utils::pyobject_to_string(py, &self.name).unwrap_or_else(|_| "<name>".to_string());
         format!("Parameter('{}')", name_str)
     }
 
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let name_str = Self::perform_obj(&self.name, py, context)?;
+        let name_str = sub_utils::perform_or_to_string(&self.name, py, context)?;
         Ok(format!("$(param {})", name_str))
-    }
-}
-
-impl Parameter {
-    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-        Ok(obj.to_string())
-    }
-
-    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-        Self::pyobject_to_string(obj, py)
     }
 }
 
@@ -1367,18 +1085,18 @@ impl BooleanSubstitution {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let val_str = Self::pyobject_to_string(&self.value, py)?;
+        let val_str = sub_utils::pyobject_to_string(py, &self.value)?;
         Ok(Self::to_boolean_string(&val_str))
     }
 
     fn __repr__(&self, py: Python) -> String {
-        let val_str =
-            Self::pyobject_to_string(&self.value, py).unwrap_or_else(|_| "<value>".to_string());
+        let val_str = sub_utils::pyobject_to_string(py, &self.value)
+            .unwrap_or_else(|_| "<value>".to_string());
         format!("BooleanSubstitution('{}')", val_str)
     }
 
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let val_str = Self::perform_obj(&self.value, py, context)?;
+        let val_str = sub_utils::perform_or_to_string(&self.value, py, context)?;
         Ok(Self::to_boolean_string(&val_str))
     }
 }
@@ -1391,28 +1109,6 @@ impl BooleanSubstitution {
             "false" | "0" | "no" | "off" | "" => "false".to_string(),
             _ => "true".to_string(), // Non-empty strings are truthy
         }
-    }
-
-    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-        Ok(obj.to_string())
-    }
-
-    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-        Self::pyobject_to_string(obj, py)
     }
 }
 
@@ -1439,44 +1135,20 @@ impl FindExecutable {
     }
 
     fn __str__(&self, py: Python) -> PyResult<String> {
-        let name_str = Self::pyobject_to_string(&self.name, py)?;
+        let name_str = sub_utils::pyobject_to_string(py, &self.name)?;
         // Return placeholder - can't actually search PATH in static analysis
         Ok(format!("$(find-executable {})", name_str))
     }
 
     fn __repr__(&self, py: Python) -> String {
         let name_str =
-            Self::pyobject_to_string(&self.name, py).unwrap_or_else(|_| "<name>".to_string());
+            sub_utils::pyobject_to_string(py, &self.name).unwrap_or_else(|_| "<name>".to_string());
         format!("FindExecutable('{}')", name_str)
     }
 
     fn perform(&self, py: Python, context: &PyAny) -> PyResult<String> {
-        let name_str = Self::perform_obj(&self.name, py, context)?;
+        let name_str = sub_utils::perform_or_to_string(&self.name, py, context)?;
         Ok(format!("$(find-executable {})", name_str))
-    }
-}
-
-impl FindExecutable {
-    fn pyobject_to_string(obj: &PyObject, py: Python) -> PyResult<String> {
-        if let Ok(s) = obj.extract::<String>(py) {
-            return Ok(s);
-        }
-        if let Ok(str_result) = obj.call_method0(py, "__str__") {
-            if let Ok(s) = str_result.extract::<String>(py) {
-                return Ok(s);
-            }
-        }
-        Ok(obj.to_string())
-    }
-
-    fn perform_obj(obj: &PyObject, py: Python, context: &PyAny) -> PyResult<String> {
-        let obj_ref = obj.as_ref(py);
-        if obj_ref.hasattr("perform")? {
-            if let Ok(result) = obj_ref.call_method1("perform", (context,)) {
-                return result.extract::<String>();
-            }
-        }
-        Self::pyobject_to_string(obj, py)
     }
 }
 

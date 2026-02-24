@@ -135,6 +135,9 @@ impl Substitution {
     }
 }
 
+/// Common ROS 2 distribution names, tried as fallback when `ROS_DISTRO` is unset.
+pub const KNOWN_ROS_DISTROS: &[&str] = &["jazzy", "iron", "humble", "galactic", "foxy"];
+
 /// Global package resolution cache
 ///
 /// Thread-safe, lock-free reads, bounded by actual ROS packages.
@@ -142,7 +145,7 @@ impl Substitution {
 static PACKAGE_CACHE: Lazy<DashMap<String, String>> = Lazy::new(DashMap::new);
 
 /// Find ROS 2 package share directory with caching
-fn find_package_share(package_name: &str) -> Option<String> {
+pub fn find_package_share(package_name: &str) -> Option<String> {
     // Fast path: Check cache (lock-free read)
     if let Some(entry) = PACKAGE_CACHE.get(package_name) {
         log::trace!("Package cache hit: {}", package_name);
@@ -170,7 +173,7 @@ fn find_package_share_uncached(package_name: &str) -> Option<String> {
     }
 
     // Fallback: Try common ROS 2 distributions
-    for distro in &["jazzy", "iron", "humble", "galactic", "foxy"] {
+    for distro in KNOWN_ROS_DISTROS {
         let share_path = format!("/opt/ros/{}/share/{}", distro, package_name);
         if std::path::Path::new(&share_path).exists() {
             return Some(share_path);
