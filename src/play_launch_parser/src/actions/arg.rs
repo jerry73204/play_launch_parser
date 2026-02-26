@@ -19,13 +19,13 @@ impl ArgAction {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         Ok(Self {
             name: entity
-                .get_attr("name", false)?
+                .required_attr("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "arg".to_string(),
                     attribute: "name".to_string(),
                 })?,
-            default: entity.get_attr("default", true)?,
-            description: entity.get_attr("description", true)?,
+            default: entity.optional_attr("default")?,
+            description: entity.optional_attr("description")?,
         })
     }
 

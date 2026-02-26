@@ -17,7 +17,7 @@ impl SetParameterAction {
     pub fn from_entity<E: Entity>(entity: &E) -> Result<Self> {
         let name =
             entity
-                .get_attr_str("name", true)?
+                .optional_attr_str("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "set_parameter".to_string(),
                     attribute: "name".to_string(),
@@ -25,7 +25,7 @@ impl SetParameterAction {
 
         let value_str =
             entity
-                .get_attr_str("value", true)?
+                .optional_attr_str("value")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "set_parameter".to_string(),
                     attribute: "value".to_string(),

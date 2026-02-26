@@ -28,7 +28,7 @@ impl NodeAction {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         let package =
             entity
-                .get_attr_str("pkg", false)?
+                .required_attr_str("pkg")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "node".to_string(),
                     attribute: "pkg".to_string(),
@@ -37,7 +37,7 @@ impl NodeAction {
 
         let executable =
             entity
-                .get_attr_str("exec", false)?
+                .required_attr_str("exec")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "node".to_string(),
                     attribute: "exec".to_string(),
@@ -45,12 +45,12 @@ impl NodeAction {
         let executable = parse_substitutions(&executable)?;
 
         let name = entity
-            .get_attr_str("name", true)?
+            .optional_attr_str("name")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
         let namespace = entity
-            .get_attr_str("namespace", true)?
+            .optional_attr_str("namespace")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
@@ -64,7 +64,7 @@ impl NodeAction {
             match child.type_name() {
                 "param" => {
                     // Check if this is a parameter file reference
-                    if let Some(from_attr) = child.get_attr_str("from", true)? {
+                    if let Some(from_attr) = child.optional_attr_str("from")? {
                         // This is a parameter file
                         param_files.push(parse_substitutions(&from_attr)?);
                     } else {
@@ -90,7 +90,7 @@ impl NodeAction {
 
         // Parse args attribute (command-line arguments before --ros-args)
         let args = entity
-            .get_attr_str("args", true)?
+            .optional_attr_str("args")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
@@ -104,13 +104,13 @@ impl NodeAction {
             remappings,
             environment,
             args,
-            output: entity.get_attr("output", true)?,
+            output: entity.optional_attr("output")?,
             respawn: entity
-                .get_attr_str("respawn", true)?
+                .optional_attr_str("respawn")?
                 .map(|s| parse_substitutions(&s))
                 .transpose()?,
             respawn_delay: entity
-                .get_attr_str("respawn_delay", true)?
+                .optional_attr_str("respawn_delay")?
                 .map(|s| parse_substitutions(&s))
                 .transpose()?,
         })
@@ -207,7 +207,7 @@ impl Parameter {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         let value_str: String =
             entity
-                .get_attr("value", false)?
+                .required_attr("value")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "param".to_string(),
                     attribute: "value".to_string(),
@@ -215,7 +215,7 @@ impl Parameter {
 
         Ok(Self {
             name: entity
-                .get_attr("name", false)?
+                .required_attr("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "param".to_string(),
                     attribute: "name".to_string(),
@@ -235,7 +235,7 @@ impl Remapping {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         let from_str: String =
             entity
-                .get_attr("from", false)?
+                .required_attr("from")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "remap".to_string(),
                     attribute: "from".to_string(),
@@ -243,7 +243,7 @@ impl Remapping {
 
         let to_str: String =
             entity
-                .get_attr("to", false)?
+                .required_attr("to")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "remap".to_string(),
                     attribute: "to".to_string(),
@@ -259,14 +259,14 @@ impl Remapping {
 fn parse_env(entity: &XmlEntity) -> Result<(String, String)> {
     let name: String =
         entity
-            .get_attr("name", false)?
+            .required_attr("name")?
             .ok_or_else(|| ParseError::MissingAttribute {
                 element: "env".to_string(),
                 attribute: "name".to_string(),
             })?;
     let value: String =
         entity
-            .get_attr("value", false)?
+            .required_attr("value")?
             .ok_or_else(|| ParseError::MissingAttribute {
                 element: "env".to_string(),
                 attribute: "value".to_string(),

@@ -89,7 +89,7 @@ impl LaunchTraverser {
                             .map(|s| s.to_string());
 
                         let default_expr = default_value
-                            .map(|d| parse_substitutions(d).map(Expr))
+                            .map(|d| parse_substitutions(d).map(Expr::new))
                             .transpose()?;
 
                         body.push(Action {
@@ -162,7 +162,7 @@ impl LaunchTraverser {
                             .as_ref()
                             .map(|d| parse_substitutions(d))
                             .transpose()?
-                            .map(Expr),
+                            .map(Expr::new),
                         description: arg.description.clone(),
                         choices: None,
                     },
@@ -200,7 +200,7 @@ impl LaunchTraverser {
                 actions.push(Action {
                     kind: ActionKind::DeclareArgument {
                         name: declare_arg.name,
-                        default: declare_arg.default.map(Expr),
+                        default: declare_arg.default.map(Expr::new),
                         description: declare_arg.description,
                         choices: declare_arg.choices,
                     },
@@ -226,7 +226,7 @@ impl LaunchTraverser {
                 actions.push(Action {
                     kind: ActionKind::SetVariable {
                         name: let_action.name,
-                        value: Expr(value_subs),
+                        value: Expr::new(value_subs),
                     },
                     condition,
                     span,
@@ -262,13 +262,13 @@ impl LaunchTraverser {
                 let body = self.build_ir_include(&include, current_file);
                 actions.push(Action {
                     kind: ActionKind::Include {
-                        file: Expr(include.file),
+                        file: Expr::new(include.file),
                         args: include
                             .args
                             .into_iter()
                             .map(|(name, value)| crate::ir::IncludeArg {
                                 name,
-                                value: Expr(value),
+                                value: Expr::new(value),
                             })
                             .collect(),
                         body,
@@ -298,7 +298,7 @@ impl LaunchTraverser {
 
                 actions.push(Action {
                     kind: ActionKind::Group {
-                        namespace: group.namespace.map(Expr),
+                        namespace: group.namespace.map(Expr::new),
                         body,
                     },
                     condition,
@@ -362,8 +362,8 @@ impl LaunchTraverser {
 
             "push-ros-namespace" => {
                 let ns_str = entity
-                    .get_attr_str("namespace", true)?
-                    .or_else(|| entity.get_attr_str("ns", true).ok().flatten())
+                    .optional_attr_str("namespace")?
+                    .or_else(|| entity.optional_attr_str("ns").ok().flatten())
                     .ok_or_else(|| ParseError::MissingAttribute {
                         element: "push-ros-namespace".to_string(),
                         attribute: "namespace or ns".to_string(),
@@ -379,7 +379,7 @@ impl LaunchTraverser {
                 let span = make_span(entity, current_file);
                 actions.push(Action {
                     kind: ActionKind::PushNamespace {
-                        namespace: Expr(ns_subs),
+                        namespace: Expr::new(ns_subs),
                     },
                     condition,
                     span,
@@ -532,13 +532,13 @@ impl LaunchTraverser {
 
 /// Extract `if`/`unless` condition from an XML entity without evaluating it.
 fn extract_condition(entity: &XmlEntity) -> Result<Option<Condition>> {
-    if let Some(if_str) = entity.get_attr_str("if", true)? {
+    if let Some(if_str) = entity.optional_attr_str("if")? {
         let subs = parse_substitutions(&if_str)?;
-        return Ok(Some(Condition::If(Expr(subs))));
+        return Ok(Some(Condition::If(Expr::new(subs))));
     }
-    if let Some(unless_str) = entity.get_attr_str("unless", true)? {
+    if let Some(unless_str) = entity.optional_attr_str("unless")? {
         let subs = parse_substitutions(&unless_str)?;
-        return Ok(Some(Condition::Unless(Expr(subs))));
+        return Ok(Some(Condition::Unless(Expr::new(subs))));
     }
     Ok(None)
 }

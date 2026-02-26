@@ -300,24 +300,24 @@ fn ir_to_node_action(kind: &ActionKind) -> NodeAction {
             respawn,
             respawn_delay,
         } => NodeAction {
-            package: package.0.clone(),
-            executable: executable.0.clone(),
-            name: name.as_ref().map(|n| n.0.clone()),
-            namespace: namespace.as_ref().map(|n| n.0.clone()),
+            package: package.parts.clone(),
+            executable: executable.parts.clone(),
+            name: name.as_ref().map(|n| n.parts.clone()),
+            namespace: namespace.as_ref().map(|n| n.parts.clone()),
             parameters: params
                 .iter()
                 .map(|p| crate::actions::node::Parameter {
                     name: p.name.clone(),
-                    value: p.value.0.clone(),
+                    value: p.value.parts.clone(),
                 })
                 .collect(),
-            param_files: param_files.iter().map(|pf| pf.0.clone()).collect(),
-            remappings: params_remaps_to_action(remaps),
+            param_files: param_files.iter().map(|pf| pf.parts.clone()).collect(),
+            remappings: remaps_to_action(remaps),
             environment: env_decls_to_pairs(env),
-            args: args.as_ref().map(|a| a.0.clone()),
+            args: args.as_ref().map(|a| a.parts.clone()),
             output: None,
-            respawn: respawn.as_ref().map(|r| r.0.clone()),
-            respawn_delay: respawn_delay.as_ref().map(|r| r.0.clone()),
+            respawn: respawn.as_ref().map(|r| r.parts.clone()),
+            respawn_delay: respawn_delay.as_ref().map(|r| r.parts.clone()),
         },
         _ => unreachable!("ir_to_node_action called with non-SpawnNode"),
     }
@@ -331,13 +331,13 @@ fn ir_to_executable_action(kind: &ActionKind) -> ExecutableAction {
             args,
             env,
         } => ExecutableAction {
-            cmd: cmd.0.clone(),
+            cmd: cmd.parts.clone(),
             cwd: None,
-            name: name.as_ref().map(|n| n.0.clone()),
+            name: name.as_ref().map(|n| n.parts.clone()),
             shell: false,
             output: None,
             environment: env_decls_to_pairs(env),
-            arguments: args.iter().map(|a| a.0.clone()).collect(),
+            arguments: args.iter().map(|a| a.parts.clone()).collect(),
         },
         _ => unreachable!("ir_to_executable_action called with non-SpawnExecutable"),
     }
@@ -356,11 +356,11 @@ fn ir_to_container_action(
             args,
             nodes,
         } => ContainerAction {
-            package: package.0.clone(),
-            executable: executable.0.clone(),
-            name: name.0.clone(),
-            namespace: namespace.as_ref().map(|n| n.0.clone()),
-            args: args.as_ref().map(|a| a.0.clone()),
+            package: package.parts.clone(),
+            executable: executable.parts.clone(),
+            name: name.parts.clone(),
+            namespace: namespace.as_ref().map(|n| n.parts.clone()),
+            args: args.as_ref().map(|a| a.parts.clone()),
             composable_nodes: nodes
                 .iter()
                 .map(|n| composable_decl_to_action(n, context))
@@ -376,7 +376,7 @@ fn ir_to_load_composable_node_action(
 ) -> LoadComposableNodeAction {
     match kind {
         ActionKind::LoadComposableNode { target, nodes } => LoadComposableNodeAction {
-            target: target.0.clone(),
+            target: target.parts.clone(),
             composable_nodes: nodes
                 .iter()
                 .map(|n| composable_decl_to_action(n, context))
@@ -419,22 +419,22 @@ fn composable_decl_to_action(
         .collect();
 
     ComposableNodeAction {
-        package: decl.package.0.clone(),
-        plugin: decl.plugin.0.clone(),
-        name: decl.name.0.clone(),
-        namespace: decl.namespace.as_ref().map(|n| n.0.clone()),
+        package: decl.package.parts.clone(),
+        plugin: decl.plugin.parts.clone(),
+        name: decl.name.parts.clone(),
+        namespace: decl.namespace.as_ref().map(|n| n.parts.clone()),
         parameters,
         remappings,
         extra_args: decl.extra_args.iter().cloned().collect(),
     }
 }
 
-fn params_remaps_to_action(remaps: &[RemapDecl]) -> Vec<crate::actions::node::Remapping> {
+fn remaps_to_action(remaps: &[RemapDecl]) -> Vec<crate::actions::node::Remapping> {
     remaps
         .iter()
         .map(|r| crate::actions::node::Remapping {
-            from: r.from.0.clone(),
-            to: r.to.0.clone(),
+            from: r.from.parts.clone(),
+            to: r.to.parts.clone(),
         })
         .collect()
 }

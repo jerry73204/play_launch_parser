@@ -8,8 +8,18 @@ pub trait Entity {
     /// Get entity type name (e.g., "node", "arg")
     fn type_name(&self) -> &str;
 
-    /// Get attribute as string
-    fn get_attr_str(&self, name: &str, optional: bool) -> Result<Option<String>>;
+    /// Get attribute as string (internal implementation point)
+    fn get_attr_str_impl(&self, name: &str, optional: bool) -> Result<Option<String>>;
+
+    /// Get a required attribute as string. Returns error if missing.
+    fn required_attr_str(&self, name: &str) -> Result<Option<String>> {
+        self.get_attr_str_impl(name, false)
+    }
+
+    /// Get an optional attribute as string. Returns `Ok(None)` if missing.
+    fn optional_attr_str(&self, name: &str) -> Result<Option<String>> {
+        self.get_attr_str_impl(name, true)
+    }
 
     /// Get all attributes as key-value pairs
     fn attributes(&self) -> Vec<(&str, &str)>;
@@ -20,9 +30,24 @@ pub trait Entity {
 
 /// Extension trait for type-aware attribute access
 pub trait EntityExt: Entity {
-    /// Get attribute value with type coercion
-    fn get_attr<T: FromStr>(&self, name: &str, optional: bool) -> Result<Option<T>> {
-        match self.get_attr_str(name, optional)? {
+    /// Get a required attribute with type coercion. Returns error if missing or unparseable.
+    fn required_attr<T: FromStr>(&self, name: &str) -> Result<Option<T>> {
+        match self.get_attr_str_impl(name, false)? {
+            Some(value) => {
+                let parsed = value.parse::<T>().map_err(|_| ParseError::TypeCoercion {
+                    attribute: name.to_string(),
+                    value: value.to_string(),
+                    expected_type: std::any::type_name::<T>(),
+                })?;
+                Ok(Some(parsed))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get an optional attribute with type coercion. Returns `Ok(None)` if missing.
+    fn optional_attr<T: FromStr>(&self, name: &str) -> Result<Option<T>> {
+        match self.get_attr_str_impl(name, true)? {
             Some(value) => {
                 let parsed = value.parse::<T>().map_err(|_| ParseError::TypeCoercion {
                     attribute: name.to_string(),
@@ -63,7 +88,7 @@ impl<'a, 'input> Entity for XmlEntity<'a, 'input> {
         self.node.tag_name().name()
     }
 
-    fn get_attr_str(&self, name: &str, optional: bool) -> Result<Option<String>> {
+    fn get_attr_str_impl(&self, name: &str, optional: bool) -> Result<Option<String>> {
         match self.node.attribute(name) {
             Some(value) => Ok(Some(value.to_string())),
             None if optional => Ok(None),

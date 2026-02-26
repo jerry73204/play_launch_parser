@@ -44,13 +44,13 @@ mod tests {
         let root = XmlEntity::new(doc.root_element());
         assert_eq!(root.type_name(), "node");
 
-        let pkg: String = root.get_attr("pkg", false).unwrap().unwrap();
+        let pkg: String = root.required_attr("pkg").unwrap().unwrap();
         assert_eq!(pkg, "demo_nodes_cpp");
 
-        let exec: String = root.get_attr("exec", false).unwrap().unwrap();
+        let exec: String = root.required_attr("exec").unwrap().unwrap();
         assert_eq!(exec, "talker");
 
-        let name: String = root.get_attr("name", false).unwrap().unwrap();
+        let name: String = root.required_attr("name").unwrap().unwrap();
         assert_eq!(name, "my_talker");
     }
 
@@ -60,7 +60,7 @@ mod tests {
 
         let doc = roxmltree::Document::parse(xml).unwrap();
         let root = XmlEntity::new(doc.root_element());
-        let result: crate::error::Result<Option<String>> = root.get_attr("pkg", false);
+        let result: crate::error::Result<Option<String>> = root.required_attr("pkg");
         assert!(result.is_err());
     }
 
@@ -70,7 +70,7 @@ mod tests {
 
         let doc = roxmltree::Document::parse(xml).unwrap();
         let root = XmlEntity::new(doc.root_element());
-        let name: Option<String> = root.get_attr("name", true).unwrap();
+        let name: Option<String> = root.optional_attr("name").unwrap();
         assert!(name.is_none());
     }
 
@@ -80,7 +80,7 @@ mod tests {
 
         let doc = roxmltree::Document::parse(xml).unwrap();
         let root = XmlEntity::new(doc.root_element());
-        let respawn: bool = root.get_attr("respawn", false).unwrap().unwrap();
+        let respawn: bool = root.required_attr("respawn").unwrap().unwrap();
         assert!(respawn);
     }
 }

@@ -15,13 +15,13 @@ pub struct LetAction {
 impl LetAction {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         Ok(Self {
-            name: entity.get_attr_str("name", false)?.ok_or_else(|| {
+            name: entity.required_attr_str("name")?.ok_or_else(|| {
                 ParseError::MissingAttribute {
                     element: "let".to_string(),
                     attribute: "name".to_string(),
                 }
             })?,
-            value: entity.get_attr_str("value", false)?.ok_or_else(|| {
+            value: entity.required_attr_str("value")?.ok_or_else(|| {
                 ParseError::MissingAttribute {
                     element: "let".to_string(),
                     attribute: "value".to_string(),

@@ -10,23 +10,33 @@ use std::path::PathBuf;
 /// A lazy string expression (unevaluated substitution chain).
 /// Evaluate with a `LaunchContext` to resolve to a concrete string.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Expr(pub Vec<Substitution>);
+pub struct Expr {
+    /// The substitution parts that make up this expression.
+    pub parts: Vec<Substitution>,
+}
 
 impl Expr {
+    /// Create an `Expr` from substitution parts.
+    pub fn new(parts: Vec<Substitution>) -> Self {
+        Self { parts }
+    }
+
     /// Create an `Expr` from a literal string (no substitutions).
     pub fn literal(s: impl Into<String>) -> Self {
-        Expr(vec![Substitution::Text(s.into())])
+        Self {
+            parts: vec![Substitution::Text(s.into())],
+        }
     }
 
     /// Returns `true` if this expression is a single literal text with no substitutions.
     pub fn is_literal(&self) -> bool {
-        self.0.len() == 1 && matches!(&self.0[0], Substitution::Text(_))
+        self.parts.len() == 1 && matches!(&self.parts[0], Substitution::Text(_))
     }
 
     /// If this expression is a literal, return its value.
     pub fn as_literal(&self) -> Option<&str> {
-        if self.0.len() == 1 {
-            if let Substitution::Text(s) = &self.0[0] {
+        if self.parts.len() == 1 {
+            if let Substitution::Text(s) = &self.parts[0] {
                 return Some(s.as_str());
             }
         }
@@ -38,13 +48,13 @@ impl Expr {
         &self,
         context: &LaunchContext,
     ) -> Result<String, crate::error::SubstitutionError> {
-        resolve_substitutions(&self.0, context)
+        resolve_substitutions(&self.parts, context)
     }
 }
 
 impl From<Vec<Substitution>> for Expr {
-    fn from(subs: Vec<Substitution>) -> Self {
-        Expr(subs)
+    fn from(parts: Vec<Substitution>) -> Self {
+        Self { parts }
     }
 }
 

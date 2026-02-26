@@ -63,7 +63,7 @@ impl ContainerAction {
         // Get container name — parse only, don't resolve
         let name_str =
             entity
-                .get_attr_str("name", false)?
+                .required_attr_str("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "node_container".to_string(),
                     attribute: "name".to_string(),
@@ -71,14 +71,14 @@ impl ContainerAction {
         let name = parse_substitutions(&name_str)?;
 
         // Get package (defaults to "rclcpp_components" if not specified)
-        let package = if let Some(pkg_str) = entity.get_attr_str("pkg", true)? {
+        let package = if let Some(pkg_str) = entity.optional_attr_str("pkg")? {
             parse_substitutions(&pkg_str)?
         } else {
             vec![Substitution::Text("rclcpp_components".to_string())]
         };
 
         // Get executable (defaults to "component_container" if not specified)
-        let executable = if let Some(exec_str) = entity.get_attr_str("exec", true)? {
+        let executable = if let Some(exec_str) = entity.optional_attr_str("exec")? {
             parse_substitutions(&exec_str)?
         } else {
             vec![Substitution::Text("component_container".to_string())]
@@ -86,12 +86,12 @@ impl ContainerAction {
 
         // Get namespace — parse only, resolve at use site
         let namespace = entity
-            .get_attr_str("namespace", true)?
+            .optional_attr_str("namespace")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
         // Parse args attribute (command-line arguments before --ros-args)
-        let args_raw = entity.get_attr_str("args", true)?;
+        let args_raw = entity.optional_attr_str("args")?;
         log::debug!(
             "Container args_raw={:?}, all attrs={:?}",
             args_raw,
@@ -289,7 +289,7 @@ impl ComposableNodeAction {
         // Get required attributes — parse only, don't resolve
         let package_str =
             entity
-                .get_attr_str("pkg", false)?
+                .required_attr_str("pkg")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "composable_node".to_string(),
                     attribute: "pkg".to_string(),
@@ -298,7 +298,7 @@ impl ComposableNodeAction {
 
         let plugin_str =
             entity
-                .get_attr_str("plugin", false)?
+                .required_attr_str("plugin")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "composable_node".to_string(),
                     attribute: "plugin".to_string(),
@@ -308,7 +308,7 @@ impl ComposableNodeAction {
         // Get name (required for composable nodes) — parse only
         let name_str =
             entity
-                .get_attr_str("name", false)?
+                .required_attr_str("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "composable_node".to_string(),
                     attribute: "name".to_string(),
@@ -317,7 +317,7 @@ impl ComposableNodeAction {
 
         // Get optional namespace — parse only
         let namespace = entity
-            .get_attr_str("namespace", true)?
+            .optional_attr_str("namespace")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
@@ -330,7 +330,7 @@ impl ComposableNodeAction {
             match child.type_name() {
                 "param" => {
                     // Check if this is a parameter file reference
-                    if let Some(from_attr) = child.get_attr_str("from", true)? {
+                    if let Some(from_attr) = child.optional_attr_str("from")? {
                         // This is a parameter file - resolve path and load YAML
                         let from_parsed = parse_substitutions(&from_attr)?;
                         let from_resolved = resolve_substitutions(&from_parsed, context)
@@ -364,13 +364,13 @@ impl ComposableNodeAction {
                         }
                     } else {
                         // This is an inline parameter
-                        let name = child.get_attr_str("name", false)?.ok_or_else(|| {
+                        let name = child.required_attr_str("name")?.ok_or_else(|| {
                             ParseError::MissingAttribute {
                                 element: "param".to_string(),
                                 attribute: "name".to_string(),
                             }
                         })?;
-                        let value = child.get_attr_str("value", false)?.ok_or_else(|| {
+                        let value = child.required_attr_str("value")?.ok_or_else(|| {
                             ParseError::MissingAttribute {
                                 element: "param".to_string(),
                                 attribute: "value".to_string(),
@@ -386,13 +386,13 @@ impl ComposableNodeAction {
                     }
                 }
                 "remap" => {
-                    let from = child.get_attr_str("from", false)?.ok_or_else(|| {
+                    let from = child.required_attr_str("from")?.ok_or_else(|| {
                         ParseError::MissingAttribute {
                             element: "remap".to_string(),
                             attribute: "from".to_string(),
                         }
                     })?;
-                    let to = child.get_attr_str("to", false)?.ok_or_else(|| {
+                    let to = child.required_attr_str("to")?.ok_or_else(|| {
                         ParseError::MissingAttribute {
                             element: "remap".to_string(),
                             attribute: "to".to_string(),

@@ -166,10 +166,10 @@ impl LaunchTraverser {
                 // Try "namespace" attribute first (Autoware/ROS 2 standard),
                 // then fall back to "ns" for backwards compatibility
                 let ns_str = entity
-                    .get_attr_str("namespace", false)
+                    .required_attr_str("namespace")
                     .ok()
                     .flatten()
-                    .or_else(|| entity.get_attr_str("ns", false).ok().flatten())
+                    .or_else(|| entity.required_attr_str("ns").ok().flatten())
                     .ok_or_else(|| ParseError::MissingAttribute {
                         element: "push-ros-namespace".to_string(),
                         attribute: "namespace or ns".to_string(),

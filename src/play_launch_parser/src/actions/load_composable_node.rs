@@ -23,7 +23,7 @@ impl LoadComposableNodeAction {
         // Get target attribute (container name/reference)
         let target_str =
             entity
-                .get_attr_str("target", false)?
+                .required_attr_str("target")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "load_composable_node".to_string(),
                     attribute: "target".to_string(),

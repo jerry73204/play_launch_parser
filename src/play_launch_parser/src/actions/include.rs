@@ -19,7 +19,7 @@ impl IncludeAction {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         let file_str =
             entity
-                .get_attr_str("file", false)?
+                .required_attr_str("file")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "include".to_string(),
                     attribute: "file".to_string(),
@@ -33,18 +33,19 @@ impl IncludeAction {
             if child.type_name() == "arg" {
                 let name: String =
                     child
-                        .get_attr("name", false)?
+                        .required_attr("name")?
                         .ok_or_else(|| ParseError::MissingAttribute {
                             element: "arg".to_string(),
                             attribute: "name".to_string(),
                         })?;
 
-                let value_str: String = child.get_attr("value", false)?.ok_or_else(|| {
-                    ParseError::MissingAttribute {
-                        element: "arg".to_string(),
-                        attribute: "value".to_string(),
-                    }
-                })?;
+                let value_str: String =
+                    child
+                        .required_attr("value")?
+                        .ok_or_else(|| ParseError::MissingAttribute {
+                            element: "arg".to_string(),
+                            attribute: "value".to_string(),
+                        })?;
 
                 let value = parse_substitutions(&value_str)?;
                 args.push((name, value));

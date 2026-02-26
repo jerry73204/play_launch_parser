@@ -15,7 +15,7 @@ pub struct GroupAction {
 impl GroupAction {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         let namespace = entity
-            .get_attr_str("ns", true)?
+            .optional_attr_str("ns")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 

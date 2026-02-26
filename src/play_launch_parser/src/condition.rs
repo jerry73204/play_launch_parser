@@ -9,7 +9,7 @@ use crate::{
 /// Evaluate whether an entity should be processed based on if/unless conditions
 pub fn should_process_entity(entity: &XmlEntity, context: &LaunchContext) -> Result<bool> {
     // Check "if" attribute
-    if let Some(if_condition) = entity.get_attr_str("if", true)? {
+    if let Some(if_condition) = entity.optional_attr_str("if")? {
         let result = evaluate_condition(&if_condition, context)?;
         if !result {
             return Ok(false);
@@ -17,7 +17,7 @@ pub fn should_process_entity(entity: &XmlEntity, context: &LaunchContext) -> Res
     }
 
     // Check "unless" attribute
-    if let Some(unless_condition) = entity.get_attr_str("unless", true)? {
+    if let Some(unless_condition) = entity.optional_attr_str("unless")? {
         let result = evaluate_condition(&unless_condition, context)?;
         if result {
             return Ok(false);

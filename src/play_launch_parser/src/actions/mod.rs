@@ -33,25 +33,25 @@ use crate::ir::{ActionKind, ComposableNodeDecl, EnvDecl, Expr, IncludeArg, Param
 impl From<NodeAction> for ActionKind {
     fn from(node: NodeAction) -> Self {
         ActionKind::SpawnNode {
-            package: Expr(node.package),
-            executable: Expr(node.executable),
-            name: node.name.map(Expr),
-            namespace: node.namespace.map(Expr),
+            package: Expr::new(node.package),
+            executable: Expr::new(node.executable),
+            name: node.name.map(Expr::new),
+            namespace: node.namespace.map(Expr::new),
             params: node
                 .parameters
                 .into_iter()
                 .map(|p| ParamDecl {
                     name: p.name,
-                    value: Expr(p.value),
+                    value: Expr::new(p.value),
                 })
                 .collect(),
-            param_files: node.param_files.into_iter().map(Expr).collect(),
+            param_files: node.param_files.into_iter().map(Expr::new).collect(),
             remaps: node
                 .remappings
                 .into_iter()
                 .map(|r| RemapDecl {
-                    from: Expr(r.from),
-                    to: Expr(r.to),
+                    from: Expr::new(r.from),
+                    to: Expr::new(r.to),
                 })
                 .collect(),
             env: node
@@ -62,9 +62,9 @@ impl From<NodeAction> for ActionKind {
                     value: Expr::literal(v),
                 })
                 .collect(),
-            args: node.args.map(Expr),
-            respawn: node.respawn.map(Expr),
-            respawn_delay: node.respawn_delay.map(Expr),
+            args: node.args.map(Expr::new),
+            respawn: node.respawn.map(Expr::new),
+            respawn_delay: node.respawn_delay.map(Expr::new),
         }
     }
 }
@@ -72,9 +72,9 @@ impl From<NodeAction> for ActionKind {
 impl From<ExecutableAction> for ActionKind {
     fn from(exec: ExecutableAction) -> Self {
         ActionKind::SpawnExecutable {
-            cmd: Expr(exec.cmd),
-            name: exec.name.map(Expr),
-            args: exec.arguments.into_iter().map(Expr).collect(),
+            cmd: Expr::new(exec.cmd),
+            name: exec.name.map(Expr::new),
+            args: exec.arguments.into_iter().map(Expr::new).collect(),
             env: exec
                 .environment
                 .into_iter()
@@ -90,11 +90,11 @@ impl From<ExecutableAction> for ActionKind {
 impl From<ContainerAction> for ActionKind {
     fn from(c: ContainerAction) -> Self {
         ActionKind::SpawnContainer {
-            package: Expr(c.package),
-            executable: Expr(c.executable),
-            name: Expr(c.name),
-            namespace: c.namespace.map(Expr),
-            args: c.args.map(Expr),
+            package: Expr::new(c.package),
+            executable: Expr::new(c.executable),
+            name: Expr::new(c.name),
+            namespace: c.namespace.map(Expr::new),
+            args: c.args.map(Expr::new),
             nodes: c.composable_nodes.into_iter().map(Into::into).collect(),
         }
     }
@@ -103,10 +103,10 @@ impl From<ContainerAction> for ActionKind {
 impl From<ComposableNodeAction> for ComposableNodeDecl {
     fn from(n: ComposableNodeAction) -> Self {
         ComposableNodeDecl {
-            package: Expr(n.package),
-            plugin: Expr(n.plugin),
-            name: Expr(n.name),
-            namespace: n.namespace.map(Expr),
+            package: Expr::new(n.package),
+            plugin: Expr::new(n.plugin),
+            name: Expr::new(n.name),
+            namespace: n.namespace.map(Expr::new),
             params: n
                 .parameters
                 .into_iter()
@@ -133,7 +133,7 @@ impl From<ComposableNodeAction> for ComposableNodeDecl {
 impl From<LoadComposableNodeAction> for ActionKind {
     fn from(l: LoadComposableNodeAction) -> Self {
         ActionKind::LoadComposableNode {
-            target: Expr(l.target),
+            target: Expr::new(l.target),
             nodes: l.composable_nodes.into_iter().map(Into::into).collect(),
         }
     }
@@ -142,13 +142,13 @@ impl From<LoadComposableNodeAction> for ActionKind {
 impl From<IncludeAction> for ActionKind {
     fn from(inc: IncludeAction) -> Self {
         ActionKind::Include {
-            file: Expr(inc.file),
+            file: Expr::new(inc.file),
             args: inc
                 .args
                 .into_iter()
                 .map(|(name, value)| IncludeArg {
                     name,
-                    value: Expr(value),
+                    value: Expr::new(value),
                 })
                 .collect(),
             body: None,
@@ -160,7 +160,7 @@ impl From<SetEnvAction> for ActionKind {
     fn from(a: SetEnvAction) -> Self {
         ActionKind::SetEnv {
             name: a.name,
-            value: Expr(a.value),
+            value: Expr::new(a.value),
         }
     }
 }
@@ -175,7 +175,7 @@ impl From<SetParameterAction> for ActionKind {
     fn from(a: SetParameterAction) -> Self {
         ActionKind::SetParameter {
             name: a.name,
-            value: Expr(a.value),
+            value: Expr::new(a.value),
         }
     }
 }
@@ -183,8 +183,8 @@ impl From<SetParameterAction> for ActionKind {
 impl From<SetRemapAction> for ActionKind {
     fn from(a: SetRemapAction) -> Self {
         ActionKind::SetRemap {
-            from: Expr(a.from),
-            to: Expr(a.to),
+            from: Expr::new(a.from),
+            to: Expr::new(a.to),
         }
     }
 }
@@ -192,7 +192,7 @@ impl From<SetRemapAction> for ActionKind {
 impl From<GroupAction> for ActionKind {
     fn from(g: GroupAction) -> Self {
         ActionKind::Group {
-            namespace: g.namespace.map(Expr),
+            namespace: g.namespace.map(Expr::new),
             body: Vec::new(),
         }
     }

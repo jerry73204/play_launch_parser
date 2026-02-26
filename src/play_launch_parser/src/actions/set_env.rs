@@ -17,7 +17,7 @@ impl SetEnvAction {
     pub fn from_entity<E: Entity>(entity: &E) -> Result<Self> {
         let name =
             entity
-                .get_attr_str("name", true)?
+                .optional_attr_str("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "set_env".to_string(),
                     attribute: "name".to_string(),
@@ -25,7 +25,7 @@ impl SetEnvAction {
 
         let value_str =
             entity
-                .get_attr_str("value", true)?
+                .optional_attr_str("value")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "set_env".to_string(),
                     attribute: "value".to_string(),
@@ -47,7 +47,7 @@ impl UnsetEnvAction {
     pub fn from_entity<E: Entity>(entity: &E) -> Result<Self> {
         let name =
             entity
-                .get_attr_str("name", true)?
+                .optional_attr_str("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "unset_env".to_string(),
                     attribute: "name".to_string(),

@@ -20,7 +20,7 @@ impl SetRemapAction {
     pub fn from_entity<E: Entity>(entity: &E) -> Result<Self> {
         let from_str =
             entity
-                .get_attr_str("from", true)?
+                .optional_attr_str("from")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "set_remap".to_string(),
                     attribute: "from".to_string(),
@@ -28,7 +28,7 @@ impl SetRemapAction {
 
         let to_str =
             entity
-                .get_attr_str("to", true)?
+                .optional_attr_str("to")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "set_remap".to_string(),
                     attribute: "to".to_string(),

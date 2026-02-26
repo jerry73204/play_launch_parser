@@ -23,7 +23,7 @@ impl ExecutableAction {
     pub fn from_entity(entity: &XmlEntity) -> Result<Self> {
         let cmd_str =
             entity
-                .get_attr_str("cmd", false)?
+                .required_attr_str("cmd")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "executable".to_string(),
                     attribute: "cmd".to_string(),
@@ -31,17 +31,17 @@ impl ExecutableAction {
         let cmd = parse_substitutions(&cmd_str)?;
 
         let cwd = entity
-            .get_attr_str("cwd", true)?
+            .optional_attr_str("cwd")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
         let name = entity
-            .get_attr_str("name", true)?
+            .optional_attr_str("name")?
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
-        let shell: bool = entity.get_attr("shell", true)?.unwrap_or(false);
-        let output: Option<String> = entity.get_attr("output", true)?;
+        let shell: bool = entity.optional_attr("shell")?.unwrap_or(false);
+        let output: Option<String> = entity.optional_attr("output")?;
 
         // Parse child elements (env and arg)
         let mut environment = Vec::new();
@@ -50,13 +50,13 @@ impl ExecutableAction {
         for child in entity.children() {
             match child.type_name() {
                 "env" => {
-                    let name: String = child.get_attr_str("name", false)?.ok_or_else(|| {
+                    let name: String = child.required_attr_str("name")?.ok_or_else(|| {
                         ParseError::MissingAttribute {
                             element: "env".to_string(),
                             attribute: "name".to_string(),
                         }
                     })?;
-                    let value: String = child.get_attr_str("value", false)?.ok_or_else(|| {
+                    let value: String = child.required_attr_str("value")?.ok_or_else(|| {
                         ParseError::MissingAttribute {
                             element: "env".to_string(),
                             attribute: "value".to_string(),
@@ -65,13 +65,12 @@ impl ExecutableAction {
                     environment.push((name, value));
                 }
                 "arg" => {
-                    let value_str: String =
-                        child.get_attr_str("value", false)?.ok_or_else(|| {
-                            ParseError::MissingAttribute {
-                                element: "arg".to_string(),
-                                attribute: "value".to_string(),
-                            }
-                        })?;
+                    let value_str: String = child.required_attr_str("value")?.ok_or_else(|| {
+                        ParseError::MissingAttribute {
+                            element: "arg".to_string(),
+                            attribute: "value".to_string(),
+                        }
+                    })?;
                     arguments.push(parse_substitutions(&value_str)?);
                 }
                 other => {

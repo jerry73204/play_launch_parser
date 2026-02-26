@@ -19,22 +19,22 @@ impl DeclareArgumentAction {
     pub fn from_entity<E: Entity>(entity: &E) -> Result<Self> {
         let name =
             entity
-                .get_attr_str("name", true)?
+                .optional_attr_str("name")?
                 .ok_or_else(|| ParseError::MissingAttribute {
                     element: "declare_argument".to_string(),
                     attribute: "name".to_string(),
                 })?;
 
-        let default = if let Some(default_str) = entity.get_attr_str("default", true)? {
+        let default = if let Some(default_str) = entity.optional_attr_str("default")? {
             Some(parse_substitutions(&default_str)?)
         } else {
             None
         };
 
-        let description = entity.get_attr_str("description", true)?;
+        let description = entity.optional_attr_str("description")?;
 
         // Parse choices if present (comma-separated string)
-        let choices = entity.get_attr_str("choices", true)?.map(|choices_str| {
+        let choices = entity.optional_attr_str("choices")?.map(|choices_str| {
             choices_str
                 .split(',')
                 .map(|s| s.trim().to_string())

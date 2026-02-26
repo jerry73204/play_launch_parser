@@ -73,7 +73,7 @@ fn test_ir_conditional_branches() {
         Some(Condition::If(expr)) => {
             // Should contain a LaunchConfiguration substitution
             assert!(
-                expr.0
+                expr.parts
                     .iter()
                     .any(|s| matches!(s, Substitution::LaunchConfiguration(_))),
                 "If condition should contain LaunchConfiguration"
@@ -92,7 +92,7 @@ fn test_ir_conditional_branches() {
     match &program.body[2].condition {
         Some(Condition::Unless(expr)) => {
             assert!(
-                expr.0
+                expr.parts
                     .iter()
                     .any(|s| matches!(s, Substitution::LaunchConfiguration(_))),
                 "Unless condition should contain LaunchConfiguration"
@@ -157,7 +157,7 @@ fn test_ir_variable_expressions() {
             // Should contain at least a LaunchConfiguration substitution
             assert!(
                 name_expr
-                    .0
+                    .parts
                     .iter()
                     .any(|s| matches!(s, Substitution::LaunchConfiguration(_))),
                 "Name should contain LaunchConfiguration"
@@ -194,7 +194,7 @@ fn test_ir_let_and_arg() {
             // Value should contain substitutions
             assert!(
                 value
-                    .0
+                    .parts
                     .iter()
                     .any(|s| matches!(s, Substitution::LaunchConfiguration(_))),
                 "Let value should contain LaunchConfiguration"
