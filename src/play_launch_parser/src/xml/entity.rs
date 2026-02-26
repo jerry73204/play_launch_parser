@@ -59,18 +59,10 @@ pub trait EntityExt: Entity {
             None => Ok(None),
         }
     }
-
-    /// Get child entities (must be implemented per entity type)
-    fn children(&self) -> Vec<&dyn Entity>;
 }
 
 // Blanket implementation for all Entity types
-impl<T: Entity + ?Sized> EntityExt for T {
-    fn children(&self) -> Vec<&dyn Entity> {
-        // Default: no children
-        Vec::new()
-    }
-}
+impl<T: Entity + ?Sized> EntityExt for T {}
 
 /// XML entity implementation wrapping roxmltree::Node
 pub struct XmlEntity<'a, 'input> {
