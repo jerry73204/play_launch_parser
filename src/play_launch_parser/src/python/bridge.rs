@@ -1,6 +1,7 @@
 //! Bridge between Python and Rust types
 
 use crate::{
+    actions::container::{DEFAULT_CONTAINER_EXECUTABLE, DEFAULT_CONTAINER_PACKAGE},
     captures::{ContainerCapture, IncludeCapture, LoadNodeCapture, NodeCapture},
     error::Result,
     record::{ComposableNodeContainerRecord, LoadNodeRecord, NodeRecord},
@@ -135,11 +136,11 @@ impl ContainerCapture {
         let package = self
             .package
             .clone()
-            .unwrap_or_else(|| "rclcpp_components".to_string());
+            .unwrap_or_else(|| DEFAULT_CONTAINER_PACKAGE.to_string());
         let executable = self
             .executable
             .clone()
-            .unwrap_or_else(|| "component_container".to_string());
+            .unwrap_or_else(|| DEFAULT_CONTAINER_EXECUTABLE.to_string());
 
         // Generate command if not provided
         let cmd = if self.cmd.is_empty() {

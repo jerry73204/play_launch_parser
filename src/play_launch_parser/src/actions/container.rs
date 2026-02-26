@@ -9,6 +9,11 @@ use crate::{
 };
 use std::{collections::HashMap, path::Path};
 
+/// Default ROS 2 package for component containers.
+pub const DEFAULT_CONTAINER_PACKAGE: &str = "rclcpp_components";
+/// Default ROS 2 executable for component containers.
+pub const DEFAULT_CONTAINER_EXECUTABLE: &str = "component_container";
+
 /// Container action representing a composable node container
 #[derive(Debug, Clone)]
 pub struct ContainerAction {
@@ -70,18 +75,18 @@ impl ContainerAction {
                 })?;
         let name = parse_substitutions(&name_str)?;
 
-        // Get package (defaults to "rclcpp_components" if not specified)
+        // Get package (defaults to DEFAULT_CONTAINER_PACKAGE if not specified)
         let package = if let Some(pkg_str) = entity.optional_attr_str("pkg")? {
             parse_substitutions(&pkg_str)?
         } else {
-            vec![Substitution::Text("rclcpp_components".to_string())]
+            vec![Substitution::Text(DEFAULT_CONTAINER_PACKAGE.to_string())]
         };
 
-        // Get executable (defaults to "component_container" if not specified)
+        // Get executable (defaults to DEFAULT_CONTAINER_EXECUTABLE if not specified)
         let executable = if let Some(exec_str) = entity.optional_attr_str("exec")? {
             parse_substitutions(&exec_str)?
         } else {
-            vec![Substitution::Text("component_container".to_string())]
+            vec![Substitution::Text(DEFAULT_CONTAINER_EXECUTABLE.to_string())]
         };
 
         // Get namespace — parse only, resolve at use site
