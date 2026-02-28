@@ -41,6 +41,7 @@ impl OpaqueFunction {
             // This allows OpaqueFunction code to call LaunchConfiguration().perform(context)
             use crate::python::bridge::{get_current_ros_namespace, with_launch_context};
             let configs = with_launch_context(|ctx| ctx.configurations());
+            let global_params = with_launch_context(|ctx| ctx.global_parameters());
             let ros_namespace = get_current_ros_namespace();
 
             log::debug!("OpaqueFunction context: ros_namespace='{}'", ros_namespace);
@@ -128,6 +129,37 @@ context = MockLaunchContext(launch_configurations, ros_namespace, resolve_substi
             for (key, value) in configs {
                 configs_dict.set_item(key, value)?;
             }
+
+            // Include global parameters (from SetParameter actions) as 'global_params'
+            // Real ROS 2 SetParameter.execute() stores params as
+            // context.launch_configurations['global_params'] = [(name, value), ...]
+            // Autoware code accesses: dict(context.launch_configurations.get("global_params", {}))
+            if !global_params.is_empty() {
+                let gp_list = pyo3::types::PyList::empty(py);
+                for (name, value_str) in &global_params {
+                    let py_value: PyObject = if let Ok(f) = value_str.parse::<f64>() {
+                        if !value_str.contains('.') {
+                            if let Ok(i) = value_str.parse::<i64>() {
+                                i.into_py(py)
+                            } else {
+                                f.into_py(py)
+                            }
+                        } else {
+                            f.into_py(py)
+                        }
+                    } else if value_str == "True" || value_str == "true" {
+                        true.into_py(py)
+                    } else if value_str == "False" || value_str == "false" {
+                        false.into_py(py)
+                    } else {
+                        value_str.into_py(py)
+                    };
+                    let tuple = pyo3::types::PyTuple::new(py, [name.into_py(py), py_value]);
+                    gp_list.append(tuple)?;
+                }
+                configs_dict.set_item("global_params", gp_list)?;
+            }
+
             namespace.set_item("launch_configurations", configs_dict)?;
 
             // Add ros_namespace to namespace

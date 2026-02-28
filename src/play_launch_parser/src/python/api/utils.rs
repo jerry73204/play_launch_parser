@@ -4,15 +4,19 @@
 //! Python types and Rust types, particularly for handling ROS 2's
 //! SomeSubstitutionsType pattern.
 
-use pyo3::{prelude::*, types::PyDict};
+use pyo3::{
+    prelude::*,
+    types::{PyDict, PyList, PyTuple},
+};
 
 /// Create a LaunchContext-like Python object with access to launch configurations
 /// This allows substitutions to resolve LaunchConfiguration values during perform()
 pub fn create_launch_context(py: Python) -> PyResult<PyObject> {
     use crate::python::bridge::with_launch_context;
 
-    // Get resolved configurations from the thread-local LaunchContext
+    // Get resolved configurations and global parameters from the thread-local LaunchContext
     let configs = with_launch_context(|ctx| ctx.configurations());
+    let global_params = with_launch_context(|ctx| ctx.global_parameters());
 
     // Create a simple context object that has a launch_configurations dict
     let context_class = py.eval(
@@ -28,6 +32,39 @@ pub fn create_launch_context(py: Python) -> PyResult<PyObject> {
     let py_configs = PyDict::new(py);
     for (key, value) in &configs {
         py_configs.set_item(key, value)?;
+    }
+
+    // Include global parameters (from SetParameter actions) as 'global_params'
+    // This matches real ROS 2 behavior: SetParameter.execute() stores parameters
+    // as context.launch_configurations['global_params'] = [(name, value), ...]
+    // Autoware code accesses them as: dict(context.launch_configurations.get("global_params", {}))
+    if !global_params.is_empty() {
+        let gp_list = PyList::empty(py);
+        for (name, value_str) in &global_params {
+            // Convert string values back to typed Python values (float/int/str)
+            // so arithmetic in Python launch files works correctly
+            let py_value: PyObject = if let Ok(f) = value_str.parse::<f64>() {
+                // Check if it could be an integer (no decimal point in original)
+                if !value_str.contains('.') {
+                    if let Ok(i) = value_str.parse::<i64>() {
+                        i.into_py(py)
+                    } else {
+                        f.into_py(py)
+                    }
+                } else {
+                    f.into_py(py)
+                }
+            } else if value_str == "True" || value_str == "true" {
+                true.into_py(py)
+            } else if value_str == "False" || value_str == "false" {
+                false.into_py(py)
+            } else {
+                value_str.into_py(py)
+            };
+            let tuple = PyTuple::new(py, [name.into_py(py), py_value]);
+            gp_list.append(tuple)?;
+        }
+        py_configs.set_item("global_params", gp_list)?;
     }
 
     // Instantiate the context with our configs
