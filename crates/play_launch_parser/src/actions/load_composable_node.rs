@@ -64,10 +64,12 @@ impl LoadComposableNodeAction {
         // The replay builder normalizes by adding "/" if needed for matching.
         let normalized_target = target_container_name;
 
-        // Convert composable nodes to LoadNodeCaptures
+        // Convert composable nodes to LoadNodeCaptures, skipping any whose
+        // if=/unless= condition evaluates to false.
         let captures: Vec<LoadNodeCapture> = self
             .composable_nodes
             .iter()
+            .filter(|node| node.is_enabled(context).unwrap_or(true))
             .map(|node| {
                 // Resolve node fields
                 let package = resolve_substitutions(&node.package, context).unwrap_or_default();
@@ -126,10 +128,12 @@ impl LoadComposableNodeAction {
         let global_params_vec: Vec<(String, String)> =
             context.global_parameters().into_iter().collect();
 
-        // Convert composable nodes to LoadNodeRecords
+        // Convert composable nodes to LoadNodeRecords, skipping any whose
+        // if=/unless= condition evaluates to false.
         let records: Vec<LoadNodeRecord> = self
             .composable_nodes
             .iter()
+            .filter(|node| node.is_enabled(context).unwrap_or(true))
             .map(|node| {
                 // Resolve node fields
                 let package = resolve_substitutions(&node.package, context).unwrap_or_default();

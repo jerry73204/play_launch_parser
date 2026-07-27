@@ -29,7 +29,19 @@ pub use set_remap::SetRemapAction;
 // --- From impls for converting action types to IR ActionKind ---
 
 #[cfg(feature = "ir")]
-use crate::ir::{ActionKind, ComposableNodeDecl, EnvDecl, Expr, IncludeArg, ParamDecl, RemapDecl};
+use crate::ir::{
+    ActionKind, ComposableNodeDecl, Condition, EnvDecl, Expr, IncludeArg, ParamDecl, RemapDecl,
+};
+
+#[cfg(feature = "ir")]
+impl From<container::ComposableNodeCondition> for Condition {
+    fn from(c: container::ComposableNodeCondition) -> Self {
+        match c {
+            container::ComposableNodeCondition::If(subs) => Condition::If(Expr::new(subs)),
+            container::ComposableNodeCondition::Unless(subs) => Condition::Unless(Expr::new(subs)),
+        }
+    }
+}
 
 #[cfg(feature = "ir")]
 impl From<NodeAction> for ActionKind {
@@ -130,7 +142,7 @@ impl From<ComposableNodeAction> for ComposableNodeDecl {
                 })
                 .collect(),
             extra_args: n.extra_args.into_iter().collect(),
-            condition: None,
+            condition: n.condition.map(Into::into),
             span: None,
         }
     }

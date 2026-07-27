@@ -704,6 +704,9 @@ fn parse_yaml_composable_node(
         parameters,
         remappings,
         extra_args: HashMap::new(),
+        // YAML composable_node if=/unless= is not yet supported; tracked
+        // separately from the XML frontend fix in issue #7.
+        condition: None,
     })
 }
 
