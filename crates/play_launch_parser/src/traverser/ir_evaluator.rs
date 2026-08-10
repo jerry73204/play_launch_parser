@@ -434,6 +434,14 @@ fn composable_decl_to_action(
         parameters,
         remappings,
         extra_args: decl.extra_args.iter().cloned().collect(),
+        condition: decl.condition.as_ref().map(|c| match c {
+            Condition::If(e) => {
+                crate::actions::container::ComposableNodeCondition::If(e.parts.clone())
+            }
+            Condition::Unless(e) => {
+                crate::actions::container::ComposableNodeCondition::Unless(e.parts.clone())
+            }
+        }),
     }
 }
 

@@ -912,6 +912,111 @@ fn test_composable_node_in_container() {
 }
 
 #[test]
+fn test_composable_node_if_condition() {
+    // Standard `ros2 launch` honours if=/unless= on <composable_node> inside
+    // <node_container> — regression test for issue #7. Only the node with
+    // if="true" should end up as a load_node entry.
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <node_container pkg="rclcpp_components" exec="component_container" name="my_container">
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Talker" name="talker" if="false" />
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Listener" name="listener" if="true" />
+    </node_container>
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(temp_file.path(), args);
+
+    assert!(
+        result.is_ok(),
+        "node_container with if= composable_node children should parse: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let load_nodes = json["load_node"].as_array().unwrap();
+
+    assert_eq!(
+        load_nodes.len(),
+        1,
+        "Only the if=\"true\" composable_node should be loaded"
+    );
+    assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "listener");
+}
+
+#[test]
+fn test_composable_node_unless_condition() {
+    // Same as above but exercising unless=.
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <node_container pkg="rclcpp_components" exec="component_container" name="my_container">
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Talker" name="talker" unless="true" />
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Listener" name="listener" unless="false" />
+    </node_container>
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    let args = HashMap::new();
+    let result = parse_launch_file(temp_file.path(), args);
+
+    assert!(
+        result.is_ok(),
+        "node_container with unless= composable_node children should parse: {:?}",
+        result.err()
+    );
+
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let load_nodes = json["load_node"].as_array().unwrap();
+
+    assert_eq!(
+        load_nodes.len(),
+        1,
+        "Only the unless=\"false\" composable_node should be loaded"
+    );
+    assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "listener");
+}
+
+#[test]
+fn test_composable_node_condition_with_substitution() {
+    // if=/unless= on <composable_node> must accept substitutions (e.g. $(var
+    // foo)), exactly like every other action's condition handling.
+    let mut temp_file = NamedTempFile::new().unwrap();
+    let launch_content = r#"<?xml version="1.0"?>
+<launch>
+    <arg name="enable_listener" default="false" />
+    <node_container pkg="rclcpp_components" exec="component_container" name="my_container">
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Talker" name="talker" if="$(var enable_listener)" />
+        <composable_node pkg="demo_nodes_cpp" plugin="demo_nodes_cpp::Listener" name="listener" unless="$(var enable_listener)" />
+    </node_container>
+</launch>
+"#;
+    temp_file.write_all(launch_content.as_bytes()).unwrap();
+
+    // Default (enable_listener=false): talker is skipped, listener is loaded.
+    let result = parse_launch_file(temp_file.path(), HashMap::new());
+    assert!(result.is_ok(), "should parse: {:?}", result.err());
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let load_nodes = json["load_node"].as_array().unwrap();
+    assert_eq!(load_nodes.len(), 1);
+    assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "listener");
+
+    // Override via CLI arg (enable_listener=true): talker is loaded, listener is skipped.
+    let mut args = HashMap::new();
+    args.insert("enable_listener".to_string(), "true".to_string());
+    let result = parse_launch_file(temp_file.path(), args);
+    assert!(result.is_ok(), "should parse: {:?}", result.err());
+    let json = serde_json::to_value(result.unwrap()).unwrap();
+    let load_nodes = json["load_node"].as_array().unwrap();
+    assert_eq!(load_nodes.len(), 1);
+    assert_eq!(load_nodes[0]["node_name"].as_str().unwrap(), "talker");
+}
+
+#[test]
 fn test_load_composable_node() {
     let fixture = get_fixture_path("test_load_composable_node.launch.xml");
     assert!(fixture.exists(), "Fixture file should exist: {:?}", fixture);

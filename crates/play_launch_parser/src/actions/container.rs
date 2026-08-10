@@ -25,6 +25,18 @@ pub struct ContainerAction {
     pub composable_nodes: Vec<ComposableNodeAction>,
 }
 
+/// Condition (`if=`/`unless=`) gating whether a composable node is loaded.
+///
+/// Mirrors `crate::ir::Condition`, but is defined here (rather than reused
+/// directly) so `ComposableNodeAction` stays usable without the `ir` feature.
+#[derive(Debug, Clone)]
+pub enum ComposableNodeCondition {
+    /// Load when the expression evaluates to truthy.
+    If(Vec<Substitution>),
+    /// Load when the expression evaluates to falsy.
+    Unless(Vec<Substitution>),
+}
+
 /// Composable node action
 #[derive(Debug, Clone)]
 pub struct ComposableNodeAction {
@@ -35,6 +47,8 @@ pub struct ComposableNodeAction {
     pub parameters: Vec<(String, String)>,
     pub remappings: Vec<(String, String)>,
     pub extra_args: HashMap<String, String>,
+    /// `if=`/`unless=` condition parsed from the `<composable_node>` element.
+    pub condition: Option<ComposableNodeCondition>,
 }
 
 /// Resolve a namespace value against context, handling absolute/relative logic.
@@ -214,11 +228,18 @@ impl ContainerAction {
             .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
         let namespace = resolve_namespace(self.namespace.as_ref(), context)?;
 
-        Ok(self
-            .composable_nodes
-            .iter()
-            .map(|node| node.to_load_node_record(&name, &namespace, context))
-            .collect())
+        let mut records = Vec::with_capacity(self.composable_nodes.len());
+        for node in &self.composable_nodes {
+            if node.is_enabled(context)? {
+                records.push(node.to_load_node_record(&name, &namespace, context));
+            } else {
+                log::debug!(
+                    "Skipping composable_node due to if=/unless= condition (container={})",
+                    name
+                );
+            }
+        }
+        Ok(records)
     }
 
     pub fn to_node_record(&self, context: &LaunchContext) -> Result<crate::record::NodeRecord> {
@@ -332,6 +353,20 @@ impl ComposableNodeAction {
             .map(|s| parse_substitutions(&s))
             .transpose()?;
 
+        // Get optional if=/unless= condition — parse only, evaluated at use site.
+        // Standard `ros2 launch` honours if=/unless= on <composable_node>; follow
+        // the same "if takes precedence over unless when both are present" rule
+        // used elsewhere in this crate (see `extract_condition` in ir_builder.rs).
+        let condition = if let Some(if_str) = entity.optional_attr_str("if")? {
+            Some(ComposableNodeCondition::If(parse_substitutions(&if_str)?))
+        } else if let Some(unless_str) = entity.optional_attr_str("unless")? {
+            Some(ComposableNodeCondition::Unless(parse_substitutions(
+                &unless_str,
+            )?))
+        } else {
+            None
+        };
+
         // Parse children for params and remaps (still resolved eagerly — these are runtime values)
         let mut parameters = Vec::new();
         let mut remappings = Vec::new();
@@ -433,7 +468,26 @@ impl ComposableNodeAction {
             parameters,
             remappings,
             extra_args,
+            condition,
         })
+    }
+
+    /// Evaluate this node's `if=`/`unless=` condition against `context`.
+    /// Returns `true` (load the node) when there is no condition.
+    pub fn is_enabled(&self, context: &LaunchContext) -> Result<bool> {
+        match &self.condition {
+            None => Ok(true),
+            Some(ComposableNodeCondition::If(subs)) => {
+                let resolved = resolve_substitutions(subs, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                Ok(crate::condition::is_truthy(&resolved))
+            }
+            Some(ComposableNodeCondition::Unless(subs)) => {
+                let resolved = resolve_substitutions(subs, context)
+                    .map_err(|e| ParseError::InvalidSubstitution(e.to_string()))?;
+                Ok(!crate::condition::is_truthy(&resolved))
+            }
+        }
     }
 
     pub fn to_load_node_record(
